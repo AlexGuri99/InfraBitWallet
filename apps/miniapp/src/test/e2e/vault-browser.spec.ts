@@ -26,8 +26,11 @@ function getCspFromVercel(): string {
   const raw = readFileSync(vercelPath, 'utf-8');
   const cfg: Record<string, unknown> = JSON.parse(raw) as Record<string, unknown>;
   const rawHeaders = cfg['headers'];
-  const headers: { source: string; headers: { key: string; value: string }[] }[] =
-    Array.isArray(rawHeaders) ? (rawHeaders as { source: string; headers: { key: string; value: string }[] }[]) : [];
+  const headers: { source: string; headers: { key: string; value: string }[] }[] = Array.isArray(
+    rawHeaders,
+  )
+    ? (rawHeaders as { source: string; headers: { key: string; value: string }[] }[])
+    : [];
   const match = headers.find((h) => h.source === '/(.*)');
   const cspHeader = match?.headers?.find(
     (h: { key: string; value: string }) => h.key.toLowerCase() === 'content-security-policy',
@@ -36,7 +39,8 @@ function getCspFromVercel(): string {
 }
 
 /** Vault test page HTML — served inline with the vault-bundle.js script */
-const VAULT_TEST_HTML = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script src="vault-bundle.js"></script><h1 id="status">Ready</h1></body></html>';
+const VAULT_TEST_HTML =
+  '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script src="vault-bundle.js"></script><h1 id="status">Ready</h1></body></html>';
 
 /** Set up route interception that applies the given CSP to all file responses */
 async function applyCsp(page: import('@playwright/test').Page, csp: string): Promise<void> {
@@ -126,11 +130,10 @@ test.describe('Vault browser operations', () => {
     await expect(page.getByText('OneZeroWallet')).toBeVisible();
   });
 
-  test('Argon2id vault create/unlock works under production CSP (with wasm-unsafe-eval)', async ({ page }) => {
-    const cspWithWasm = csp.replace(
-      "script-src 'self'",
-      "script-src 'self' 'wasm-unsafe-eval'",
-    );
+  test('Argon2id vault create/unlock works under production CSP (with wasm-unsafe-eval)', async ({
+    page,
+  }) => {
+    const cspWithWasm = csp.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
     await applyCsp(page, cspWithWasm);
     await page.goto('/vault-test.html');
     await expect(page.getByText('Ready')).toBeVisible();
@@ -143,13 +146,20 @@ test.describe('Vault browser operations', () => {
         const phrase = vault['generateMnemonicPhrase'](24) as string;
         const normalized = vault['normalizeMnemonic'](phrase) as string;
         const seed = vault['mnemonicToSeed'](normalized) as Uint8Array;
-        const seal = await (vault['sealVault'] as (s: Uint8Array, p: string) => Promise<Record<string, unknown>>)(seed, 'test-passcode-123');
-        const ur = await (vault['unsealVault'] as (s: Record<string, unknown>, p: string) => Promise<Record<string, unknown>>)(seal, 'test-passcode-123');
+        const seal = await (
+          vault['sealVault'] as (s: Uint8Array, p: string) => Promise<Record<string, unknown>>
+        )(seed, 'test-passcode-123');
+        const ur = await (
+          vault['unsealVault'] as (
+            s: Record<string, unknown>,
+            p: string,
+          ) => Promise<Record<string, unknown>>
+        )(seal, 'test-passcode-123');
         const urr = ur as Record<string, boolean>;
         if (!urr['success']) {
           return { ok: false, err: (ur as Record<string, string>)['error'] ?? 'unknown' };
         }
-        return { ok: true, ver: (seal['version'] as number) };
+        return { ok: true, ver: seal['version'] as number };
       } catch (e) {
         return { ok: false, err: e instanceof Error ? e.message : String(e) };
       }
@@ -162,10 +172,7 @@ test.describe('Vault browser operations', () => {
   });
 
   test('v2 vault with mnemonic works under production CSP', async ({ page }) => {
-    const cspWithWasm = csp.replace(
-      "script-src 'self'",
-      "script-src 'self' 'wasm-unsafe-eval'",
-    );
+    const cspWithWasm = csp.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
     await applyCsp(page, cspWithWasm);
     await page.goto('/vault-test.html');
     await expect(page.getByText('Ready')).toBeVisible();
@@ -178,11 +185,24 @@ test.describe('Vault browser operations', () => {
         const phrase = vault['generateMnemonicPhrase'](24) as string;
         const normalized = vault['normalizeMnemonic'](phrase) as string;
         const seed = vault['mnemonicToSeed'](normalized) as Uint8Array;
-        const seal = await (vault['sealVault'] as (s: Uint8Array, p: string, ds: unknown, cfg: unknown, mn: string) => Promise<Record<string, unknown>>)(seed, 'v2-password-789', undefined, undefined, phrase);
+        const seal = await (
+          vault['sealVault'] as (
+            s: Uint8Array,
+            p: string,
+            ds: unknown,
+            cfg: unknown,
+            mn: string,
+          ) => Promise<Record<string, unknown>>
+        )(seed, 'v2-password-789', undefined, undefined, phrase);
         if ((seal['version'] as number) !== 2) {
           return { ok: false, err: 'not v2' };
         }
-        const ur = await (vault['unsealVault'] as (s: Record<string, unknown>, p: string) => Promise<Record<string, unknown>>)(seal, 'v2-password-789');
+        const ur = await (
+          vault['unsealVault'] as (
+            s: Record<string, unknown>,
+            p: string,
+          ) => Promise<Record<string, unknown>>
+        )(seal, 'v2-password-789');
         const urr = ur as Record<string, string>;
         if (!(ur as Record<string, boolean>)['success']) {
           return { ok: false, err: urr['error'] ?? 'unknown' };

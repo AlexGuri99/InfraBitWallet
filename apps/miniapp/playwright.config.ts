@@ -18,7 +18,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm build && npx esbuild ../../packages/crypto-vault/src/index.ts --bundle --outfile=dist/vault-bundle.js --platform=browser --format=iife --global-name=vault && pnpm preview',
+    command:
+      'pnpm build && npx esbuild ../../packages/crypto-vault/src/index.ts --bundle --outfile=dist/vault-bundle.js --platform=browser --format=iife --global-name=vault && pnpm preview',
     url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
   },

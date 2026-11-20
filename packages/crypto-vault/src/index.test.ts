@@ -313,7 +313,8 @@ describe('Vault', () => {
   // ---------------------------------------------------------------------------
 
   it('v2 seal stores and returns mnemonic', async () => {
-    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
     expect(seal.version).toBe(2);
     expect(seal.encryptedMnemonic).toBeDefined();
@@ -341,7 +342,8 @@ describe('Vault', () => {
   });
 
   it('v2 seal rejects tampered mnemonic', async () => {
-    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
     const tampered = {
       ...seal,
@@ -355,7 +357,8 @@ describe('Vault', () => {
   });
 
   it('v1 to v2 migration via re-seal preserves mnemonic', async () => {
-    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     // Create v1 seal (no mnemonic)
     const v1Seal = await sealVault(seed, passcode);
     expect(v1Seal.version).toBe(1);
@@ -378,7 +381,8 @@ describe('Vault', () => {
   });
 
   it('changePasscode preserves mnemonic in v2 seal', async () => {
-    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
     expect(seal.version).toBe(2);
 

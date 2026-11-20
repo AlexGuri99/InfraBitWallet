@@ -29,12 +29,12 @@
 
 ### What Telegram Storage Guarantees
 
-| Feature                             | Guarantees                                                                          | Limitations                                                                                            |
-| ----------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Feature                             | Guarantees                                                                                                                                                                          | Limitations                                                                                            |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | **SecureStorage** (Bot API 9.0+)    | OS-native encryption (iOS Keychain, Android Keystore). On reinstall, Telegram may prompt the user to approve a restore request — data is not automatically restored on all clients. | Not available on Desktop/Web. 10-item limit. Data may be cleared by Telegram/OS. Same-bot access only. |
-| **BiometricManager** (Bot API 7.2+) | Secure biometric authentication (fingerprint/face). Can store encrypted token.      | Desktop/Web may lack biometrics entirely. Biometric token needs SecureStorage.                         |
-| **DeviceStorage** (Bot API 9.0+)    | Persistent local storage, ~5 MB.                                                    | **Not encrypted.** Do not store secrets.                                                               |
-| **CloudStorage** (Bot API 6.9+)     | Persistent across devices.                                                          | **Never use for secrets.** Accessible to Telegram's infrastructure.                                    |
+| **BiometricManager** (Bot API 7.2+) | Secure biometric authentication (fingerprint/face). Can store encrypted token.                                                                                                      | Desktop/Web may lack biometrics entirely. Biometric token needs SecureStorage.                         |
+| **DeviceStorage** (Bot API 9.0+)    | Persistent local storage, ~5 MB.                                                                                                                                                    | **Not encrypted.** Do not store secrets.                                                               |
+| **CloudStorage** (Bot API 6.9+)     | Persistent across devices.                                                                                                                                                          | **Never use for secrets.** Accessible to Telegram's infrastructure.                                    |
 
 **Key rule:** Feature-detect everything. Don't assume any Bot API version. Passcode is always the fallback.
 
@@ -105,25 +105,25 @@ Sources:
 
 **Threat model update:**
 
-| Attack                                  | Severity | Mitigation                                                                                                                                                                       |
-| --------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Biometric bypass / spoof                | Low      | Biometrics are a SECOND factor layered on top of the passcode — both are required. The OS-native biometric subsystem (Face ID / fingerprint sensor) has its own anti-spoofing.    |
-| Biometric unavailable (Desktop/Web)     | Low      | Passcode-only mode works without biometrics. The min passcode length is stricter (8+ chars with digit) when no biometric or device-secret wrap is configured.                    |
-| Device without biometric sensor         | None     | Passcode is always the fallback. Biometric fields are simply absent from the JSON seal. No code path depends on their presence.                                                   |
+| Attack                                    | Severity | Mitigation                                                                                                                                                                      |
+| ----------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Biometric bypass / spoof                  | Low      | Biometrics are a SECOND factor layered on top of the passcode — both are required. The OS-native biometric subsystem (Face ID / fingerprint sensor) has its own anti-spoofing.  |
+| Biometric unavailable (Desktop/Web)       | Low      | Passcode-only mode works without biometrics. The min passcode length is stricter (8+ chars with digit) when no biometric or device-secret wrap is configured.                   |
+| Device without biometric sensor           | None     | Passcode is always the fallback. Biometric fields are simply absent from the JSON seal. No code path depends on their presence.                                                 |
 | biometricWrappedKey stored alongside seal | High     | biometricWrappedKey is encrypted with the biometric token. An attacker who steals both the seal and the biometric token (from device secure storage) can extract the vault key. |
 
 ## What We Do NOT Protect Against
 
 These attack scenarios are **out of scope** for the vault's threat model. Users must be aware that no amount of client-side cryptography defends against them.
 
-| Scenario                                                                        | Why It Is Not Protected                                                                   | Mitigation (user responsibility)                         |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| **Device malware** (keylogger, screen scraper, infostealer, clipboard hijacker) | Malware running on the same device has full access to memory, keystrokes, and the screen. | Use a clean device; enable OS-level malware protection.   |
-| **Compromised host serving malicious JS**                                       | If the deployed app JS is replaced by an attacker (CDN hijack, Vercel compromise, MITM), it can exfiltrate the seed or keys at runtime. | Verify build hashes; use a hardware wallet for large amounts. |
-| **User voluntarily shares their recovery phrase**                               | Social engineering, phishing, or coercion cannot be prevented by client code.              | Never share the 24-word phrase with anyone, ever.         |
-| **Screenshots / screen recording**                                              | The OS or a malicious app can capture the screen without the app's knowledge.              | Enable Telegram's anti-screenshot controls; use a privacy screen. |
-| **Shoulder surfing**                                                            | An observer looking at the screen can see the passcode or seed words being entered.        | Shield the screen during entry; use biometric unlock where available. |
-| **Compromised Telegram client**                                                 | A malicious or backdoored Telegram client can read the Mini App's memory and storage.      | Use the official Telegram client from a trusted source.   |
+| Scenario                                                                        | Why It Is Not Protected                                                                                                                 | Mitigation (user responsibility)                                      |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Device malware** (keylogger, screen scraper, infostealer, clipboard hijacker) | Malware running on the same device has full access to memory, keystrokes, and the screen.                                               | Use a clean device; enable OS-level malware protection.               |
+| **Compromised host serving malicious JS**                                       | If the deployed app JS is replaced by an attacker (CDN hijack, Vercel compromise, MITM), it can exfiltrate the seed or keys at runtime. | Verify build hashes; use a hardware wallet for large amounts.         |
+| **User voluntarily shares their recovery phrase**                               | Social engineering, phishing, or coercion cannot be prevented by client code.                                                           | Never share the 24-word phrase with anyone, ever.                     |
+| **Screenshots / screen recording**                                              | The OS or a malicious app can capture the screen without the app's knowledge.                                                           | Enable Telegram's anti-screenshot controls; use a privacy screen.     |
+| **Shoulder surfing**                                                            | An observer looking at the screen can see the passcode or seed words being entered.                                                     | Shield the screen during entry; use biometric unlock where available. |
+| **Compromised Telegram client**                                                 | A malicious or backdoored Telegram client can read the Mini App's memory and storage.                                                   | Use the official Telegram client from a trusted source.               |
 
 ## Known Limits of JavaScript Memory Wiping
 

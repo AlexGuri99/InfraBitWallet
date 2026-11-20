@@ -49,7 +49,7 @@ describe('Vercel CSP headers', () => {
     const tokens = csp.split(/['"]?\s+['"]?/);
     for (const token of tokens) {
       const t = token.trim().toLowerCase();
-      if (t === "'unsafe-eval'" || t === "unsafe-eval") {
+      if (t === "'unsafe-eval'" || t === 'unsafe-eval') {
         expect(true).toBe(false);
       }
     }
