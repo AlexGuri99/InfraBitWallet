@@ -23,5 +23,6 @@
     "rootDir": "./src"
   },
   "include": ["src"],
+  "exclude": ["src/test/e2e"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

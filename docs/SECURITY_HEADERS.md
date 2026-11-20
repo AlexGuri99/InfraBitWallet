@@ -4,7 +4,7 @@
 
 ```
 default-src 'self';
-script-src 'self';
+script-src 'self' 'wasm-unsafe-eval';
 style-src 'self' 'unsafe-inline';
 img-src 'self' data: https:;
 connect-src 'self' https:;
@@ -19,7 +19,7 @@ form-action 'self';
 | Directive         | Value                                          | Rationale                                                                                                                                                                                                                                                                                   |
 | ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `default-src`     | `'self'`                                       | Fallback for all resource types not explicitly listed. Only same-origin resources allowed by default.                                                                                                                                                                                       |
-| `script-src`      | `'self'`                                       | Only scripts from our own origin. No `unsafe-inline` (blocks `<script>` tags with inline code) and no `unsafe-eval` (blocks `eval()`, `setTimeout(string)`, etc.). This is the key XSS mitigation as it prevents injection of arbitrary scripts.                                            |
+| `script-src`      | `'self' 'wasm-unsafe-eval'`               | Only scripts from our own origin. No `unsafe-inline` (blocks `<script>` tags with inline code) and no `unsafe-eval` (blocks `eval()`, `setTimeout(string)`, etc.). `wasm-unsafe-eval` is required because hash-wasm (Argon2id passcode KDF) uses `WebAssembly.compile()` and `WebAssembly.instantiate()` to load a hand-tuned WASM binary for Argon2id. This is much safer than `unsafe-eval` — it only allows compiling WebAssembly modules, not arbitrary JavaScript execution. |
 | `style-src`       | `'self' 'unsafe-inline'`                       | Allows loading stylesheets from our own origin plus inline styles. `unsafe-inline` is required because Tailwind generates inline styles and Telegram theme parameters are applied via inline style attributes. This is an accepted risk — style injection cannot leak secrets.              |
 | `img-src`         | `'self' data: https:`                          | Allows images from our origin, inline data URIs (for QR codes, icons), and HTTPS sources (for token logos, user avatars).                                                                                                                                                                   |
 | `connect-src`     | `'self' https:`                                | Allows fetch/WebSocket to our origin and any HTTPS endpoint. Required for RPC calls to external providers (TON Center, TronGrid, Alchemy, etc.).                                                                                                                                            |
@@ -51,6 +51,9 @@ A Vitest test in `packages/core/src/security.test.ts` parses `vercel.json` and a
 
 - No `unsafe-inline` in `script-src`
 - No `unsafe-eval` anywhere in CSP
+- `wasm-unsafe-eval` IS allowed (required for hash-wasm Argon2id)
 - `frame-ancestors` is present and not set to `'none'`
 - `base-uri` is `'self'`
 - `form-action` is `'self'`
+
+A Playwright E2E test in `apps/miniapp/src/test/e2e/vault-browser.spec.ts` verifies that Argon2id vault create/unlock works in the browser under the production CSP (with `wasm-unsafe-eval`).

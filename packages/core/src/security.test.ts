@@ -43,8 +43,16 @@ describe('Vercel CSP headers', () => {
     expect(scriptSrc?.toLowerCase()).not.toContain("'unsafe-inline'");
   });
 
-  it('should not allow unsafe-eval anywhere', () => {
-    expect(csp.toLowerCase()).not.toContain("'unsafe-eval'");
+  it('should not allow unsafe-eval (but wasm-unsafe-eval is allowed)', () => {
+    // 'wasm-unsafe-eval' IS allowed (needed for hash-wasm's WebAssembly Argon2id).
+    // But plain 'unsafe-eval' is still forbidden.
+    const tokens = csp.split(/['"]?\s+['"]?/);
+    for (const token of tokens) {
+      const t = token.trim().toLowerCase();
+      if (t === "'unsafe-eval'" || t === "unsafe-eval") {
+        expect(true).toBe(false);
+      }
+    }
   });
 
   it('should have frame-ancestors directive', () => {

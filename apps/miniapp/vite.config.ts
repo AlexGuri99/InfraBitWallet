@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react';
 // No unsafe-inline/unsafe-eval in script-src.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
   "connect-src 'self' https:",
