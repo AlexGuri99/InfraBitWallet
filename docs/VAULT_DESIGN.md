@@ -31,7 +31,7 @@
 
 | Feature                             | Guarantees                                                                          | Limitations                                                                                            |
 | ----------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **SecureStorage** (Bot API 9.0+)    | OS-native encryption (iOS Keychain, Android Keystore). Data survives app reinstall. | Not available on Desktop/Web. 10-item limit. Data may be cleared by Telegram/OS. Same-bot access only. |
+| **SecureStorage** (Bot API 9.0+)    | OS-native encryption (iOS Keychain, Android Keystore). On reinstall, Telegram may prompt the user to approve a restore request — data is not automatically restored on all clients. | Not available on Desktop/Web. 10-item limit. Data may be cleared by Telegram/OS. Same-bot access only. |
 | **BiometricManager** (Bot API 7.2+) | Secure biometric authentication (fingerprint/face). Can store encrypted token.      | Desktop/Web may lack biometrics entirely. Biometric token needs SecureStorage.                         |
 | **DeviceStorage** (Bot API 9.0+)    | Persistent local storage, ~5 MB.                                                    | **Not encrypted.** Do not store secrets.                                                               |
 | **CloudStorage** (Bot API 6.9+)     | Persistent across devices.                                                          | **Never use for secrets.** Accessible to Telegram's infrastructure.                                    |
@@ -93,9 +93,24 @@ Sources:
 
 ### Biometric Wrap (Optional)
 
-- **Mechanism:** BiometricManager.authenticate releases a biometric token stored in SecureStorage
-- **Token:** AES-256-GCM encrypts vault key with biometric token
-- **Constraint:** Biometrics never replace passcode
+- **Mechanism:** Telegram BiometricManager (`@telegram-apps/sdk`, Bot API 7.2+)
+- **authenticate() behavior:** Always shows a native OS biometric popup (Face ID / fingerprint) with a custom reason string. There is no silent/background mode — the user must interact on every call. The callback receives `(success, token)` — the token is the OS-native biometric credential.
+- **Token storage:** The biometric token is stored in **device-native secure storage** (iOS Keychain, Android Keystore) via `updateBiometricToken(token)`. This is NOT the same as Telegram `SecureStorage` — it is a separate, lower-level storage managed by the biometric subsystem. The token is matched to the device via `deviceId`.
+- **Token availability:** On a device where a token was previously saved, `isBiometricTokenSaved` returns true, and calling `authenticate()` prompts the user and then releases the stored token on success.
+- **Source:** core.telegram.org/bots/webapps (BiometricManager section, fetched 2026-11-20)
+
+**Unlock model (dual-factor):** Passcode MUST always be entered. Biometrics is an additional factor that wraps a separate copy of the vault key (`biometricWrappedKey`). The main `unsealVault()` function ALWAYS uses the passcode-derived key — there is no biometric-only unlock path in the core vault module. The app layer may use the biometric wrap for convenience (e.g., quicker re-authentication within a session), but the passcode remains mandatory for the initial unlock.
+
+- **Constraint:** Biometrics never replace passcode. The passcode is always the fallback (Desktop/Web may lack biometrics entirely). On devices without biometrics, the vault works in passcode-only mode; the biometric wrap fields are simply absent from the seal.
+
+**Threat model update:**
+
+| Attack                                  | Severity | Mitigation                                                                                                                                                                       |
+| --------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Biometric bypass / spoof                | Low      | Biometrics are a SECOND factor layered on top of the passcode — both are required. The OS-native biometric subsystem (Face ID / fingerprint sensor) has its own anti-spoofing.    |
+| Biometric unavailable (Desktop/Web)     | Low      | Passcode-only mode works without biometrics. The min passcode length is stricter (8+ chars with digit) when no biometric or device-secret wrap is configured.                    |
+| Device without biometric sensor         | None     | Passcode is always the fallback. Biometric fields are simply absent from the JSON seal. No code path depends on their presence.                                                   |
+| biometricWrappedKey stored alongside seal | High     | biometricWrappedKey is encrypted with the biometric token. An attacker who steals both the seal and the biometric token (from device secure storage) can extract the vault key. |
 
 ## What We Do NOT Protect Against
 

@@ -307,6 +307,95 @@ describe('Vault', () => {
     expect(evaluatePasscodeStrength('abcdefg1', false)).toBe('');
     expect(evaluatePasscodeStrength('abcdefgh1', false)).toBe('');
   });
+
+  // ---------------------------------------------------------------------------
+  // Vault v2 + mnemonic storage tests
+  // ---------------------------------------------------------------------------
+
+  it('v2 seal stores and returns mnemonic', async () => {
+    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
+    expect(seal.version).toBe(2);
+    expect(seal.encryptedMnemonic).toBeDefined();
+    expect(seal.mnemonicIv).toBeDefined();
+
+    const result = await unsealVault(seal, passcode);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.mnemonic).toBe(mnemonic);
+      expect(result.seed).toEqual(seed);
+    }
+  });
+
+  it('v1 seal (no mnemonic) returns version 1 without mnemonic fields', async () => {
+    const seal = await sealVault(seed, passcode);
+    expect(seal.version).toBe(1);
+    expect(seal.encryptedMnemonic).toBeUndefined();
+    expect(seal.mnemonicIv).toBeUndefined();
+
+    const result = await unsealVault(seal, passcode);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.mnemonic).toBeUndefined();
+    }
+  });
+
+  it('v2 seal rejects tampered mnemonic', async () => {
+    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
+    const tampered = {
+      ...seal,
+      encryptedMnemonic: '00' + (seal.encryptedMnemonic ?? '').slice(2),
+    };
+    const result = await unsealVault(tampered, passcode);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe('tampered_data');
+    }
+  });
+
+  it('v1 to v2 migration via re-seal preserves mnemonic', async () => {
+    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    // Create v1 seal (no mnemonic)
+    const v1Seal = await sealVault(seed, passcode);
+    expect(v1Seal.version).toBe(1);
+
+    // Unseal v1, then re-seal as v2 with mnemonic
+    const v1Result = await unsealVault(v1Seal, passcode);
+    expect(v1Result.success).toBe(true);
+    if (v1Result.success) {
+      const v2Seal = await sealVault(v1Result.seed, passcode, undefined, undefined, mnemonic);
+      expect(v2Seal.version).toBe(2);
+      expect(v2Seal.encryptedMnemonic).toBeDefined();
+
+      // Verify v2 unseal returns mnemonic
+      const v2Result = await unsealVault(v2Seal, passcode);
+      expect(v2Result.success).toBe(true);
+      if (v2Result.success) {
+        expect(v2Result.mnemonic).toBe(mnemonic);
+      }
+    }
+  });
+
+  it('changePasscode preserves mnemonic in v2 seal', async () => {
+    const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
+    expect(seal.version).toBe(2);
+
+    const newSeal = await changePasscode(seal, passcode, 'newpass123');
+    if ('version' in newSeal) {
+      expect(newSeal.version).toBe(2);
+      expect(newSeal.encryptedMnemonic).toBeDefined();
+
+      const result = await unsealVault(newSeal, 'newpass123');
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.mnemonic).toBe(mnemonic);
+      }
+    } else {
+      expect(true).toBe(false);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

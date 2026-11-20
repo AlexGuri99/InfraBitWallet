@@ -10,6 +10,8 @@
  * - Optionally also wrapped by a biometric secret (Telegram BiometricManager).
  * - The seal binds its version and KDF parameters as AAD so tampering with
  *   stored parameters causes decryption to fail.
+ * - Version 2 also stores an encrypted mnemonic phrase for re-display of the
+ *   recovery phrase after unlock ("test your backup").
  *
  * Sources:
  * - AES-256-GCM: NIST SP 800-38D
@@ -50,6 +52,8 @@ export const DEFAULT_VAULT_CONFIG: Required<VaultConfig> = {
  * - `deviceWrappedKey` is NOT stored. The device secret is stored in
  *   SecureStorage and combined at runtime. The seal only records that it
  *   is needed via `hasDeviceSecret`.
+ * - Version 2 adds `encryptedMnemonic` and `mnemonicIv` for re-display of
+ *   the recovery phrase after unlock.
  */
 export interface VaultSeal {
   /** Vault key wrapped by passcode-derived key (or combined key if hasDeviceSecret) (hex: iv || ciphertext) */
@@ -72,10 +76,14 @@ export interface VaultSeal {
   argon2TimeCost: number;
   argon2MemoryCost: number;
   argon2Parallelism: number;
+  /** AES-GCM encrypted mnemonic phrase (UTF-8 bytes, hex) — v2+ */
+  encryptedMnemonic?: string;
+  /** AES-GCM IV used for mnemonic encryption (hex) — v2+ */
+  mnemonicIv?: string;
 }
 
 export type VaultUnlockResult =
-  | { success: true; seed: Uint8Array }
+  | { success: true; seed: Uint8Array; mnemonic?: string }
   | {
       success: false;
       error: 'wrong_passcode' | 'device_secret_missing' | 'tampered_data' | 'kdf_unavailable';
@@ -221,22 +229,52 @@ function encodeAad(version: number, config: Required<VaultConfig>): Uint8Array {
  * @param passcode - User's passcode
  * @param deviceSecret - Optional 32-byte device secret (stored in SecureStorage by caller)
  * @param config - Optional Argon2id parameters
- * @returns The vault seal and optionally the device secret (for the caller to store)
+ * @param mnemonic - Optional mnemonic phrase (v2+). If provided, it is encrypted and
+ *   stored for re-display after unlock.
+ * @returns The vault seal
  */
 export async function sealVault(
   seed: Uint8Array,
   passcode: string,
   deviceSecret?: Uint8Array,
   config?: VaultConfig,
+  mnemonic?: string,
 ): Promise<VaultSeal> {
   const cfg = { ...DEFAULT_VAULT_CONFIG, ...config };
   const vaultKey = globalThis.crypto.getRandomValues(new Uint8Array(32));
 
+  // Determine version: v2 if mnemonic is provided, otherwise v1
+  const version = mnemonic !== undefined ? 2 : 1;
+
   // Encode AAD: version + params so stored parameters cannot be tampered with
-  const aad = encodeAad(1, cfg);
+  const aad = encodeAad(version, cfg);
 
   // Encrypt seed with vault key (AAD-bound)
   const { ciphertext: encryptedSeed, iv } = await aes256GcmEncrypt(seed, vaultKey, aad);
+
+  // Encrypt mnemonic if provided (v2+)
+  const seal: VaultSeal = {
+    version,
+    encryptedSeed: bytesToHex(encryptedSeed),
+    iv: bytesToHex(iv),
+    aad: bytesToHex(aad),
+    passcodeWrappedKey: '',
+    hasDeviceSecret: false,
+    passcodeSalt: '',
+    argon2TimeCost: cfg.argon2TimeCost,
+    argon2MemoryCost: cfg.argon2MemoryCost,
+    argon2Parallelism: cfg.argon2Parallelism,
+  };
+  if (mnemonic !== undefined) {
+    const mnemonicBytes = new TextEncoder().encode(mnemonic);
+    const { ciphertext: mnemonicCt, iv: mnemonicIvRaw } = await aes256GcmEncrypt(
+      mnemonicBytes,
+      vaultKey,
+      aad,
+    );
+    seal.encryptedMnemonic = bytesToHex(mnemonicCt);
+    seal.mnemonicIv = bytesToHex(mnemonicIvRaw);
+  }
 
   // Derive passcode key
   const passcodeSalt = globalThis.crypto.getRandomValues(new Uint8Array(16));
@@ -268,18 +306,10 @@ export async function sealVault(
   passcodeKey.fill(0);
   vaultKey.fill(0);
 
-  return {
-    version: 1,
-    encryptedSeed: bytesToHex(encryptedSeed),
-    iv: bytesToHex(iv),
-    aad: bytesToHex(aad),
-    passcodeWrappedKey: bytesToHex(combined),
-    hasDeviceSecret,
-    passcodeSalt: bytesToHex(passcodeSalt),
-    argon2TimeCost: cfg.argon2TimeCost,
-    argon2MemoryCost: cfg.argon2MemoryCost,
-    argon2Parallelism: cfg.argon2Parallelism,
-  };
+  seal.passcodeWrappedKey = bytesToHex(combined);
+  seal.hasDeviceSecret = hasDeviceSecret;
+  seal.passcodeSalt = bytesToHex(passcodeSalt);
+  return seal;
 }
 
 /**
@@ -288,7 +318,7 @@ export async function sealVault(
  * @param seal - The vault seal
  * @param passcode - User's passcode
  * @param deviceSecret - The device secret from SecureStorage (required if seal.hasDeviceSecret)
- * @returns Decrypted seed or error
+ * @returns Decrypted seed (and mnemonic if version >= 2) or error
  */
 export async function unsealVault(
   seal: VaultSeal,
@@ -352,20 +382,48 @@ export async function unsealVault(
     wrappingKey.fill(0);
 
     // Decrypt seed (verify AAD)
+    let seed: Uint8Array;
     try {
       const aad = hex2bytes(seal.aad);
-      const decrypted = await aes256GcmDecrypt(
+      seed = await aes256GcmDecrypt(
         hex2bytes(seal.encryptedSeed),
         vaultKey,
         hex2bytes(seal.iv),
         aad,
       );
-      vaultKey.fill(0);
-      return { success: true, seed: decrypted };
     } catch {
       vaultKey.fill(0);
       return { success: false, error: 'tampered_data' };
     }
+
+    // Decrypt mnemonic if available (v2+)
+    let mnemonic: string | undefined;
+    if (
+      seal.version >= 2 &&
+      seal.encryptedMnemonic !== undefined &&
+      seal.mnemonicIv !== undefined
+    ) {
+      try {
+        const aad = hex2bytes(seal.aad);
+        const mnemonicBytes = await aes256GcmDecrypt(
+          hex2bytes(seal.encryptedMnemonic),
+          vaultKey,
+          hex2bytes(seal.mnemonicIv),
+          aad,
+        );
+        mnemonic = new TextDecoder().decode(mnemonicBytes);
+      } catch {
+        vaultKey.fill(0);
+        return { success: false, error: 'tampered_data' };
+      }
+    }
+
+    vaultKey.fill(0);
+
+    if (mnemonic !== undefined) {
+      return { success: true, seed, mnemonic };
+    }
+    return { success: true, seed };
   } catch {
     return { success: false, error: 'tampered_data' };
   }
@@ -382,7 +440,14 @@ export async function changePasscode(
   if (!unsealResult.success) {
     return unsealResult;
   }
-  const newSeal = await sealVault(unsealResult.seed, newPasscode, deviceSecret, config);
+  // Pass the mnemonic through so v2 seals remain v2 after passcode change
+  const newSeal = await sealVault(
+    unsealResult.seed,
+    newPasscode,
+    deviceSecret,
+    config,
+    unsealResult.mnemonic,
+  );
   unsealResult.seed.fill(0);
   return newSeal;
 }
