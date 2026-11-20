@@ -169,10 +169,7 @@ export interface DerivedKeys {
 /**
  * Derive keys for all supported chains from a single BIP-39 seed.
  */
-export function deriveAllKeys(
-  seed: Uint8Array,
-  accountIndex: number = 0,
-): DerivedKeys {
+export function deriveAllKeys(seed: Uint8Array, accountIndex: number = 0): DerivedKeys {
   return {
     ton: deriveTonKey(seed, accountIndex),
     tron: deriveTronKey(seed, accountIndex),

@@ -55,11 +55,7 @@ export function generateMnemonicPhrase(length: MnemonicLength = 24): string {
  * Reference: BIP-39 spec § "Mnemonic sentence to seed"
  */
 export function normalizeMnemonic(phrase: string): string {
-  return phrase
-    .trim()
-    .replace(/\s+/g, ' ')
-    .normalize('NFKD')
-    .toLowerCase();
+  return phrase.trim().replace(/\s+/g, ' ').normalize('NFKD').toLowerCase();
 }
 
 /**
@@ -94,7 +90,9 @@ export function validateMnemonicPhrase(phrase: string): MnemonicValidation {
   const wordlistSet = new Set(WORDLIST);
   const unknownWords = words.filter((w) => !wordlistSet.has(w));
   if (unknownWords.length > 0) {
-    errors.push(`Unknown words: ${unknownWords.slice(0, 3).join(', ')}${unknownWords.length > 3 ? '...' : ''}`);
+    errors.push(
+      `Unknown words: ${unknownWords.slice(0, 3).join(', ')}${unknownWords.length > 3 ? '...' : ''}`,
+    );
   }
 
   if (errors.length === 0 && !validateMnemonic(normalized, WORDLIST)) {

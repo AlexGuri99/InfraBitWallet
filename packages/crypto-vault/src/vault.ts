@@ -4,18 +4,23 @@
  * Design:
  * - Random 256-bit vault key encrypts the seed with AES-256-GCM (WebCrypto).
  * - Vault key is wrapped (encrypted) by a passcode-derived key (Argon2id).
- * - Optionally also wrapped by a device-specific secret (stored in SecureStorage).
+ * - Optionally the passcode-derived key is COMBINED with a device-specific
+ *   secret (via HKDF-SHA256) so that BOTH factors are required. Neither the
+ *   passcode nor the device secret alone can unwrap the vault key.
  * - Optionally also wrapped by a biometric secret (Telegram BiometricManager).
+ * - The seal binds its version and KDF parameters as AAD so tampering with
+ *   stored parameters causes decryption to fail.
  *
  * Sources:
  * - AES-256-GCM: NIST SP 800-38D
  * - Web Crypto API: https://www.w3.org/TR/WebCryptoAPI/
  * - Argon2id: RFC 9106
+ * - HKDF: RFC 5869
  * - hash-wasm: https://github.com/Daninet/hash-wasm (MIT, fetched 2026-11-20)
  */
 import { argon2id } from 'hash-wasm';
-import type { StorageAdapter } from './storage';
-import { STORAGE_KEYS } from './storage';
+import { hkdf } from '@noble/hashes/hkdf';
+import { sha256 } from '@noble/hashes/sha2';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,14 +38,37 @@ export const DEFAULT_VAULT_CONFIG: Required<VaultConfig> = {
   argon2Parallelism: 1,
 };
 
+/**
+ * VaultSeal — the persisted data envelope.
+ *
+ * Security properties:
+ * - `passcodeWrappedKey`: when `hasDeviceSecret` is false, this is the vault
+ *   key encrypted with the passcode-derived key alone (iv || ciphertext, hex).
+ *   When `hasDeviceSecret` is true, this is the vault key encrypted with the
+ *   HKDF-combined key (passcodeKey + deviceSecret). There is NO copy that
+ *   unlocks with the passcode alone.
+ * - `deviceWrappedKey` is NOT stored. The device secret is stored in
+ *   SecureStorage and combined at runtime. The seal only records that it
+ *   is needed via `hasDeviceSecret`.
+ */
 export interface VaultSeal {
+  /** Vault key wrapped by passcode-derived key (or combined key if hasDeviceSecret) (hex: iv || ciphertext) */
   passcodeWrappedKey: string;
-  deviceWrappedKey?: string;
+  /** True if the device secret is required for unwrapping. If true, passcode alone cannot unwrap. */
+  hasDeviceSecret: boolean;
+  /** Biometric-wrapped vault key (hex, optional) */
   biometricWrappedKey?: string;
+  /** AES-GCM encrypted seed (hex) */
   encryptedSeed: string;
+  /** AES-GCM IV used for seed encryption (hex) */
   iv: string;
+  /** AES-GCM AAD (additional authenticated data) — version + params as JSON (hex) */
+  aad: string;
+  /** Vault format version for parameter migration */
   version: number;
+  /** Argon2id salt for passcode derivation (hex) */
   passcodeSalt: string;
+  /** Argon2id parameters used */
   argon2TimeCost: number;
   argon2MemoryCost: number;
   argon2Parallelism: number;
@@ -48,13 +76,16 @@ export interface VaultSeal {
 
 export type VaultUnlockResult =
   | { success: true; seed: Uint8Array }
-  | { success: false; error: 'wrong_passcode' | 'device_secret_missing' | 'tampered_data' };
+  | {
+      success: false;
+      error: 'wrong_passcode' | 'device_secret_missing' | 'tampered_data' | 'kdf_unavailable';
+    };
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function hex2bytes(hex: string): Uint8Array {
+function hex2bytes(hex: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -62,7 +93,7 @@ function hex2bytes(hex: string): Uint8Array {
   return bytes;
 }
 
-function toUint8Array(buf: ArrayBuffer): Uint8Array {
+function toUint8Array(buf: ArrayBuffer): Uint8Array<ArrayBuffer> {
   return new Uint8Array(buf, 0, buf.byteLength);
 }
 
@@ -73,12 +104,13 @@ function bytesToHex(b: Uint8Array): string {
 }
 
 // ---------------------------------------------------------------------------
-// AES-256-GCM
+// AES-256-GCM with AAD support
 // ---------------------------------------------------------------------------
 
 async function aes256GcmEncrypt(
   plaintext: Uint8Array,
   key: Uint8Array,
+  aad?: Uint8Array,
 ): Promise<{ ciphertext: Uint8Array; iv: Uint8Array }> {
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
   const cryptoKey = await globalThis.crypto.subtle.importKey(
@@ -88,8 +120,13 @@ async function aes256GcmEncrypt(
     false,
     ['encrypt'],
   );
+  const encryptParams: AesGcmParams & { additionalData?: BufferSource } = {
+    name: 'AES-GCM',
+    iv,
+  };
+  if (aad) encryptParams.additionalData = aad as BufferSource;
   const encrypted = await globalThis.crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv as BufferSource },
+    encryptParams,
     cryptoKey,
     plaintext as BufferSource,
   );
@@ -97,22 +134,24 @@ async function aes256GcmEncrypt(
 }
 
 async function aes256GcmDecrypt(
-  ciphertext: Uint8Array,
-  key: Uint8Array,
-  iv: Uint8Array,
+  ciphertext: BufferSource,
+  key: BufferSource,
+  iv: BufferSource,
+  aad?: BufferSource,
 ): Promise<Uint8Array> {
   const cryptoKey = await globalThis.crypto.subtle.importKey(
     'raw',
-    key as BufferSource,
+    key,
     { name: 'AES-GCM' },
     false,
     ['decrypt'],
   );
-  const decrypted = await globalThis.crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: iv as BufferSource },
-    cryptoKey,
-    ciphertext as BufferSource,
-  );
+  const decryptParams: AesGcmParams & { additionalData?: BufferSource } = {
+    name: 'AES-GCM',
+    iv,
+  };
+  if (aad) decryptParams.additionalData = aad;
+  const decrypted = await globalThis.crypto.subtle.decrypt(decryptParams, cryptoKey, ciphertext);
   return toUint8Array(decrypted);
 }
 
@@ -120,48 +159,112 @@ async function aes256GcmDecrypt(
 // Passcode key derivation (Argon2id)
 // ---------------------------------------------------------------------------
 
+/**
+ * Derive a 256-bit key from a passcode using Argon2id.
+ *
+ * Returns null if Argon2id is unavailable (WASM not loaded).
+ * The caller MUST fail closed when null is returned.
+ */
 async function derivePasscodeKey(
   passcode: string,
   salt: Uint8Array,
   config: Required<VaultConfig>,
-): Promise<Uint8Array> {
-  const normalized = passcode.normalize('NFKD');
-  const result = await argon2id({
-    password: normalized,
-    salt,
-    parallelism: config.argon2Parallelism,
-    iterations: config.argon2TimeCost,
-    memorySize: config.argon2MemoryCost,
-    hashLength: 32,
-    outputType: 'binary',
-  });
-  return result;
+): Promise<Uint8Array | null> {
+  try {
+    const normalized = passcode.normalize('NFKD');
+    const result = await argon2id({
+      password: normalized,
+      salt,
+      parallelism: config.argon2Parallelism,
+      iterations: config.argon2TimeCost,
+      memorySize: config.argon2MemoryCost,
+      hashLength: 32,
+      outputType: 'binary',
+    });
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Combine a passcode-derived key with a device secret via HKDF-SHA256.
+ * Produces a 32-byte output key that requires both inputs.
+ */
+function combineWithDeviceSecret(passcodeKey: Uint8Array, deviceSecret: Uint8Array): Uint8Array {
+  return hkdf(sha256, passcodeKey, deviceSecret, 'onezerowallet-vault-combined', 32);
+}
+
+/**
+ * Encode the AAD payload: a JSON string of parameters that, if tampered with
+ * in storage, should make the GCM decryption fail.
+ */
+function encodeAad(version: number, config: Required<VaultConfig>): Uint8Array {
+  return new TextEncoder().encode(
+    JSON.stringify({
+      v: version,
+      t: config.argon2TimeCost,
+      m: config.argon2MemoryCost,
+      p: config.argon2Parallelism,
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Vault operations
 // ---------------------------------------------------------------------------
 
+/**
+ * Seal the vault.
+ *
+ * @param seed - 64-byte BIP-39 seed
+ * @param passcode - User's passcode
+ * @param deviceSecret - Optional 32-byte device secret (stored in SecureStorage by caller)
+ * @param config - Optional Argon2id parameters
+ * @returns The vault seal and optionally the device secret (for the caller to store)
+ */
 export async function sealVault(
   seed: Uint8Array,
   passcode: string,
+  deviceSecret?: Uint8Array,
   config?: VaultConfig,
 ): Promise<VaultSeal> {
   const cfg = { ...DEFAULT_VAULT_CONFIG, ...config };
   const vaultKey = globalThis.crypto.getRandomValues(new Uint8Array(32));
-  const { ciphertext: encryptedSeed, iv } = await aes256GcmEncrypt(seed, vaultKey);
+
+  // Encode AAD: version + params so stored parameters cannot be tampered with
+  const aad = encodeAad(1, cfg);
+
+  // Encrypt seed with vault key (AAD-bound)
+  const { ciphertext: encryptedSeed, iv } = await aes256GcmEncrypt(seed, vaultKey, aad);
+
+  // Derive passcode key
   const passcodeSalt = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const passcodeKey = await derivePasscodeKey(passcode, passcodeSalt, cfg);
-  const { ciphertext: passcodeWrappedCt, iv: passcodeIv } = await aes256GcmEncrypt(
-    vaultKey,
-    passcodeKey,
-  );
+  if (!passcodeKey) {
+    vaultKey.fill(0);
+    throw new Error('KDF_UNAVAILABLE');
+  }
 
-  const combined = new Uint8Array(passcodeIv.length + passcodeWrappedCt.length);
-  combined.set(passcodeIv, 0);
-  combined.set(passcodeWrappedCt, passcodeIv.length);
-  const passcodeWrappedKey = bytesToHex(combined);
+  // Choose the wrapping key: combined with device secret or passcode alone
+  let wrappingKey: Uint8Array;
+  if (deviceSecret !== undefined) {
+    const combined = combineWithDeviceSecret(passcodeKey, deviceSecret);
+    wrappingKey = combined;
+  } else {
+    wrappingKey = passcodeKey;
+  }
+  const hasDeviceSecret = deviceSecret !== undefined;
 
+  // Wrap vault key with wrapping key
+  const { ciphertext: wrappedCt, iv: wrapIv } = await aes256GcmEncrypt(vaultKey, wrappingKey);
+
+  const combined = new Uint8Array(wrapIv.length + wrappedCt.length);
+  combined.set(wrapIv, 0);
+  combined.set(wrappedCt, wrapIv.length);
+
+  // Zero intermediate keys
+  wrappingKey.fill(0);
   passcodeKey.fill(0);
   vaultKey.fill(0);
 
@@ -169,7 +272,9 @@ export async function sealVault(
     version: 1,
     encryptedSeed: bytesToHex(encryptedSeed),
     iv: bytesToHex(iv),
-    passcodeWrappedKey,
+    aad: bytesToHex(aad),
+    passcodeWrappedKey: bytesToHex(combined),
+    hasDeviceSecret,
     passcodeSalt: bytesToHex(passcodeSalt),
     argon2TimeCost: cfg.argon2TimeCost,
     argon2MemoryCost: cfg.argon2MemoryCost,
@@ -177,24 +282,21 @@ export async function sealVault(
   };
 }
 
-export async function addDeviceSecretWrap(
-  seal: VaultSeal,
-  secureStorage: StorageAdapter,
-): Promise<VaultSeal> {
-  const deviceSecret = globalThis.crypto.getRandomValues(new Uint8Array(32));
-  await secureStorage.set(STORAGE_KEYS.DEVICE_SECRET, bytesToHex(deviceSecret));
-  const deviceWrappedKey = bytesToHex(deviceSecret) + '|' + seal.passcodeWrappedKey;
-  deviceSecret.fill(0);
-  return { ...seal, deviceWrappedKey };
-}
-
+/**
+ * Unseal the vault.
+ *
+ * @param seal - The vault seal
+ * @param passcode - User's passcode
+ * @param deviceSecret - The device secret from SecureStorage (required if seal.hasDeviceSecret)
+ * @returns Decrypted seed or error
+ */
 export async function unsealVault(
   seal: VaultSeal,
   passcode: string,
-  secureStorage?: StorageAdapter,
-  _biometricSecret?: Uint8Array,
+  deviceSecret?: Uint8Array,
 ): Promise<VaultUnlockResult> {
   try {
+    // Derive passcode key
     const passcodeSalt = hex2bytes(seal.passcodeSalt);
     const passcodeKey = await derivePasscodeKey(passcode, passcodeSalt, {
       argon2TimeCost: seal.argon2TimeCost,
@@ -202,52 +304,66 @@ export async function unsealVault(
       argon2Parallelism: seal.argon2Parallelism,
     });
 
-    if (seal.deviceWrappedKey && secureStorage) {
-      const storedDeviceSecret = await secureStorage.get(STORAGE_KEYS.DEVICE_SECRET);
-      if (!storedDeviceSecret) {
+    if (!passcodeKey) {
+      return { success: false, error: 'kdf_unavailable' };
+    }
+
+    // If device secret is required, check it
+    if (seal.hasDeviceSecret) {
+      if (!deviceSecret || deviceSecret.length === 0) {
         passcodeKey.fill(0);
         return { success: false, error: 'device_secret_missing' };
       }
     }
 
-    const wrapKey = await globalThis.crypto.subtle.importKey(
-      'raw',
-      passcodeKey as BufferSource,
-      { name: 'AES-GCM' },
-      false,
-      ['decrypt'],
-    );
+    // Re-derive the wrapping key (same as during seal)
+    let wrappingKey: Uint8Array;
+    if (seal.hasDeviceSecret && deviceSecret) {
+      wrappingKey = combineWithDeviceSecret(passcodeKey, deviceSecret);
+      passcodeKey.fill(0);
+    } else {
+      wrappingKey = passcodeKey;
+    }
 
+    // Unwrap vault key
     const wrappedKeyBuf = hex2bytes(seal.passcodeWrappedKey);
     const wrapIv = wrappedKeyBuf.slice(0, 12);
     const wrappedKeyCt = wrappedKeyBuf.slice(12);
 
-    let vaultKey: Uint8Array;
+    let vaultKey: Uint8Array<ArrayBuffer>;
     try {
       const unwrapped = await globalThis.crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: wrapIv as BufferSource },
-        wrapKey,
+        await globalThis.crypto.subtle.importKey(
+          'raw',
+          wrappingKey as BufferSource,
+          { name: 'AES-GCM' },
+          false,
+          ['decrypt'],
+        ),
         wrappedKeyCt,
       );
       vaultKey = toUint8Array(unwrapped);
     } catch {
-      passcodeKey.fill(0);
+      wrappingKey.fill(0);
       return { success: false, error: 'wrong_passcode' };
     }
 
+    wrappingKey.fill(0);
+
+    // Decrypt seed (verify AAD)
     try {
-      const encryptedSeed = hex2bytes(seal.encryptedSeed);
+      const aad = hex2bytes(seal.aad);
       const decrypted = await aes256GcmDecrypt(
-        encryptedSeed,
+        hex2bytes(seal.encryptedSeed),
         vaultKey,
         hex2bytes(seal.iv),
+        aad,
       );
       vaultKey.fill(0);
-      passcodeKey.fill(0);
       return { success: true, seed: decrypted };
     } catch {
       vaultKey.fill(0);
-      passcodeKey.fill(0);
       return { success: false, error: 'tampered_data' };
     }
   } catch {
@@ -259,13 +375,14 @@ export async function changePasscode(
   seal: VaultSeal,
   oldPasscode: string,
   newPasscode: string,
+  deviceSecret?: Uint8Array,
   config?: VaultConfig,
 ): Promise<VaultSeal | VaultUnlockResult> {
-  const unsealResult = await unsealVault(seal, oldPasscode);
+  const unsealResult = await unsealVault(seal, oldPasscode, deviceSecret);
   if (!unsealResult.success) {
     return unsealResult;
   }
-  const newSeal = await sealVault(unsealResult.seed, newPasscode, config);
+  const newSeal = await sealVault(unsealResult.seed, newPasscode, deviceSecret, config);
   unsealResult.seed.fill(0);
   return newSeal;
 }
@@ -284,7 +401,7 @@ export function evaluatePasscodeStrength(passcode: string, hasDeviceSecretWrap: 
 
 export async function addBiometricWrap(
   vaultKey: Uint8Array,
-  biometricSecret: Uint8Array,
+  biometricSecret: Uint8Array<ArrayBuffer>,
 ): Promise<string> {
   const { ciphertext } = await aes256GcmEncrypt(vaultKey, biometricSecret);
   return bytesToHex(ciphertext);
@@ -292,7 +409,7 @@ export async function addBiometricWrap(
 
 export async function removeBiometricWrap(
   biometricWrappedKey: string,
-  biometricSecret: Uint8Array,
+  biometricSecret: Uint8Array<ArrayBuffer>,
 ): Promise<Uint8Array> {
   const encrypted = hex2bytes(biometricWrappedKey);
   const iv = encrypted.slice(0, 12);

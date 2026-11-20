@@ -122,9 +122,13 @@ export async function unlockSession(
   seal: VaultSeal,
   passcode: string,
   secureStorage?: StorageAdapter,
-  biometricSecret?: Uint8Array,
+  _biometricSecret?: Uint8Array,
 ): Promise<
-  { success: true; session: VaultSession } | { success: false; error: 'wrong_passcode' | 'device_secret_missing' | 'tampered_data' }
+  | { success: true; session: VaultSession }
+  | {
+      success: false;
+      error: 'wrong_passcode' | 'device_secret_missing' | 'tampered_data' | 'kdf_unavailable';
+    }
 > {
   // Check backoff
   if (secureStorage) {
@@ -134,7 +138,20 @@ export async function unlockSession(
     }
   }
 
-  const result = await unsealVault(seal, passcode, secureStorage, biometricSecret);
+  // Read device secret from SecureStorage if available
+  let deviceSecret: Uint8Array | undefined;
+  if (seal.hasDeviceSecret && secureStorage) {
+    const dsHex = await secureStorage.get(STORAGE_KEYS.DEVICE_SECRET);
+    if (dsHex) {
+      const bytes = new Uint8Array(dsHex.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(dsHex.slice(i * 2, i * 2 + 2), 16);
+      }
+      deviceSecret = bytes;
+    }
+  }
+
+  const result = await unsealVault(seal, passcode, deviceSecret);
   if (!result.success) {
     if (secureStorage) {
       await recordFailedAttempt(secureStorage);

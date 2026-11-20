@@ -18,12 +18,7 @@ export {
 
 export type { MnemonicLength, MnemonicValidation } from './mnemonic';
 
-export {
-  deriveTonKey,
-  deriveTronKey,
-  deriveEvmKey,
-  deriveAllKeys,
-} from './derivation';
+export { deriveTonKey, deriveTronKey, deriveEvmKey, deriveAllKeys } from './derivation';
 
 export type { DerivedKey, DerivedKeys } from './derivation';
 
@@ -31,7 +26,6 @@ export {
   sealVault,
   unsealVault,
   changePasscode,
-  addDeviceSecretWrap,
   addBiometricWrap,
   removeBiometricWrap,
   evaluatePasscodeStrength,

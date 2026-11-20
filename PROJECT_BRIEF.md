@@ -133,17 +133,17 @@ Feature flags per chain, feature and region. A geo/region-restriction hook. A sa
 
 What distinguishes OneZeroWallet from other self-custodial wallets:
 
-| Differentiator | Where it's built | Phase |
-|---|---|---|
-| **Clean-room, MyTonWallet-inspired design** — same UX patterns, zero copied code | All | P0+ |
-| **Multi-chain from one seed** — TON, TRON, EVM from one BIP-39 24-word phrase | packages/crypto-vault | P1 |
-| **Passcode + biometrics + device-secret combined** — no single point of failure for unlock | packages/crypto-vault | P1 |
-| **Transparent, capped fees** — every fee line-item, 1% hard cap, never unlimited approvals | packages/core, all swap packages | P2+ |
-| **Keyless API** — our server can never access keys, sign transactions, or censor sends | services/api | P0 |
-| **Telegram Mini App native** — no install, no browser extension, works in any Telegram client | apps/miniapp | P0 |
-| **Data-driven assets** — coin metadata from config, not hardcoded, with verified-token registry | packages/core | P2 |
-| **Fail-closed contract allowlist** — swaps/stakes only to verified contracts | All swap/stake packages | P3+ |
-| **Portable infrastructure** — Vercel today, Cloudflare Pages/Workers tomorrow | services/api, deploy config | P0 |
+| Differentiator                                                                                  | Where it's built                 | Phase |
+| ----------------------------------------------------------------------------------------------- | -------------------------------- | ----- |
+| **Clean-room, MyTonWallet-inspired design** — same UX patterns, zero copied code                | All                              | P0+   |
+| **Multi-chain from one seed** — TON, TRON, EVM from one BIP-39 24-word phrase                   | packages/crypto-vault            | P1    |
+| **Passcode + biometrics + device-secret combined** — no single point of failure for unlock      | packages/crypto-vault            | P1    |
+| **Transparent, capped fees** — every fee line-item, 1% hard cap, never unlimited approvals      | packages/core, all swap packages | P2+   |
+| **Keyless API** — our server can never access keys, sign transactions, or censor sends          | services/api                     | P0    |
+| **Telegram Mini App native** — no install, no browser extension, works in any Telegram client   | apps/miniapp                     | P0    |
+| **Data-driven assets** — coin metadata from config, not hardcoded, with verified-token registry | packages/core                    | P2    |
+| **Fail-closed contract allowlist** — swaps/stakes only to verified contracts                    | All swap/stake packages          | P3+   |
+| **Portable infrastructure** — Vercel today, Cloudflare Pages/Workers tomorrow                   | services/api, deploy config      | P0    |
 
 ## 14. Dependencies license audit
 

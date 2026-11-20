@@ -25,7 +25,6 @@ import {
   sealVault,
   unsealVault,
   changePasscode,
-  addDeviceSecretWrap,
   evaluatePasscodeStrength,
   lockSession,
   getSession,
@@ -86,14 +85,17 @@ describe('Mnemonic', () => {
   });
 
   it('rejects invalid words', () => {
-    const result = validateMnemonicPhrase('zzzzzz yyyyy xxxxx wwwww vvvvv uuuuu ttttt sssss rrrrr qqqqq ppppp ooooo nnnnn mmmmm');
+    const result = validateMnemonicPhrase(
+      'zzzzzz yyyyy xxxxx wwwww vvvvv uuuuu ttttt sssss rrrrr qqqqq ppppp ooooo nnnnn mmmmm',
+    );
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('Unknown words'))).toBe(true);
   });
 
   it('rejects invalid checksum', () => {
     // Tamper one word in a valid mnemonic
-    const phrase = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon zoo';
+    const phrase =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon zoo';
     const result = validateMnemonicPhrase(phrase);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('Checksum'))).toBe(true);
@@ -245,7 +247,10 @@ describe('Vault', () => {
   });
 
   it('supports version/parameter upgrade (different config)', async () => {
-    const seal = await sealVault(seed, passcode, { argon2TimeCost: 4, argon2MemoryCost: 32768 });
+    const seal = await sealVault(seed, passcode, undefined, {
+      argon2TimeCost: 4,
+      argon2MemoryCost: 32768,
+    });
     const result = await unsealVault(seal, passcode);
     expect(result.success).toBe(true);
   });
@@ -278,7 +283,7 @@ describe('Vault', () => {
         fc.uint8Array({ minLength: 64, maxLength: 64 }),
         fc.string({ minLength: 4, maxLength: 12 }),
         async (randomSeed, randomPasscode) => {
-          const seal = await sealVault(randomSeed, randomPasscode, testConfig);
+          const seal = await sealVault(randomSeed, randomPasscode, undefined, testConfig);
           const result = await unsealVault(seal, randomPasscode);
           if (!result.success) return false;
           const seedArr = Array.from(result.seed);
@@ -309,20 +314,49 @@ describe('Vault', () => {
 // ---------------------------------------------------------------------------
 
 describe('Device-secret wrap', () => {
-  it('device secret required for unlock when active', async () => {
+  it('device secret required for unlock when hasDeviceSecret', async () => {
     const seed = testSeed();
     const passcode = 'mypasscode42';
-    const seal = await sealVault(seed, passcode);
-    const storage = new InMemoryStorage();
+    const deviceSecret = new Uint8Array(32).fill(0xab);
 
-    // Add device-secret wrap
-    const sealed = await addDeviceSecretWrap(seal, storage);
+    const seal = await sealVault(seed, passcode, deviceSecret);
+    expect(seal.hasDeviceSecret).toBe(true);
 
-    // Passcode without device secret should fail
-    await unsealVault(sealed, passcode);
-    // Note: current implementation doesn't require device secret for unseal yet
-    // This test documents the intended behavior
-    expect(storage).toBeDefined();
+    // Correct passcode + correct device secret should succeed
+    const goodResult = await unsealVault(seal, passcode, deviceSecret);
+    expect(goodResult.success).toBe(true);
+
+    // Correct passcode + NO device secret should fail
+    const noDsResult = await unsealVault(seal, passcode);
+    expect(noDsResult.success).toBe(false);
+    if (!noDsResult.success) {
+      expect(noDsResult.error).toBe('device_secret_missing');
+    }
+
+    // Wrong passcode + correct device secret should fail
+    const wrongPwResult = await unsealVault(seal, 'wrongpass', deviceSecret);
+    expect(wrongPwResult.success).toBe(false);
+    if (!wrongPwResult.success) {
+      expect(wrongPwResult.error).toBe('wrong_passcode');
+    }
+
+    // Wrong device secret should fail
+    const wrongDs = new Uint8Array(32).fill(0xcd);
+    const wrongDsResult = await unsealVault(seal, passcode, wrongDs);
+    expect(wrongDsResult.success).toBe(false);
+  });
+
+  it('seal has no passcode-only unlockable copy when hasDeviceSecret', async () => {
+    const seed = testSeed();
+    const passcode = 'test1234';
+    const deviceSecret = new Uint8Array(32).fill(0xef);
+
+    const seal = await sealVault(seed, passcode, deviceSecret);
+    expect(seal.hasDeviceSecret).toBe(true);
+
+    // With device secret mode, passcode-only unlock must fail
+    const result = await unsealVault(seal, passcode);
+    expect(result.success).toBe(false);
   });
 });
 
