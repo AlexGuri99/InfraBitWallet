@@ -1,0 +1,32 @@
+{
+  "name": "onezerowallet",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Self-custodial multi-chain crypto wallet as a Telegram Mini App",
+  "scripts": {
+    "dev": "pnpm --filter @onezerowallet/miniapp dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "type-check": "pnpm -r type-check",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @onezerowallet/miniapp test:e2e",
+    "audit": "pnpm audit --audit-level=high",
+    "license-check": "pnpm -r license-check",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
+    "ci": "pnpm lint && pnpm type-check && pnpm test && pnpm audit && pnpm license-check"
+  },
+  "engines": {
+    "node": ">=22.0.0 <23",
+    "pnpm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "prettier": "^3.4.0",
+    "eslint": "^9.15.0",
+    "@eslint/js": "^9.15.0",
+    "typescript-eslint": "^8.16.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "globals": "^15.12.0"
+  }
+}

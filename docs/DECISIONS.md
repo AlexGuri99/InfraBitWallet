@@ -1,0 +1,242 @@
+# OneZeroWallet — Decisions
+
+## Decision: TON Swap Provider → STON.fi (direct DEX v2 SDK)
+
+**Status:** Accepted
+
+**Recommendation:** STON.fi DEX v2 via the direct DEX v2 SDK, using `referralValue` in basis points.
+
+**Reasons:**
+
+- Established TON DEX with deepest liquidity.
+- Direct SDK supports `referralValue` parameter (bps): 35 bps = 0.35%.
+- Fee accrues in DEX v2 Vault for controlled withdrawal.
+- Permissively documented API — no copyleft concerns.
+
+**Source:** https://docs.ston.fi/developer-section/omniston/referral-fees (fetched 2026-11-20)
+
+**License:** STON.fi SDK is MIT. API usage is free. No restrictive terms identified.
+
+**Fee mechanism (v1):** Direct DEX v2 SDK with `referralValue: 35` (35 bps = 0.35%) and a referral/receiving address.
+
+**⚠️ bps vs pips warning:** STON.fi OmniSton v1beta8 API (`integrator_fee_pips`) uses pips (1 pip = 0.0001%). The direct DEX v2 SDK (`referralValue`) uses bps (1 bps = 0.01%). 0.35% = **35 bps** = **3500 pips**. The swap-payload builder must use the correct unit for the chosen interface. A mistaken pips value (3500) passed as bps would be rejected by the 1% client-side cap (test required).
+
+**Risks:**
+
+- API rate limits (mitigate: cache quotes, fallback mode).
+- SDK versioning — breaking changes.
+- DEX V2 Vault withdrawal requires SDK integration.
+
+---
+
+## Decision: EVM Swap Aggregator → 0x Swap API
+
+**Status:** Accepted (provisional — legal review needed)
+
+**Recommendation:** 0x Swap API (https://0x.org)
+
+**Reasons:**
+
+- Leading EVM swap aggregator, routes through all major DEXes.
+- Native integrator fee support via `swapFeeRecipient`, `swapFeeBps`, `swapFeeToken`.
+- Supports multi-recipient fee splitting.
+- Free tier available (higher volume needs custom pricing).
+- Covers Ethereum mainnet + potential future chains (Base, BNB, Arbitrum).
+
+**Source:** https://docs.0x.org/ (fetched 2026-11-20)
+
+**License:** 0x API License Agreement (terms apply for commercial use). Free tier available for dev/test. **Must review commercial terms before production revenue-sharing use** — see `docs/LEGAL_TODO.md`.
+
+**Fee mechanism:** `swapFeeRecipient` address receives `swapFeeBps: 35` (0.35%) of sellAmount. Fee token must be buyToken or sellToken. Trade surplus optional via `tradeSurplusRecipient` (custom plan). 0x may also add its own protocol/network fee — the total cost shown to the user must include everything.
+
+**Risks:**
+
+- API dependency — 0x could change terms, pricing, or availability.
+- Centralization risk — single point of failure for EVM swaps.
+- **Could 0x add its own fee?** UNVERIFIED — need to check `fees.integratorFee` vs total quote cost before P5.
+- License terms for commercial use need legal review.
+- API rate limits on free tier.
+
+---
+
+## Decision: TRON Swap — DEFERRED from v1
+
+**Status:** Future work — no suitable provider found for v1
+
+**Finding:** SunSwap V4 (https://sun.io) is the dominant DEX on TRON (current version is V4, which replaces the earlier JustSwap/SunSwap V1-V3 branding). SUN.io also offers SunCurve (stablecoins) and PSM. However, **no documented integrator fee mechanism** was found in the available SunSwap or TRON developer documentation that would support a verifiable atomic fee collection at swap time.
+
+**Source:** https://docs.sun.io/ (fetched 2026-11-20)
+
+**What was checked:**
+
+- SunSwap V4 documentation — swap contract interfaces
+- TRON developer hub — TRC-20 swap standards
+- SUN.io documentation pages
+
+**Requirement for future inclusion:**
+A TRON swap provider must support a verified, atomic integrator-fee mechanism that:
+
+1. Encodes the fee in the swap transaction itself (not a separate transfer).
+2. Prevents the user or the swap contract from bypassing the fee.
+3. Supports a verifiable fee amount (0.35%) at quote/execution time.
+
+Until then, TRON v1 covers receive and send (TRX, USDT) with energy handling only.
+
+**Risks:**
+
+- Two-transaction fee approach (swap + parallel transfer) was considered and rejected per project guidance: excessive TRON energy/bandwidth costs.
+- TRON DeFi ecosystem less mature than EVM — aggregator options are limited.
+- SunSwap's terms of service need review.
+
+---
+
+## Decision: GRAM Staking Provider → Tonstakers
+
+**Status:** Accepted
+
+**Recommendation:** Tonstakers (https://tonstakers.com)
+
+**Reasons:**
+
+- Largest TON liquid staking protocol by TVL.
+- Full TypeScript SDK available (`tonstakers-sdk` on npm, MIT license).
+- `partnerCode` field in SDK allows tracking referrals (no fee in v1, but infrastructure ready).
+- Liquid staking via tsTON — users can use tsTON in DeFi.
+- Instant unstaking available ("within minutes").
+- `getCurrentApy()` returns live APY.
+- Automatic compounding ~every 18 hours.
+
+**Source:** https://tonstakers.com/ and https://github.com/tonstakers/tonstakers-sdk (fetched 2026-11-20)
+
+**License:** Tonstakers SDK: MIT.
+
+**Fee mechanism:** None in v1 (`StakingFeePolicy: 'none'`). The SDK's `partnerCode` field is available for future revenue share if policy changes.
+
+**Risks:**
+
+- Smart contract risk (though established protocol).
+- Instant unstaking liquidity depends on pool.
+- APY is variable and market-dependent.
+- Unstaking gas reserve: SDK adds 1 TON fee reserve on stake, 1.05 TON gas for unstake.
+
+---
+
+## Decision: TON Data Provider → TON Center API (with tonconsole.com fallback)
+
+**Status:** Accepted (provisional — GRAM rename impact UNVERIFIED)
+
+**Recommendation:** TON Center API (https://toncenter.com/api/v2/) with fallback to tonconsole.com (https://tonconsole.com/api).
+
+**Reasons:**
+
+- Free tier available (rate-limited).
+- REST API for addresses, balances, transactions, jettons.
+- Well-documented, widely used.
+- Supports testnet.
+
+**Source:** https://toncenter.com/api/v2/ (fetched 2026-11-20)
+
+**License:** Free API tier — rate limits apply. Terms of service standard.
+
+**Risks:**
+
+- **GRAM rename impact UNVERIFIED:** Need to check live TON Center/TonAPI responses in P2 for what they return post-rename. Assumption that they still return "TON" needs verification.
+- Rate limits on free tier may require API key (paid upgrade) for production.
+- API deprecation risk.
+- Mitigation: abstract behind a `TonDataProvider` interface with fallback chaining.
+
+---
+
+## Decision: TRON Data Provider → TronGrid (with fallback to full node RPC)
+
+**Status:** Accepted
+
+**Recommendation:** TronGrid (https://trongrid.io) with FullNode HTTP API as local fallback.
+
+**Reasons:**
+
+- Official TRON infrastructure provider by TRON DAO.
+- Scales to production.
+- REST + gRPC endpoints for balances, TRC-20, transactions, resources (energy/bandwidth).
+- Free tier with API key.
+
+**Source:** https://developers.tron.network/ (fetched 2026-11-20)
+
+**License:** Free tier available. Paid tiers for higher rate limits.
+
+**Risks:**
+
+- Centralization — TronGrid is the primary provider.
+- API key needed for rate limits.
+- Mitigation: maintain ability to connect directly to public FullNode HTTP endpoints.
+
+---
+
+## Decision: EVM Data Provider → Alchemy (with Infura fallback)
+
+**Status:** Accepted
+
+**Recommendation:** Alchemy (https://alchemy.com) with Infura (https://infura.io) as fallback.
+
+**Reasons:**
+
+- Leading EVM RPC provider, supports all EVM chains.
+- Rich API: balances, token metadata, transaction history (via Transfers API), gas estimation.
+- Free tier generous enough for development.
+- Viem support (our chosen EVM library).
+
+**License:** Standard API terms. Free tier, paid for production scale.
+
+**Risks:**
+
+- Rate limits on free tier.
+- API key exposure mitigated by proxying through our keyless API.
+- Mitigation: abstract behind `EvmDataProvider` interface, fallback to Infura or public RPCs.
+
+---
+
+## Decision: State Management → Zustand
+
+**Status:** Accepted
+
+**Reasons:**
+
+- Minimal boilerplate compared to Redux Toolkit.
+- First-class TypeScript support.
+- Works well with React without context providers.
+- Lightweight (~1KB).
+- Easy to test with store outside React components.
+
+---
+
+## Decision: Package Manager → pnpm
+
+**Status:** Accepted
+
+**Reasons:**
+
+- Strict dependency isolation prevents phantom dependencies.
+- Faster installs with content-addressable store.
+- Built-in workspace support for monorepo.
+- Dependency install scripts disabled unless explicitly allowlisted (security).
+
+**CI impact:** CI uses `pnpm install --frozen-lockfile`. Audit uses `pnpm audit`.
+
+---
+
+## Complete Findings List (Research Results from 2026-11-20)
+
+**10 items identified:**
+
+| #   | Item                                                                                                                                                                                                                  | Verdict                               |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1   | **STON.fi fee parameter** — Brief says `referralValue: 35` (bps). Current OmniSton v1beta8 uses `integrator_fee_pips: 3500` (pips). Direct DEX v2 SDK uses `referralValue` in bps. For v1 we use direct SDK with bps. | ✅ bps corrected; pips warning added  |
+| 2   | **SunSwap version** — Brief says "e.g. SunSwap." Current docs show SunSwap V4 is latest (not V2). Ecosystem includes SunCurve, PSM, Universal Router.                                                                 | ✅ V4 noted; TRON swaps deferred      |
+| 3   | **SunSwap integrator fee undocumented** — No fee mechanism found for atomic collection.                                                                                                                               | 🚫 TRON swap excluded from v1         |
+| 4   | **`@telegram-apps/sdk` vs `@tma.js/sdk`** — Brief references `@telegram-apps/sdk`. Docs reference `@tma.js/sdk@4`. Need to verify if same project.                                                                    | UNVERIFIED — verify before P0 install |
+| 5   | **GRAM rename — API impact** — Brief says TON→GRAM 2026-06-15. Tonstakers uses "GRAM." SLIP-44 still shows "TON." Impact on TON Center API responses unknown.                                                         | UNVERIFIED — add P2 check task        |
+| 6   | **TRON derivation path** — `m/44'/195'/0'/0/0` confirmed from SLIP-44. Some wallets vary change/address_index usage.                                                                                                  | ✅ Confirmed per SLIP-44              |
+| 7   | **0x API commercial terms** — Free tier available. API License Agreement needs review before production revenue-sharing.                                                                                              | → docs/LEGAL_TODO.md                  |
+| 8   | **TRON "no USDC" claim** — Brief says Circle ended native USDC on TRON. Date and current status of existing USDC need verification.                                                                                   | UNVERIFIED — verify in P4             |
+| 9   | **TON wallet V5R1** — Confirmed: "Most wallet apps use Wallet V5R1... by default."                                                                                                                                    | ✅ Confirmed                          |
+| 10  | **Derivation paths confirmed** — TON `m/44'/607'/0'`, TRON `m/44'/195'/0'/0/0`, ETH `m/44'/60'/0'/0/0` all from SLIP-44.                                                                                              | ✅ Confirmed                          |
