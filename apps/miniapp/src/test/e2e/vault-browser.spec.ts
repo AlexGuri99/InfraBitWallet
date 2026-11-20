@@ -147,7 +147,7 @@ test.describe('Vault browser operations', () => {
         const ur = await (vault['unsealVault'] as (s: Record<string, unknown>, p: string) => Promise<Record<string, unknown>>)(seal, 'test-passcode-123');
         const urr = ur as Record<string, boolean>;
         if (!urr['success']) {
-          return { ok: false, err: String((ur as Record<string, string>)['error'] ?? 'unknown') };
+          return { ok: false, err: (ur as Record<string, string>)['error'] ?? 'unknown' };
         }
         return { ok: true, ver: (seal['version'] as number) };
       } catch (e) {
@@ -185,7 +185,7 @@ test.describe('Vault browser operations', () => {
         const ur = await (vault['unsealVault'] as (s: Record<string, unknown>, p: string) => Promise<Record<string, unknown>>)(seal, 'v2-password-789');
         const urr = ur as Record<string, string>;
         if (!(ur as Record<string, boolean>)['success']) {
-          return { ok: false, err: String(urr['error'] ?? 'unknown') };
+          return { ok: false, err: urr['error'] ?? 'unknown' };
         }
         return { ok: true, mnemonicMatch: urr['mnemonic'] === phrase };
       } catch (e) {
