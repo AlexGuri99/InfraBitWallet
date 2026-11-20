@@ -42,6 +42,7 @@ Project start: 2026-11-20
 **Status:** ✅ Complete (2026-11-20)
 
 All P1a tasks are now complete. The vault module (`packages/crypto-vault`) implements:
+
 - BIP-39 mnemonic generation, validation, normalization (@scure/bip39)
 - Multi-chain derivation: TON (SLIP-10/Ed25519), TRON (BIP-32/secp256k1), EVM (BIP-32/secp256k1)
 - AES-256-GCM seed encryption (WebCrypto)
@@ -63,30 +64,31 @@ All P1a tasks are now complete. The vault module (`packages/crypto-vault`) imple
 
 **Status:** ✅ In progress (Part 1 complete — 2026-11-20)
 
-| Task                                                                        | Status  |
-| --------------------------------------------------------------------------- | ------- |
-| Fix verify/CI scripts (--if-present on build, no ; true)                    | ✅ Done |
-| Valibot override to >=1.4.2 (fixes GHSA-vqpr-j7v3-hqw9, GHSA-5qjj-4xww-7phc) | ✅ Done |
-| Node engine requirements set to >=22.22.2 (matching jsdom)                  | ✅ Done |
-| .nvmrc, CI, .gitattributes for cross-platform line endings                  | ✅ Done |
-| Add `wasm-unsafe-eval` to CSP for hash-wasm WebAssembly (Argon2id)          | ✅ Done |
-| Document CSP rationale in SECURITY_HEADERS.md                               | ✅ Done |
-| Vault format v2: store encrypted mnemonic for phrase re-display             | ✅ Done |
-| V1 → v2 migration support + tests                                           | ✅ Done |
-| Researched Telegram BiometricManager docs (authenticate always prompts)     | ✅ Done |
-| Corrected biometric model in VAULT_DESIGN.md (dual-factor, accurate storage) | ✅ Done |
-| Added "What we do NOT protect against" to VAULT_DESIGN.md                   | ✅ Done |
-| Playwright E2E vault browser test (Chrome, prod CSP, Argon2id)             | ✅ Done |
-| Bundle secret scan test (dist JS/HTML for mnemonics, keys, tokens)          | ✅ Done |
+| Task                                                                           | Status  |
+| ------------------------------------------------------------------------------ | ------- |
+| Fix verify/CI scripts (--if-present on build, no ; true)                       | ✅ Done |
+| Valibot override to >=1.4.2 (fixes GHSA-vqpr-j7v3-hqw9, GHSA-5qjj-4xww-7phc)   | ✅ Done |
+| Node engine requirements set to >=22.22.2 (matching jsdom)                     | ✅ Done |
+| .nvmrc, CI, .gitattributes for cross-platform line endings                     | ✅ Done |
+| Add `wasm-unsafe-eval` to CSP for hash-wasm WebAssembly (Argon2id)             | ✅ Done |
+| Document CSP rationale in SECURITY_HEADERS.md                                  | ✅ Done |
+| Vault format v2: store encrypted mnemonic for phrase re-display                | ✅ Done |
+| V1 → v2 migration support + tests                                              | ✅ Done |
+| Researched Telegram BiometricManager docs (authenticate always prompts)        | ✅ Done |
+| Corrected biometric model in VAULT_DESIGN.md (dual-factor, accurate storage)   | ✅ Done |
+| Added "What we do NOT protect against" to VAULT_DESIGN.md                      | ✅ Done |
+| Playwright E2E vault browser test (Chrome, prod CSP, Argon2id)                 | ✅ Done |
+| Bundle secret scan test (dist JS/HTML for mnemonics, keys, tokens)             | ✅ Done |
 | Updated UNVERIFIED.md with 3 new items (frame-ancestors, OWASP, SecureStorage) | ✅ Done |
 
 **Remaining for P1c Part 2:**
-| Task                                                  | Status    |
-| ----------------------------------------------------- | --------- |
-| Real address test vectors for all chains               | Pending   |
-| TON interoperability tests (testnet)                   | Pending   |
-| Verify GRAM rename impact (fetch TON Center response)  | UNVERIFIED |
-| Test with WebKit in Playwright (CI matrix expansion)   | Pending   |
+
+| Task                                                  | Status     |
+| ----------------------------------------------------- | ---------- |
+| Real address test vectors for all chains              | Pending    |
+| TON interoperability tests (testnet)                  | Pending    |
+| Verify GRAM rename impact (fetch TON Center response) | UNVERIFIED |
+| Test with WebKit in Playwright (CI matrix expansion)  | Pending    |
 
 ---
 
