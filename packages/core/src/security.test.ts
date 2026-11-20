@@ -19,7 +19,9 @@ function getCsp(): string {
   const raw: string = readFileSync(vercelPath, 'utf-8');
   const cfg: Record<string, unknown> = JSON.parse(raw) as Record<string, unknown>;
   const rawHeaders = cfg['headers'];
-  const headers: VercelHeaderRule[] = Array.isArray(rawHeaders) ? (rawHeaders as VercelHeaderRule[]) : [];
+  const headers: VercelHeaderRule[] = Array.isArray(rawHeaders)
+    ? (rawHeaders as VercelHeaderRule[])
+    : [];
   const cspEntry = headers.find((h) => h.source === '/(.*)');
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   const cspHeader = cspEntry?.headers?.find(
