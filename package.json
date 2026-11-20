@@ -14,11 +14,11 @@
     "license-check": "npx license-checker --summary --production --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;CC-BY-3.0;CC-BY-4.0;Unlicense' --excludePrivatePackages || true",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
-    "verify": "pnpm lint && pnpm type-check && pnpm test && pnpm format:check && pnpm audit --audit-level=high; true",
-    "ci": "pnpm lint && pnpm type-check && pnpm test && pnpm audit --audit-level=high && pnpm license-check"
+    "verify": "pnpm lint && pnpm type-check && pnpm test && pnpm -r --if-present build && pnpm format:check && pnpm audit --audit-level=high && pnpm license-check",
+    "ci": "pnpm lint && pnpm type-check && pnpm test && pnpm -r --if-present build && pnpm format:check && pnpm audit --audit-level=high && pnpm license-check"
   },
   "engines": {
-    "node": ">=22.0.0 <23",
+    "node": ">=22.22.2 <23",
     "pnpm": ">=9.0.0"
   },
   "devDependencies": {

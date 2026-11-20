@@ -97,6 +97,19 @@ Sources:
 - **Token:** AES-256-GCM encrypts vault key with biometric token
 - **Constraint:** Biometrics never replace passcode
 
+## What We Do NOT Protect Against
+
+These attack scenarios are **out of scope** for the vault's threat model. Users must be aware that no amount of client-side cryptography defends against them.
+
+| Scenario                                                                        | Why It Is Not Protected                                                                   | Mitigation (user responsibility)                         |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| **Device malware** (keylogger, screen scraper, infostealer, clipboard hijacker) | Malware running on the same device has full access to memory, keystrokes, and the screen. | Use a clean device; enable OS-level malware protection.   |
+| **Compromised host serving malicious JS**                                       | If the deployed app JS is replaced by an attacker (CDN hijack, Vercel compromise, MITM), it can exfiltrate the seed or keys at runtime. | Verify build hashes; use a hardware wallet for large amounts. |
+| **User voluntarily shares their recovery phrase**                               | Social engineering, phishing, or coercion cannot be prevented by client code.              | Never share the 24-word phrase with anyone, ever.         |
+| **Screenshots / screen recording**                                              | The OS or a malicious app can capture the screen without the app's knowledge.              | Enable Telegram's anti-screenshot controls; use a privacy screen. |
+| **Shoulder surfing**                                                            | An observer looking at the screen can see the passcode or seed words being entered.        | Shield the screen during entry; use biometric unlock where available. |
+| **Compromised Telegram client**                                                 | A malicious or backdoored Telegram client can read the Mini App's memory and storage.      | Use the official Telegram client from a trusted source.   |
+
 ## Known Limits of JavaScript Memory Wiping
 
 JavaScript has no guaranteed way to zero-fill memory:

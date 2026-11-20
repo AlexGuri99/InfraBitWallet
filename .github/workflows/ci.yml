@@ -8,7 +8,7 @@ on:
 
 env:
   PNPM_VERSION: '9'
-  NODE_VERSION: '22'
+  NODE_VERSION: '22.22.2'
 
 jobs:
   ci:

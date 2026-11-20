@@ -2,3 +2,6 @@ packages:
   - 'apps/*'
   - 'packages/*'
   - 'services/*'
+
+overrides:
+  valibot: '>=1.4.2'
