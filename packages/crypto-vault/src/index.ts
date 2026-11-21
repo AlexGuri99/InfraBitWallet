@@ -1,38 +1,22 @@
 /**
- * @onezerowallet/crypto-vault — BIP-39 mnemonic management, multi-chain derivation,
- * AES-256-GCM vault encryption, passcode+device+biometric unlock, and session handling.
+ * @onezerowallet/crypto-vault public API.
  *
- * This package NEVER exposes the raw seed or private keys outside its module boundary.
- * See docs/VAULT_DESIGN.md for the full threat model.
+ * RULE: nothing exported here may return the seed, a private key or the vault key.
+ * index.test.ts enforces an explicit allowlist of export names, so adding an export fails CI
+ * until someone consciously updates the list. Secret-handling functions (mnemonicToSeed,
+ * derive*, sealVault, unsealVault) are module-internal and imported directly by tests only.
  */
 
-export {
-  generateMnemonicPhrase,
-  validateMnemonicPhrase,
-  normalizeMnemonic,
-  mnemonicToSeed,
-  zeroFill,
-  bytesToHex,
-  seedToHex,
-} from './mnemonic';
-
+export { generateMnemonicPhrase, validateMnemonicPhrase, normalizeMnemonic } from './mnemonic';
 export type { MnemonicLength, MnemonicValidation } from './mnemonic';
 
-export { deriveTonKey, deriveTronKey, deriveEvmKey, deriveAllKeys } from './derivation';
-
-export type { DerivedKey, DerivedKeys } from './derivation';
-
 export {
-  sealVault,
-  unsealVault,
+  createSeal,
   changePasscode,
-  addBiometricWrap,
-  removeBiometricWrap,
   evaluatePasscodeStrength,
   DEFAULT_VAULT_CONFIG,
 } from './vault';
-
-export type { VaultConfig, VaultSeal, VaultUnlockResult } from './vault';
+export type { VaultConfig, VaultSeal } from './vault';
 
 export {
   unlockSession,
@@ -47,10 +31,7 @@ export {
   isWipeThresholdReached,
   getBackoffCount,
 } from './session';
-
 export type { VaultSession } from './session';
 
-export { InMemoryStorage, STORAGE_KEYS } from './storage';
+export { InMemoryStorage } from './storage';
 export type { StorageAdapter } from './storage';
-
-export type { DerivedKey as DerivedKeyInfo } from './derivation';

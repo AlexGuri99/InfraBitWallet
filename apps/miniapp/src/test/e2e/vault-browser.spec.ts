@@ -115,16 +115,19 @@ test.describe('Production CSP', () => {
       if (!vault) return { ok: false, err: 'vault bundle not loaded' };
       try {
         const phrase = vault['generateMnemonicPhrase']?.(24) as string;
-        const seed = vault['mnemonicToSeed']?.(vault['normalizeMnemonic']?.(phrase)) as Uint8Array;
-        const seal = await (vault['sealVault']?.(seed, 'test-passcode-123') as Promise<
+        const seal = await (vault['createSeal']?.(phrase, 'test-passcode-123') as Promise<
           Record<string, unknown>
         >);
-        const unsealed = (await (vault['unsealVault']?.(seal, 'test-passcode-123') as Promise<
-          Record<string, unknown>
-        >)) as { success: boolean; error?: string };
-        return unsealed.success
+        const storage = new (vault['InMemoryStorage'] as new () => unknown)();
+        const unlocked = await (vault['unlockSession']?.(
+          seal,
+          'test-passcode-123',
+          storage,
+        ) as Promise<{ success: boolean; error?: string }>);
+        (vault['lockSession'] as () => void)();
+        return unlocked.success
           ? { ok: true, version: seal['version'] as number }
-          : { ok: false, err: unsealed.error ?? 'unknown' };
+          : { ok: false, err: unlocked.error ?? 'unknown' };
       } catch (e) {
         return { ok: false, err: e instanceof Error ? e.message : 'non-Error thrown' };
       }
@@ -149,8 +152,10 @@ test.describe('Production CSP', () => {
         .vault;
       if (!vault) return { ok: false, err: 'vault bundle not loaded' };
       try {
-        const seed = new Uint8Array(64).fill(1);
-        await (vault['sealVault']?.(seed, 'test-passcode-123') as Promise<unknown>);
+        await (vault['createSeal']?.(
+          'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+          'test-passcode-123',
+        ) as Promise<unknown>);
         return { ok: true, err: '' };
       } catch (e) {
         return { ok: false, err: e instanceof Error ? e.message : 'non-Error thrown' };

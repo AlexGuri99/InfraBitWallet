@@ -10,7 +10,6 @@
  */
 import { generateMnemonic, validateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
-import { bytesToHex } from '@noble/hashes/utils';
 
 const WORDLIST = wordlist;
 
@@ -120,14 +119,4 @@ export function mnemonicToSeed(normalizedPhrase: string, passphrase: string = ''
  */
 export function zeroFill(buf: Uint8Array): void {
   buf.fill(0);
-}
-
-export { bytesToHex };
-
-/**
- * Generate a hex-encoded entropy string for TON-legacy wallet import.
- * Not a secret; used only for address derivation testing.
- */
-export function seedToHex(seed: Uint8Array): string {
-  return bytesToHex(seed);
 }

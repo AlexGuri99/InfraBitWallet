@@ -17,13 +17,6 @@ import {
   generateMnemonicPhrase,
   validateMnemonicPhrase,
   normalizeMnemonic,
-  mnemonicToSeed,
-  deriveTonKey,
-  deriveTronKey,
-  deriveEvmKey,
-  deriveAllKeys,
-  sealVault,
-  unsealVault,
   changePasscode,
   evaluatePasscodeStrength,
   lockSession,
@@ -37,6 +30,10 @@ import {
   getBackoffCount,
   isWipeThresholdReached,
 } from './index';
+import * as publicApi from './index';
+import { mnemonicToSeed } from './mnemonic';
+import { deriveTonKey, deriveTronKey, deriveEvmKey, deriveAllKeys } from './derivation';
+import { sealVault, unsealVault } from './vault';
 
 import type { MnemonicLength } from './index';
 import { MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
@@ -55,6 +52,53 @@ function testSeed(): Uint8Array {
 // ---------------------------------------------------------------------------
 // 1. Mnemonic tests
 // ---------------------------------------------------------------------------
+
+describe('A3: public API surface', () => {
+  // Adding an export fails this test until the allowlist is consciously updated.
+  // No name here may return the seed, a private key or the vault key.
+  const ALLOWED_EXPORTS = [
+    'DEFAULT_VAULT_CONFIG',
+    'InMemoryStorage',
+    'changePasscode',
+    'computeBackoffDelay',
+    'createSeal',
+    'evaluatePasscodeStrength',
+    'generateMnemonicPhrase',
+    'getBackoffCount',
+    'getSession',
+    'isBackoffActive',
+    'isWipeThresholdReached',
+    'lockSession',
+    'normalizeMnemonic',
+    'recordFailedAttempt',
+    'resetBackoff',
+    'setInactivityTimeout',
+    'touchSession',
+    'unlockSession',
+    'validateMnemonicPhrase',
+  ];
+  it('exports exactly the allowlisted names', () => {
+    expect(Object.keys(publicApi).sort()).toEqual([...ALLOWED_EXPORTS].sort());
+  });
+  it('does not export seed/key/vault-key returning functions', () => {
+    for (const banned of [
+      'seedToHex',
+      'mnemonicToSeed',
+      'sealVault',
+      'unsealVault',
+      'deriveAllKeys',
+      'deriveTonKey',
+      'deriveTronKey',
+      'deriveEvmKey',
+      'addBiometricWrap',
+      'removeBiometricWrap',
+      'zeroFill',
+      'bytesToHex',
+    ]) {
+      expect(Object.keys(publicApi)).not.toContain(banned);
+    }
+  });
+});
 
 describe('Mnemonic', () => {
   it('generates a 24-word phrase', () => {

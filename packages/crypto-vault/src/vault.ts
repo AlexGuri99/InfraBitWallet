@@ -23,6 +23,7 @@
 import { argon2id } from 'hash-wasm';
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256 } from '@noble/hashes/sha2';
+import { mnemonicToSeed, normalizeMnemonic, validateMnemonicPhrase } from './mnemonic';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -480,4 +481,27 @@ export async function removeBiometricWrap(
   const iv = encrypted.slice(0, 12);
   const ct = encrypted.slice(12);
   return aes256GcmDecrypt(ct, biometricSecret, iv);
+}
+
+/**
+ * Public entry point for creating a seal from a mnemonic phrase. The seed is derived inside
+ * this module and never returned. Always produces a v2 seal (mnemonic stored for backup checks).
+ * Throws if the phrase is invalid.
+ */
+export async function createSeal(
+  mnemonic: string,
+  passcode: string,
+  deviceSecret?: Uint8Array,
+  config?: VaultConfig,
+): Promise<VaultSeal> {
+  const normalized = normalizeMnemonic(mnemonic);
+  if (!validateMnemonicPhrase(normalized).valid) {
+    throw new Error('INVALID_MNEMONIC');
+  }
+  const seed = mnemonicToSeed(normalized);
+  try {
+    return await sealVault(seed, passcode, deviceSecret, config, normalized);
+  } finally {
+    seed.fill(0);
+  }
 }
