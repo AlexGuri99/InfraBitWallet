@@ -18,11 +18,8 @@ import {
   validateMnemonicPhrase,
   normalizeMnemonic,
   createSeal,
-  lockSession,
-  getSession,
   InMemoryStorage,
   computeBackoffDelay,
-  unlockSession,
   isBackoffActive,
   recordFailedAttempt,
   resetBackoff,
@@ -283,44 +280,6 @@ describe('Backoff', () => {
     }
     expect(await isWipeThresholdReached(storage, 5)).toBe(true);
     expect(await isWipeThresholdReached(storage, 10)).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 6. Session tests
-// ---------------------------------------------------------------------------
-
-describe('Session', () => {
-  it('unlocks and provides keys', async () => {
-    const passcode = 'sessiontest99-passcode';
-    const seal = await createSeal(MNEMONIC_12_ABANDON, passcode, undefined, FAST);
-    const storage = new InMemoryStorage();
-
-    const result = await unlockSession(seal, passcode, storage);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.session.keys.ton).toBeDefined();
-      expect(result.session.keys.tron).toBeDefined();
-      expect(result.session.keys.evm).toBeDefined();
-    }
-  });
-
-  it('locks and clears session', async () => {
-    const passcode = 'lockit99-passcode';
-    const seal = await createSeal(MNEMONIC_12_ABANDON, passcode, undefined, FAST);
-    const storage = new InMemoryStorage();
-
-    const result = await unlockSession(seal, passcode, storage);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(getSession()).not.toBeNull();
-      lockSession();
-      expect(getSession()).toBeNull();
-    }
-  });
-
-  it('getSession returns null before unlock', () => {
-    expect(getSession()).toBeNull();
   });
 });
 

@@ -88,6 +88,8 @@ export interface DerivedTonKey extends DerivedKeyBase {
 /** TRON key material. `hexAddress` is an intermediate form, not a user-facing address. */
 export interface DerivedTronKey extends DerivedKeyBase {
   chain: 'tron';
+  /** secp256k1 compressed public key (33 bytes), hex. NOT an address. */
+  publicKeyHex: string;
   /** 0x41 prefix + last 20 bytes of keccak256(pubkey[1:]), hex. Base58check T... form is Stage B. */
   hexAddress: string;
 }
@@ -95,6 +97,8 @@ export interface DerivedTronKey extends DerivedKeyBase {
 /** EVM key material. `rawAddress` is lowercase and NOT EIP-55 checksummed (Stage B). */
 export interface DerivedEvmKey extends DerivedKeyBase {
   chain: 'evm';
+  /** secp256k1 compressed public key (33 bytes), hex. NOT an address. */
+  publicKeyHex: string;
   /** 0x + 20 bytes hex, lowercase, no checksum. */
   rawAddress: string;
 }
@@ -148,6 +152,7 @@ export function deriveTronKey(seed: Uint8Array, accountIndex: number = 0): Deriv
     chain: 'tron',
     path,
     privateKey: child.privateKey,
+    publicKeyHex: bytesToHex(secp256k1.getPublicKey(child.privateKey, true)),
     hexAddress: tronHexAddress,
   };
 }
@@ -180,6 +185,7 @@ export function deriveEvmKey(seed: Uint8Array, accountIndex: number = 0): Derive
     chain: 'evm',
     path,
     privateKey: child.privateKey,
+    publicKeyHex: bytesToHex(secp256k1.getPublicKey(child.privateKey, true)),
     rawAddress: ethAddress,
   };
 }
