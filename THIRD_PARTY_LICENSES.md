@@ -9,31 +9,32 @@ Last verified: 2026-11-21 (Stage B) — `license-check: 128 package entries, all
 
 ## Direct dependencies
 
-| Package              | License    | Use                                     |
-| -------------------- | ---------- | --------------------------------------- |
-| `@noble/curves`      | MIT        | Ed25519 / secp256k1                     |
-| `@noble/hashes`      | MIT        | SHA-2/512, HMAC, HKDF, keccak           |
-| `@scure/bip32`       | MIT        | BIP-32 derivation                       |
-| `@scure/bip39`       | MIT        | BIP-39 mnemonic                         |
-| `hash-wasm`          | MIT        | Argon2id (WebAssembly)                  |
-| `zod`                | MIT        | Seal / config schema validation         |
-| `@ton/core`          | MIT        | TON cells, Address, StateInit hashing   |
-| `@ton/ton`           | MIT        | Wallet V5R1 contract + address          |
-| `@ton/crypto`        | MIT        | TON-native mnemonic validation/seed     |
-| `@scure/base`        | MIT        | Base58check for TRON addresses          |
-| `buffer`             | MIT        | Browser Buffer polyfill for @ton/*      |
-| `viem`               | MIT        | EVM encoding + test cross-checks        |
-| `ethers`             | MIT        | EVM cross-check (dev)                   |
-| `tronweb`            | MIT        | TRON cross-check (dev)                  |
-| `fake-indexeddb`     | Apache-2.0 | IndexedDB adapter tests (dev)           |
-| `fast-check`         | MIT        | Property tests                          |
-| `vitest`             | MIT        | Unit tests                              |
-| `@playwright/test`   | MIT        | E2E tests                               |
-| `@telegram-apps/sdk` | MIT        | Telegram Mini Apps SDK                  |
-| `react`, `react-dom` | MIT        | UI framework                            |
-| `zustand`            | MIT        | State (no secrets)                      |
-| `tailwindcss`        | MIT        | Styling                                 |
-| `valibot` (override) | MIT        | Transitive pin `>=1.4.2` for advisories |
+| Package                                              | License    | Use                                     |
+| ---------------------------------------------------- | ---------- | --------------------------------------- |
+| `@noble/curves`                                      | MIT        | Ed25519 / secp256k1                     |
+| `@noble/hashes`                                      | MIT        | SHA-2/512, HMAC, HKDF, keccak           |
+| `@scure/bip32`                                       | MIT        | BIP-32 derivation                       |
+| `@scure/bip39`                                       | MIT        | BIP-39 mnemonic                         |
+| `hash-wasm`                                          | MIT        | Argon2id (WebAssembly)                  |
+| `zod`                                                | MIT        | Seal / config schema validation         |
+| `@ton/core`                                          | MIT        | TON cells, Address, StateInit hashing   |
+| `@ton/ton`                                           | MIT        | Wallet V5R1 contract + address          |
+| `@ton/crypto`                                        | MIT        | TON-native mnemonic validation/seed     |
+| `@scure/base`                                        | MIT        | Base58check for TRON addresses          |
+| `buffer`                                             | MIT        | Browser Buffer polyfill for @ton/*      |
+| `viem`                                               | MIT        | EVM encoding + test cross-checks        |
+| `ethers`                                             | MIT        | EVM cross-check (dev)                   |
+| `tronweb`                                            | MIT        | TRON cross-check (dev)                  |
+| `fake-indexeddb`                                     | Apache-2.0 | IndexedDB adapter tests (dev)           |
+| `fast-check`                                         | MIT        | Property tests                          |
+| `vitest`                                             | MIT        | Unit tests                              |
+| `@testing-library/react` / `user-event` / `jest-dom` | MIT        | Component tests                         |
+| `@playwright/test`                                   | MIT        | E2E tests                               |
+| `@telegram-apps/sdk`                                 | MIT        | Telegram Mini Apps SDK                  |
+| `react`, `react-dom`                                 | MIT        | UI framework                            |
+| `zustand`                                            | MIT        | State (no secrets)                      |
+| `tailwindcss`                                        | MIT        | Styling                                 |
+| `valibot` (override)                                 | MIT        | Transitive pin `>=1.4.2` for advisories |
 
 ## Notes
 

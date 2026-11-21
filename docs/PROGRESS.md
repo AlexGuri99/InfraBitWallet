@@ -132,6 +132,26 @@ approval. Cadence: one commit per task.
 
 ---
 
+### Stage C: Onboarding, unlock and backup UI (2026-11-21)
+
+| Area                                                                                  | Status             | Evidence                                                               |
+| ------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------- |
+| Welcome + risk disclosure + anti-phishing notice                                      | DONE               | `ui/onboarding.tsx › WelcomeScreen`; `ui-onboarding.test.tsx`          |
+| Create (BIP-39 / TON-native) with passcode policy                                     | DONE               | `PasscodeSetupScreen`, `App.createWallet`; policy test                 |
+| Show recovery phrase (explicit tap, warnings, hide on background)                     | DONE               | `PhraseScreen`; E2E "phrase screen is empty until…"                    |
+| Backup verification (3 random positions, retry)                                       | DONE               | `VerifyScreen`; component + E2E flows                                  |
+| Import (phrase + passcode + account type)                                             | DONE               | `ImportScreen`; component + E2E "imports a wallet phrase"              |
+| Unlock with backoff countdown and biometric button                                    | DONE               | `ui/wallet.tsx › UnlockScreen`; `ui-wallet.test.tsx`, E2E              |
+| Auto-lock: inactivity (vault) + Telegram deactivated (adapter)                        | DONE               | `App` polling + `installTelegramLifecycleHooks`                        |
+| Settings: reveal (re-auth), change passcode, biometrics, auto-lock, wipe, test backup | DONE               | `SettingsScreen`; component + E2E reveal flow                          |
+| No secrets in state/storage/DOM                                                       | DONE               | uncontrolled inputs + `secretHolder`; E2E IndexedDB dump test          |
+| Component tests (Testing Library)                                                     | DONE               | 10 UI tests                                                            |
+| Playwright flows (Chromium + WebKit)                                                  | DONE               | 32 e2e total (16 per browser)                                          |
+| Accessibility checks                                                                  | DONE (without axe) | `a11y.spec.ts`; axe-core is MPL-2.0 and was not added (see UNVERIFIED) |
+| i18n scaffold                                                                         | DONE               | `src/i18n.ts`                                                          |
+
+---
+
 ### P1b: UI — Onboarding, Unlock, Backup Screens
 
 **Status:** Not started
