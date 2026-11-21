@@ -49,25 +49,40 @@ describe('A3: public API surface', () => {
   // Adding an export fails this test until the allowlist is consciously updated.
   // No name here may return the seed, a private key or the vault key.
   const ALLOWED_EXPORTS = [
+    'CompositeStorage',
     'DEFAULT_VAULT_CONFIG',
     'InMemoryStorage',
+    'IndexedDBAdapter',
+    'KDF_BOUNDS',
+    'STORAGE_KEYS',
+    'VAULT_FORMAT_VERSION',
+    'VaultManager',
     'changePasscode',
     'computeBackoffDelay',
     'createSeal',
+    'disableBiometric',
+    'enableBiometric',
     'evaluatePasscodeStrength',
     'generateMnemonicPhrase',
     'getBackoffCount',
     'getSession',
     'isBackoffActive',
+    'isValidDeviceSecretHex',
     'isWipeThresholdReached',
+    'loadSeal',
     'lockSession',
+    'measureKdf',
+    'migrateStoredSeal',
     'normalizeMnemonic',
     'recordFailedAttempt',
     'resetBackoff',
+    'saveSeal',
     'setInactivityTimeout',
     'touchSession',
     'unlockSession',
+    'unlockSessionWithBiometric',
     'validateMnemonicPhrase',
+    'wipeStoredVault',
   ];
   it('exports exactly the allowlisted names', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...ALLOWED_EXPORTS].sort());
@@ -122,7 +137,19 @@ describe('Mnemonic', () => {
       'zzzzzz yyyyy xxxxx wwwww vvvvv uuuuu ttttt sssss rrrrr qqqqq ppppp ooooo nnnnn mmmmm',
     );
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('Unknown words'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('not in the BIP-39 English wordlist'))).toBe(true);
+  });
+
+  it('A10: validation errors report word positions and never echo the typed words', () => {
+    const secretWord = 'zznotarealwordzz';
+    const result = validateMnemonicPhrase(
+      `${secretWord} abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about`,
+    );
+    expect(result.valid).toBe(false);
+    const text = result.errors.join(' ');
+    expect(text).not.toContain(secretWord);
+    expect(text).toContain('position 1');
+    expect(text).toContain('not in the BIP-39 English wordlist');
   });
 
   it('rejects invalid checksum', () => {

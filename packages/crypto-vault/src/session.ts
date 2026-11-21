@@ -1,7 +1,7 @@
 /**
  * Session handling — lifecycle of decrypted key material.
  *
- * Design (A2):
+ * Design (A2/A8):
  * - Private keys and the seed live ONLY in the closure created by createSession(). The public
  *   session object has functions only: getPublicInfo, signDigest, reauthenticate,
  *   revealMnemonic, lock. No key bytes, seed or mnemonic are properties of anything returned.
@@ -11,6 +11,10 @@
  *   (fresh Argon2id check); the phrase is then held for the re-auth window (default 60 s) and
  *   handed out by exactly one revealMnemonic() call, which clears it.
  * - lock() zero-fills the seed and clears the window.
+ * - Unlock attempts require storage (fail closed) and use the persisted backoff in backoff.ts.
+ *   Only a wrong passcode counts. `rate_limited` carries retryAfterMs.
+ * - An optional wipe threshold (disabled by default) deletes the stored seal and device secret
+ *   when it is reached, and returns a `wiped` result.
  *
  * What JavaScript cannot guarantee: zero-fill is best effort. The engine may have copied
  * buffers (JIT, GC moves), the mnemonic is an immutable string that cannot be wiped, and a
@@ -19,79 +23,17 @@
  * signDigest signs whatever 32 bytes it is given. Callers (chain adapters) MUST build the
  * payload themselves and show a human-readable preview of it before calling.
  */
-import { StorageAdapter, STORAGE_KEYS } from './storage';
+import type { StorageAdapter } from './storage';
+import { STORAGE_KEYS } from './storage';
 import { deriveTonKey, deriveTronKey, deriveEvmKey } from './derivation';
 import { ed25519 } from '@noble/curves/ed25519';
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { unsealVault } from './vault';
+import { unsealVault, unlockWithBiometric } from './vault';
 import type { VaultSeal, VaultUnsealError } from './vault';
+import { isBackoffActive, recordFailedAttempt, resetBackoff } from './backoff';
 
 // ---------------------------------------------------------------------------
-// Backoff
-// ---------------------------------------------------------------------------
-
-const MAX_BACKOFF_ATTEMPTS = 10;
-const BACKOFF_BASE_MS = 1000;
-
-/**
- * Compute exponential backoff delay for a given attempt count.
- * Formula: base * 2^attempt + random(0, base)
- */
-export function computeBackoffDelay(attemptCount: number): number {
-  if (attemptCount <= 0) return 0;
-  const clamped = Math.min(attemptCount, MAX_BACKOFF_ATTEMPTS);
-  return BACKOFF_BASE_MS * Math.pow(2, clamped) + Math.floor(Math.random() * BACKOFF_BASE_MS);
-}
-
-/**
- * Check if we are currently in a backoff window.
- */
-export async function isBackoffActive(storage: StorageAdapter): Promise<number> {
-  const countStr = await storage.get(STORAGE_KEYS.BACKOFF_COUNT);
-  const windowStartStr = await storage.get(STORAGE_KEYS.BACKOFF_WINDOW_START);
-  if (!countStr || !windowStartStr) return 0;
-
-  const count = parseInt(countStr, 10);
-  const windowStart = parseInt(windowStartStr, 10);
-  const delay = computeBackoffDelay(count);
-  const elapsed = Date.now() - windowStart;
-
-  if (elapsed >= delay) return 0; // backoff expired
-  return delay - elapsed; // remaining wait time in ms
-}
-
-/**
- * Record a failed backoff attempt.
- */
-export async function recordFailedAttempt(storage: StorageAdapter): Promise<void> {
-  const countStr = await storage.get(STORAGE_KEYS.BACKOFF_COUNT);
-  const count = countStr ? parseInt(countStr, 10) + 1 : 1;
-  await storage.set(STORAGE_KEYS.BACKOFF_COUNT, count.toString());
-  await storage.set(STORAGE_KEYS.BACKOFF_WINDOW_START, Date.now().toString());
-}
-
-/**
- * Reset backoff on successful unlock.
- */
-export async function resetBackoff(storage: StorageAdapter): Promise<void> {
-  await storage.delete(STORAGE_KEYS.BACKOFF_COUNT);
-  await storage.delete(STORAGE_KEYS.BACKOFF_WINDOW_START);
-}
-
-/**
- * Check if the wipe threshold has been reached.
- */
-export async function isWipeThresholdReached(
-  storage: StorageAdapter,
-  maxFailures: number,
-): Promise<boolean> {
-  const countStr = await storage.get(STORAGE_KEYS.BACKOFF_COUNT);
-  if (!countStr) return false;
-  return parseInt(countStr, 10) >= maxFailures;
-}
-
-// ---------------------------------------------------------------------------
-// Session
+// Session types
 // ---------------------------------------------------------------------------
 
 export type Chain = 'ton' | 'tron' | 'evm';
@@ -108,7 +50,12 @@ export type SignError = 'locked' | 'invalid_chain' | 'invalid_digest' | 'invalid
 export type SignResult = { ok: true; signature: Uint8Array } | { ok: false; error: SignError };
 
 export type ReauthResult =
-  { ok: true } | { ok: false; error: 'locked' | 'rate_limited' | VaultUnsealError };
+  | { ok: true }
+  | {
+      ok: false;
+      error: 'locked' | 'rate_limited' | 'wiped' | 'storage_required' | VaultUnsealError;
+      retryAfterMs?: number;
+    };
 
 export type RevealResult =
   { ok: true; mnemonic: string } | { ok: false; error: 'locked' | 'reauth_required' };
@@ -117,7 +64,7 @@ export type RevealResult =
  * TODO(P2 chain adapters): adapters build a SigningRequest from the ACTUAL payload to be signed
  * (never from UI state) and the UI must show `summary` before signDigest is called. Today the
  * session accepts a bare digest, which is blind signing; this interface is the contract that
- * will replace it. Fields are intentionally minimal until the adapters exist.
+ * will replace it.
  */
 export interface SigningRequest {
   chain: Chain;
@@ -143,8 +90,19 @@ export interface VaultSession {
 
 export interface UnlockOptions {
   /** Re-auth window in ms (default 60000). */
-  reauthWindowMs?: number;
+  reauthWindowMs?: number | undefined;
+  /** Delete the stored seal + device secret after this many consecutive wrong passcodes. 0/undefined = disabled. */
+  wipeAfterFailures?: number | undefined;
 }
+
+export type UnlockResult =
+  | { success: true; session: VaultSession }
+  | {
+      success: false;
+      error: VaultUnsealError | 'rate_limited' | 'wiped' | 'storage_required';
+      /** Only for 'rate_limited'. */
+      retryAfterMs?: number;
+    };
 
 export const DEFAULT_REAUTH_WINDOW_MS = 60_000;
 const MAX_ACCOUNT_INDEX = 0x7fffffff;
@@ -202,7 +160,15 @@ async function loadDeviceSecret(
   storage: StorageAdapter,
 ): Promise<Uint8Array | undefined> {
   if (!seal.hasDeviceSecret) return undefined;
-  return readDeviceSecretHex(await storage.get(STORAGE_KEYS.DEVICE_SECRET));
+  const secret = readDeviceSecretHex(await storage.get(STORAGE_KEYS.DEVICE_SECRET));
+  return secret;
+}
+
+/** Delete everything the vault persists. Called only when the user (or a wipe threshold) asks. */
+export async function wipeStoredVault(storage: StorageAdapter): Promise<void> {
+  await storage.delete(STORAGE_KEYS.SEAL);
+  await storage.delete(STORAGE_KEYS.DEVICE_SECRET);
+  await resetBackoff(storage);
 }
 
 function publicInfoFor(seed: Uint8Array, accountIndex: number): PublicAccountInfo {
@@ -226,6 +192,7 @@ function createSession(
   seal: VaultSeal,
   storage: StorageAdapter,
   reauthWindowMs: number,
+  wipeAfterFailures: number,
 ): VaultSession {
   const state = { locked: false };
   // A function call (not a property read) so the type checker does not narrow the flag across awaits.
@@ -251,6 +218,16 @@ function createSession(
       }
       removeVisibilityListener();
     }
+  };
+
+  const recordAttempt = async (): Promise<ReauthResult | null> => {
+    const { count } = await recordFailedAttempt(storage);
+    if (wipeAfterFailures > 0 && count >= wipeAfterFailures) {
+      await wipeStoredVault(storage);
+      lock();
+      return { ok: false, error: 'wiped' };
+    }
+    return null;
   };
 
   const session: VaultSession = {
@@ -297,7 +274,8 @@ function createSession(
     async reauthenticate(passcode) {
       if (isLocked()) return { ok: false, error: 'locked' };
       revealable = null;
-      if ((await isBackoffActive(storage)) > 0) return { ok: false, error: 'rate_limited' };
+      const remaining = await isBackoffActive(storage);
+      if (remaining > 0) return { ok: false, error: 'rate_limited', retryAfterMs: remaining };
       const deviceSecret = await loadDeviceSecret(seal, storage);
       const result = await unsealVault(seal, passcode, deviceSecret);
       if (isLocked()) {
@@ -305,7 +283,10 @@ function createSession(
         return { ok: false, error: 'locked' };
       }
       if (!result.success) {
-        if (result.error === 'wrong_passcode') await recordFailedAttempt(storage);
+        if (result.error === 'wrong_passcode') {
+          const wiped = await recordAttempt();
+          if (wiped) return wiped;
+        }
         return { ok: false, error: result.error };
       }
       result.seed.fill(0);
@@ -331,41 +312,75 @@ function createSession(
   return Object.freeze(session);
 }
 
-/**
- * Unlock the vault and create a session. Only one session is active: unlocking replaces
- * (and locks) a previous one. Biometric unlock arrives with A6; rate-limit rework with A8.
- */
-export async function unlockSession(
+/** Guard the active session so re-auth cannot proceed across a lock. */
+function openSession(
+  seed: Uint8Array,
   seal: VaultSeal,
-  passcode: string,
   storage: StorageAdapter,
-  options: UnlockOptions = {},
-): Promise<
-  | { success: true; session: VaultSession }
-  | { success: false; error: VaultUnsealError | 'rate_limited' }
-> {
-  const remaining = await isBackoffActive(storage);
-  if (remaining > 0) return { success: false, error: 'rate_limited' };
-
-  const deviceSecret = await loadDeviceSecret(seal, storage);
-  const result = await unsealVault(seal, passcode, deviceSecret);
-  if (!result.success) {
-    await recordFailedAttempt(storage);
-    return { success: false, error: result.error };
-  }
-  await resetBackoff(storage);
-
+  options: UnlockOptions,
+): UnlockResult {
   lockSession();
   const session = createSession(
-    result.seed,
+    seed,
     seal,
     storage,
     options.reauthWindowMs ?? DEFAULT_REAUTH_WINDOW_MS,
+    options.wipeAfterFailures ?? 0,
   );
   activeSession = session;
   resetInactivityTimer();
   addVisibilityListener();
   return { success: true, session };
+}
+
+/**
+ * Unlock the vault with a passcode and create a session. Only one session is active: unlocking
+ * replaces (and locks) a previous one. Storage is mandatory and enforces the persisted backoff.
+ */
+export async function unlockSession(
+  seal: VaultSeal,
+  passcode: string,
+  storage: StorageAdapter | undefined,
+  options: UnlockOptions = {},
+): Promise<UnlockResult> {
+  if (!storage) return { success: false, error: 'storage_required' }; // fail closed
+  const remaining = await isBackoffActive(storage);
+  if (remaining > 0) return { success: false, error: 'rate_limited', retryAfterMs: remaining };
+
+  const deviceSecret = await loadDeviceSecret(seal, storage);
+  const result = await unsealVault(seal, passcode, deviceSecret);
+  if (!result.success) {
+    if (result.error === 'wrong_passcode') {
+      const { count } = await recordFailedAttempt(storage);
+      if ((options.wipeAfterFailures ?? 0) > 0 && count >= (options.wipeAfterFailures ?? 0)) {
+        await wipeStoredVault(storage);
+        return { success: false, error: 'wiped' };
+      }
+    }
+    return { success: false, error: result.error };
+  }
+  await resetBackoff(storage);
+  return openSession(result.seed, seal, storage, options);
+}
+
+/**
+ * Unlock with a biometric token returned by enableBiometric(). The device secret (if the seal
+ * requires one) is read from storage exactly as for passcode unlock.
+ */
+export async function unlockSessionWithBiometric(
+  seal: VaultSeal,
+  token: string,
+  storage: StorageAdapter | undefined,
+  options: UnlockOptions = {},
+): Promise<UnlockResult> {
+  if (!storage) return { success: false, error: 'storage_required' };
+  const remaining = await isBackoffActive(storage);
+  if (remaining > 0) return { success: false, error: 'rate_limited', retryAfterMs: remaining };
+  const deviceSecret = await loadDeviceSecret(seal, storage);
+  const result = await unlockWithBiometric(seal, token, deviceSecret);
+  if (!result.success) return { success: false, error: result.error };
+  await resetBackoff(storage);
+  return openSession(result.seed, seal, storage, options);
 }
 
 /** Lock the active session (zero-fills the seed, clears the re-auth window). */
@@ -381,10 +396,4 @@ export function touchSession(): void {
 /** The current session, or null if locked. */
 export function getSession(): VaultSession | null {
   return activeSession;
-}
-
-/** Internal for testing — get current backoff count */
-export async function getBackoffCount(storage: StorageAdapter): Promise<number> {
-  const countStr = await storage.get(STORAGE_KEYS.BACKOFF_COUNT);
-  return countStr ? parseInt(countStr, 10) : 0;
 }

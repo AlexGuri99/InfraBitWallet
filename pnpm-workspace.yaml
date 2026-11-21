@@ -8,3 +8,4 @@ allowBuilds:
 
 overrides:
   valibot: '>=1.4.2'
+  zod: '>=4.6.6'

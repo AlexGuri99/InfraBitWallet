@@ -1,17 +1,22 @@
 /**
  * Vault module — encrypts/decrypts the BIP-39 seed and mnemonic under a random vault key.
  *
- * Seal format (version 3):
+ * Seal format (version 4):
  * - A random 256-bit vault key encrypts the seed and the mnemonic (AES-256-GCM, WebCrypto),
  *   each with its own random 96-bit IV.
- * - The vault key is wrapped by a key derived from the passcode (Argon2id) and, when the
- *   seal has a device secret, an HKDF-SHA256 combination of the Argon2id output and the
- *   device secret. No stored copy of the vault key opens with the passcode alone in that case.
- * - EVERY ciphertext (seed, mnemonic, wrapped vault key) is authenticated with AAD that is
- *   RECOMPUTED at open time from: format version, Argon2id parameters, the device-secret
- *   flag and a role label ("vault-key" | "seed" | "mnemonic"). Nothing in the seal supplies
- *   the AAD. A ciphertext moved to another role, or opened under a different version or
- *   parameter set, fails GCM authentication.
+ * - The vault key is wrapped by a key derived from the passcode (Argon2id). When the seal has
+ *   a device secret, the Argon2id output is combined with the device secret using the
+ *   conventional HKDF-SHA256 form (RFC 5869): IKM is a length-prefixed concatenation of the
+ *   two, salt is a fixed domain-separation string, info is a role label. No stored copy of the
+ *   vault key opens with the passcode alone in that case.
+ * - An optional biometric wrap stores the vault key encrypted under a key derived from the
+ *   Telegram biometric token (HKDF-SHA256, distinct info string). The token itself is NEVER
+ *   stored by this module; the caller keeps it via BiometricManager.updateBiometricToken.
+ * - EVERY ciphertext (seed, mnemonic, wrapped vault key, biometric wrap) is authenticated with
+ *   AAD that is RECOMPUTED at open time from: format version, Argon2id parameters, the
+ *   device-secret flag and a role label ("vault-key" | "seed" | "mnemonic" | "biometric-key").
+ *   Nothing in the seal supplies the AAD. A ciphertext moved to another role, or opened under a
+ *   different version or parameter set, fails GCM authentication.
  *   Note: for the Argon2id parameters the key derivation output also changes, so a parameter
  *   edit is first seen as a failed key unwrap ("wrong_passcode"); the AAD binding is the
  *   second line of defence and is tested directly in vault.test.ts.
@@ -19,10 +24,21 @@
  *   (BIP-39, empty passphrase; passphrases are not supported).
  * - Parameters are bounds-checked BEFORE Argon2id runs (see KDF_BOUNDS).
  *
+ * Format history:
+ * - v1/v2: stored `aad` (JSON), key wrap without AAD. v1 has no stored mnemonic.
+ * - v3: recomputed AAD, but the device-secret combination used the *unconventional*
+ *   `HKDF(ikm=passcodeKey, salt=deviceSecret, info=label)` form.
+ * - v4: conventional HKDF (this file) + optional biometric wrap.
+ * migrateLegacySeal() upgrades v1–v3; the old combination is used only to open a v3 seal and
+ * nothing legacy is ever written back.
+ *
  * Sources:
  * - AES-GCM: NIST SP 800-38D; Web Crypto: https://www.w3.org/TR/WebCryptoAPI/
- * - Argon2id: RFC 9106; HKDF: RFC 5869
+ * - Argon2id: RFC 9106; HKDF: RFC 5869 — https://www.rfc-editor.org/rfc/rfc5869
  * - hash-wasm: https://github.com/Daninet/hash-wasm (MIT)
+ * - Telegram BiometricManager / SecureStorage: https://core.telegram.org/bots/webapps
+ *   (fetched 2026-11-21: BiometricManager since Bot API 7.2; SecureStorage since 9.0,
+ *   Keychain on iOS / Keystore on Android, up to 10 items per bot per user)
  */
 import { argon2id } from 'hash-wasm';
 import { hkdf } from '@noble/hashes/hkdf';
@@ -46,7 +62,7 @@ export const DEFAULT_VAULT_CONFIG: Required<VaultConfig> = {
 };
 
 /** Current seal format version. */
-export const VAULT_FORMAT_VERSION = 3;
+export const VAULT_FORMAT_VERSION = 4;
 
 /**
  * Accepted Argon2id parameter ranges. These numbers are OUR choice, not an external
@@ -60,9 +76,17 @@ export const KDF_BOUNDS = {
   argon2Parallelism: { min: 1, max: 4 },
 } as const;
 
+/** Fixed domain-separation salt for the device-secret HKDF (RFC 5869 style, not a secret). */
+export const HKDF_SALT = 'onezerowallet/vault/v4/hkdf-salt';
+export const HKDF_INFO_VAULT_KEY = 'vault-key-wrap';
+export const HKDF_INFO_BIOMETRIC = 'biometric-vault-key-wrap';
+/** Salt for the biometric-token HKDF (distinct domain). */
+export const BIOMETRIC_HKDF_SALT = 'onezerowallet/vault/v4/biometric-salt';
+
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const DEVICE_SECRET_BYTES = 32;
+const BIOMETRIC_TOKEN_BYTES = 32;
 const SEED_BYTES = 64;
 const GCM_TAG_BYTES = 16;
 const WRAPPED_KEY_BYTES = IV_BYTES + 32 + GCM_TAG_BYTES;
@@ -71,7 +95,7 @@ const MNEMONIC_CT_MIN_BYTES = 1 + GCM_TAG_BYTES;
 const MNEMONIC_CT_MAX_BYTES = 1024;
 
 /**
- * VaultSeal v3 — the persisted envelope (all binary fields are hex strings).
+ * VaultSeal v4 — the persisted envelope (all binary fields are hex strings).
  * There is deliberately no `aad` field: AAD is recomputed (see header).
  */
 export interface VaultSeal {
@@ -80,6 +104,8 @@ export interface VaultSeal {
   passcodeWrappedKey: string;
   /** True if the device secret is required. */
   hasDeviceSecret: boolean;
+  /** Optional biometric wrap of the vault key: iv(12) || ct(32) || tag(16). */
+  biometricWrappedKey?: string;
   /** AES-GCM encrypted 64-byte seed (+ tag). */
   encryptedSeed: string;
   /** IV for encryptedSeed (12 bytes). */
@@ -95,7 +121,10 @@ export interface VaultSeal {
   argon2Parallelism: number;
 }
 
-/** Pre-v3 seal (versions 1 and 2): carries a stored `aad`, wrap has no AAD. Migration input only. */
+/**
+ * Pre-v4 seal (versions 1–3). v1/v2 carry a stored `aad` and a wrap without AAD;
+ * v3 has no `aad` but used the old HKDF combination. Migration input only.
+ */
 export interface LegacyVaultSeal {
   version: number;
   passcodeWrappedKey: string;
@@ -103,7 +132,7 @@ export interface LegacyVaultSeal {
   biometricWrappedKey?: string;
   encryptedSeed: string;
   iv: string;
-  aad: string;
+  aad?: string;
   passcodeSalt: string;
   argon2TimeCost: number;
   argon2MemoryCost: number;
@@ -120,7 +149,9 @@ export type VaultUnsealError =
   | 'malformed_seal'
   | 'unsupported_version'
   | 'invalid_params'
-  | 'seed_mnemonic_mismatch';
+  | 'seed_mnemonic_mismatch'
+  | 'biometric_not_enabled'
+  | 'invalid_biometric_token';
 
 export type VaultUnlockResult =
   | { success: true; seed: Uint8Array; mnemonic: string }
@@ -154,6 +185,14 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
   out.set(b, a.length);
+  return out;
+}
+
+/** 4-byte big-endian length prefix, so HKDF IKM components cannot be shifted into each other. */
+function lengthPrefixed(b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(4 + b.length);
+  new DataView(out.buffer).setUint32(0, b.length, false);
+  out.set(b, 4);
   return out;
 }
 
@@ -221,7 +260,7 @@ async function aesDecrypt(
 // AAD
 // ---------------------------------------------------------------------------
 
-export type AadRole = 'vault-key' | 'seed' | 'mnemonic';
+export type AadRole = 'vault-key' | 'seed' | 'mnemonic' | 'biometric-key';
 
 /**
  * Build the AAD for one ciphertext. Always called with values the verifier trusts
@@ -272,9 +311,50 @@ async function derivePasscodeKey(
   }
 }
 
-/** HKDF-SHA256(ikm = passcodeKey, salt = deviceSecret, info = fixed label). Reworked in A10. */
-function combineWithDeviceSecret(passcodeKey: Uint8Array, deviceSecret: Uint8Array): Uint8Array {
+/**
+ * Combine the Argon2id output with the device secret using the conventional HKDF-SHA256 form
+ * (RFC 5869): IKM = len(passcodeKey) || passcodeKey || len(deviceSecret) || deviceSecret,
+ * salt = fixed domain-separation string, info = role label.
+ * Exported for tests only; not part of the package's public API (index.ts).
+ */
+export function combineWithDeviceSecret(
+  passcodeKey: Uint8Array,
+  deviceSecret: Uint8Array,
+): Uint8Array {
+  const ikm = concat(lengthPrefixed(passcodeKey), lengthPrefixed(deviceSecret));
+  try {
+    return hkdf(sha256, ikm, new TextEncoder().encode(HKDF_SALT), HKDF_INFO_VAULT_KEY, 32);
+  } finally {
+    ikm.fill(0);
+  }
+}
+
+/** v3's unconventional combination. Used ONLY to open a legacy v3 seal. */
+function legacyV3Combine(passcodeKey: Uint8Array, deviceSecret: Uint8Array): Uint8Array {
   return hkdf(sha256, passcodeKey, deviceSecret, 'onezerowallet-vault-combined', 32);
+}
+
+/**
+ * Key that wraps the vault key with a biometric token (HKDF-SHA256, distinct domain). When the
+ * seal also has a device secret it is mixed into the IKM, so the biometric wrap still needs the
+ * device binding and a wrong device secret fails GCM authentication.
+ */
+function biometricWrapKeyFromToken(token: Uint8Array, deviceSecret?: Uint8Array): Uint8Array {
+  const ikm =
+    deviceSecret === undefined
+      ? token
+      : concat(lengthPrefixed(token), lengthPrefixed(deviceSecret));
+  try {
+    return hkdf(
+      sha256,
+      ikm,
+      new TextEncoder().encode(BIOMETRIC_HKDF_SALT),
+      HKDF_INFO_BIOMETRIC,
+      32,
+    );
+  } finally {
+    if (deviceSecret !== undefined) ikm.fill(0);
+  }
 }
 
 async function deriveWrappingKey(
@@ -291,6 +371,20 @@ async function deriveWrappingKey(
   return combined;
 }
 
+async function deriveLegacyV3WrappingKey(
+  passcode: string,
+  salt: Uint8Array,
+  params: Required<VaultConfig>,
+  deviceSecret: Uint8Array | undefined,
+): Promise<Uint8Array | null> {
+  const passcodeKey = await derivePasscodeKey(passcode, salt, params);
+  if (passcodeKey === null) return null;
+  if (deviceSecret === undefined) return passcodeKey;
+  const combined = legacyV3Combine(passcodeKey, deviceSecret);
+  passcodeKey.fill(0);
+  return combined;
+}
+
 // ---------------------------------------------------------------------------
 // Seal parsing (strict; nothing is trusted from storage)
 // ---------------------------------------------------------------------------
@@ -301,6 +395,7 @@ interface ParsedSeal {
   params: Required<VaultConfig>;
   salt: Uint8Array;
   wrappedKey: Uint8Array;
+  biometricWrappedKey: Uint8Array | null;
   seedIv: Uint8Array;
   seedCt: Uint8Array;
   mnemonicIv: Uint8Array;
@@ -324,6 +419,46 @@ function readParams(s: Record<string, unknown>): Required<VaultConfig> | null {
   };
 }
 
+/** Parse the v3/v4 field set (identical apart from the optional biometric wrap). */
+function parseSealBody(s: Record<string, unknown>, version: number): ParsedSeal | null {
+  const hasDeviceSecret = s['hasDeviceSecret'];
+  if (typeof hasDeviceSecret !== 'boolean') return null;
+
+  const params = readParams(s);
+  if (params === null) return null;
+
+  const salt = parseHex(s['passcodeSalt'], SALT_BYTES);
+  const wrappedKey = parseHex(s['passcodeWrappedKey'], WRAPPED_KEY_BYTES);
+  const seedIv = parseHex(s['iv'], IV_BYTES);
+  const seedCt = parseHex(s['encryptedSeed'], SEED_CT_BYTES);
+  const mnemonicIv = parseHex(s['mnemonicIv'], IV_BYTES);
+  const mnemonicCt = parseHex(s['encryptedMnemonic']);
+  if (!salt || !wrappedKey || !seedIv || !seedCt || !mnemonicIv || !mnemonicCt) return null;
+  if (mnemonicCt.length < MNEMONIC_CT_MIN_BYTES || mnemonicCt.length > MNEMONIC_CT_MAX_BYTES) {
+    return null;
+  }
+
+  const bioRaw = s['biometricWrappedKey'];
+  const bio = bioRaw === undefined ? null : parseHex(bioRaw, WRAPPED_KEY_BYTES);
+  if (bioRaw !== undefined && !bio) return null;
+
+  // Bounds are checked before any KDF work.
+  if (!paramsInBounds(params)) return null;
+
+  return {
+    version,
+    hasDeviceSecret,
+    params,
+    salt,
+    wrappedKey,
+    biometricWrappedKey: bio,
+    seedIv,
+    seedCt,
+    mnemonicIv,
+    mnemonicCt,
+  };
+}
+
 function parseSeal(input: unknown): { ok: true; seal: ParsedSeal } | ParseFailure {
   const malformed: ParseFailure = { ok: false, error: 'malformed_seal' };
   if (typeof input !== 'object' || input === null) return malformed;
@@ -333,40 +468,15 @@ function parseSeal(input: unknown): { ok: true; seal: ParsedSeal } | ParseFailur
   if (typeof version !== 'number' || !Number.isInteger(version)) return malformed;
   if (version !== VAULT_FORMAT_VERSION) return { ok: false, error: 'unsupported_version' };
 
-  const hasDeviceSecret = s['hasDeviceSecret'];
-  if (typeof hasDeviceSecret !== 'boolean') return malformed;
-
-  const params = readParams(s);
-  if (params === null) return malformed;
-
-  const salt = parseHex(s['passcodeSalt'], SALT_BYTES);
-  const wrappedKey = parseHex(s['passcodeWrappedKey'], WRAPPED_KEY_BYTES);
-  const seedIv = parseHex(s['iv'], IV_BYTES);
-  const seedCt = parseHex(s['encryptedSeed'], SEED_CT_BYTES);
-  const mnemonicIv = parseHex(s['mnemonicIv'], IV_BYTES);
-  const mnemonicCt = parseHex(s['encryptedMnemonic']);
-  if (!salt || !wrappedKey || !seedIv || !seedCt || !mnemonicIv || !mnemonicCt) return malformed;
-  if (mnemonicCt.length < MNEMONIC_CT_MIN_BYTES || mnemonicCt.length > MNEMONIC_CT_MAX_BYTES) {
+  const body = parseSealBody(s, version);
+  if (body === null) {
+    // Distinguish an out-of-bounds parameter set from a malformed envelope so callers and tests
+    // can assert the specific reason.
+    const params = readParams(s);
+    if (params !== null && !paramsInBounds(params)) return { ok: false, error: 'invalid_params' };
     return malformed;
   }
-
-  // Bounds are checked before any KDF work.
-  if (!paramsInBounds(params)) return { ok: false, error: 'invalid_params' };
-
-  return {
-    ok: true,
-    seal: {
-      version,
-      hasDeviceSecret,
-      params,
-      salt,
-      wrappedKey,
-      seedIv,
-      seedCt,
-      mnemonicIv,
-      mnemonicCt,
-    },
-  };
+  return { ok: true, seal: body };
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +570,51 @@ export async function createSeal(
 }
 
 /**
- * Open a v3 seal. INTERNAL: returns the seed, so it is not exported from index.ts.
+ * Decrypt the seed and mnemonic using an already-unwrapped vault key. Verifies that the
+ * mnemonic regenerates the seed. Returns a fresh seed buffer (the caller owns it).
+ */
+async function openPayload(p: ParsedSeal, vaultKey: Uint8Array): Promise<VaultUnlockResult> {
+  let seed: Uint8Array;
+  let mnemonicBytes: Uint8Array;
+  try {
+    seed = await aesDecrypt(
+      p.seedCt,
+      vaultKey,
+      p.seedIv,
+      buildAad('seed', p.version, p.hasDeviceSecret, p.params),
+    );
+    mnemonicBytes = await aesDecrypt(
+      p.mnemonicCt,
+      vaultKey,
+      p.mnemonicIv,
+      buildAad('mnemonic', p.version, p.hasDeviceSecret, p.params),
+    );
+  } catch {
+    return { success: false, error: 'tampered_data' };
+  }
+
+  let mnemonic: string;
+  try {
+    mnemonic = new TextDecoder('utf-8', { fatal: true }).decode(mnemonicBytes);
+  } catch {
+    seed.fill(0);
+    return { success: false, error: 'tampered_data' };
+  } finally {
+    mnemonicBytes.fill(0);
+  }
+
+  const derived = mnemonicToSeed(normalizeMnemonic(mnemonic));
+  const matches = constantTimeEqual(derived, seed);
+  derived.fill(0);
+  if (!matches) {
+    seed.fill(0);
+    return { success: false, error: 'seed_mnemonic_mismatch' };
+  }
+  return { success: true, seed, mnemonic };
+}
+
+/**
+ * Open a v4 seal. INTERNAL: returns the seed, so it is not exported from index.ts.
  * Checks, in order: seal shape/version, parameter bounds (all BEFORE Argon2id), device
  * secret presence, key unwrap, seed and mnemonic decryption, and finally that the mnemonic
  * regenerates the seed.
@@ -483,8 +637,6 @@ export async function unsealVault(
 
   let wrappingKey: Uint8Array | null = null;
   let vaultKey: Uint8Array | null = null;
-  let seed: Uint8Array | null = null;
-  let handedOver = false;
   try {
     wrappingKey = await deriveWrappingKey(
       passcode,
@@ -506,50 +658,150 @@ export async function unsealVault(
       return { success: false, error: 'wrong_passcode' };
     }
 
-    let mnemonicBytes: Uint8Array;
-    try {
-      seed = await aesDecrypt(
-        p.seedCt,
-        vaultKey,
-        p.seedIv,
-        buildAad('seed', p.version, p.hasDeviceSecret, p.params),
-      );
-      mnemonicBytes = await aesDecrypt(
-        p.mnemonicCt,
-        vaultKey,
-        p.mnemonicIv,
-        buildAad('mnemonic', p.version, p.hasDeviceSecret, p.params),
-      );
-    } catch {
-      return { success: false, error: 'tampered_data' };
-    }
-
-    let mnemonic: string;
-    try {
-      mnemonic = new TextDecoder('utf-8', { fatal: true }).decode(mnemonicBytes);
-    } catch {
-      return { success: false, error: 'tampered_data' };
-    } finally {
-      mnemonicBytes.fill(0);
-    }
-
-    const derived = mnemonicToSeed(normalizeMnemonic(mnemonic));
-    const matches = constantTimeEqual(derived, seed);
-    derived.fill(0);
-    if (!matches) return { success: false, error: 'seed_mnemonic_mismatch' };
-
-    handedOver = true;
-    return { success: true, seed, mnemonic };
+    return await openPayload(p, vaultKey);
   } finally {
     wrappingKey?.fill(0);
     vaultKey?.fill(0);
-    if (!handedOver) seed?.fill(0);
   }
 }
 
+// ---------------------------------------------------------------------------
+// Biometrics (A6)
+// ---------------------------------------------------------------------------
+
+export type EnableBiometricResult =
+  { ok: true; seal: VaultSeal; token: string } | { ok: false; error: VaultUnsealError };
+
 /**
- * Re-seal under a new passcode. The vault key is regenerated (new salt, new IVs).
- * (Return type is reworked to a discriminated result in A10.)
+ * Add a biometric wrap to a seal. Unwraps the vault key with the passcode (and device secret
+ * if required), generates a fresh 32-byte biometric token, wraps the vault key with a key
+ * derived from that token via HKDF-SHA256 (random IV stored in the blob, role-labelled AAD),
+ * and returns the new seal plus the token.
+ *
+ * The token is NOT persisted by this module. The caller must store it with
+ * BiometricManager.updateBiometricToken (Telegram keeps it in device secure storage, gated by
+ * a successful biometric check — https://core.telegram.org/bots/webapps).
+ */
+export async function enableBiometric(
+  seal: VaultSeal,
+  passcode: string,
+  deviceSecret?: Uint8Array,
+): Promise<EnableBiometricResult> {
+  const parsed = parseSeal(seal);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const p = parsed.seal;
+  if (
+    p.hasDeviceSecret &&
+    (deviceSecret === undefined || deviceSecret.length !== DEVICE_SECRET_BYTES)
+  ) {
+    return { ok: false, error: 'device_secret_missing' };
+  }
+
+  let wrappingKey: Uint8Array | null = null;
+  let vaultKey: Uint8Array | null = null;
+  let bioKey: Uint8Array | null = null;
+  try {
+    wrappingKey = await deriveWrappingKey(
+      passcode,
+      p.salt,
+      p.params,
+      p.hasDeviceSecret ? deviceSecret : undefined,
+    );
+    if (wrappingKey === null) return { ok: false, error: 'kdf_unavailable' };
+    try {
+      vaultKey = await aesDecrypt(
+        p.wrappedKey.slice(IV_BYTES),
+        wrappingKey,
+        p.wrappedKey.slice(0, IV_BYTES),
+        buildAad('vault-key', p.version, p.hasDeviceSecret, p.params),
+      );
+    } catch {
+      return { ok: false, error: 'wrong_passcode' };
+    }
+
+    const token = globalThis.crypto.getRandomValues(new Uint8Array(BIOMETRIC_TOKEN_BYTES));
+    bioKey = biometricWrapKeyFromToken(token, p.hasDeviceSecret ? deviceSecret : undefined);
+    const wrapEnc = await aesEncrypt(
+      vaultKey,
+      bioKey,
+      buildAad('biometric-key', p.version, p.hasDeviceSecret, p.params),
+    );
+    return {
+      ok: true,
+      seal: { ...seal, biometricWrappedKey: bytesToHex(concat(wrapEnc.iv, wrapEnc.ciphertext)) },
+      token: bytesToHex(token),
+    };
+  } finally {
+    wrappingKey?.fill(0);
+    vaultKey?.fill(0);
+    bioKey?.fill(0);
+  }
+}
+
+/** Remove the biometric wrap. The vault key is unchanged, so the passcode still works. */
+export function disableBiometric(seal: VaultSeal): VaultSeal {
+  const next: VaultSeal = { ...seal };
+  delete next.biometricWrappedKey;
+  return next;
+}
+
+/**
+ * Open a seal using a biometric token previously returned by enableBiometric(). When the seal
+ * has a device secret, that secret is still required: the biometric factor is an additional
+ * convenience gate, not a replacement for device binding (documented in VAULT_DESIGN.md).
+ */
+export async function unlockWithBiometric(
+  seal: VaultSeal,
+  tokenHex: string,
+  deviceSecret?: Uint8Array,
+): Promise<VaultUnlockResult> {
+  const parsed = parseSeal(seal);
+  if (!parsed.ok) return { success: false, error: parsed.error };
+  const p = parsed.seal;
+  if (p.biometricWrappedKey === null) {
+    return { success: false, error: 'biometric_not_enabled' };
+  }
+  if (
+    p.hasDeviceSecret &&
+    (deviceSecret === undefined || deviceSecret.length !== DEVICE_SECRET_BYTES)
+  ) {
+    return { success: false, error: 'device_secret_missing' };
+  }
+  const token = parseHex(tokenHex, BIOMETRIC_TOKEN_BYTES);
+  if (token === null) return { success: false, error: 'invalid_biometric_token' };
+
+  let bioKey: Uint8Array | null = null;
+  let vaultKey: Uint8Array | null = null;
+  try {
+    bioKey = biometricWrapKeyFromToken(token, p.hasDeviceSecret ? deviceSecret : undefined);
+    try {
+      vaultKey = await aesDecrypt(
+        p.biometricWrappedKey.slice(IV_BYTES),
+        bioKey,
+        p.biometricWrappedKey.slice(0, IV_BYTES),
+        buildAad('biometric-key', p.version, p.hasDeviceSecret, p.params),
+      );
+    } catch {
+      return { success: false, error: 'wrong_passcode' };
+    }
+    return await openPayload(p, vaultKey);
+  } finally {
+    bioKey?.fill(0);
+    vaultKey?.fill(0);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Passcode change
+// ---------------------------------------------------------------------------
+
+export type ChangePasscodeResult =
+  { ok: true; seal: VaultSeal } | { ok: false; error: VaultUnsealError };
+
+/**
+ * Re-seal under a new passcode. The vault key is regenerated (new salt, new IVs) and any
+ * biometric wrap is dropped: its token was bound to the old vault key, so it must be
+ * re-enabled by the caller after a successful passcode change.
  */
 export async function changePasscode(
   seal: VaultSeal,
@@ -557,31 +809,43 @@ export async function changePasscode(
   newPasscode: string,
   deviceSecret?: Uint8Array,
   config?: VaultConfig,
-): Promise<VaultSeal | VaultUnlockResult> {
+): Promise<ChangePasscodeResult> {
   const unsealed = await unsealVault(seal, oldPasscode, deviceSecret);
-  if (!unsealed.success) return unsealed;
+  if (!unsealed.success) return { ok: false, error: unsealed.error };
   try {
-    return await sealVault(unsealed.seed, unsealed.mnemonic, newPasscode, deviceSecret, config);
+    const next = await sealVault(
+      unsealed.seed,
+      unsealed.mnemonic,
+      newPasscode,
+      deviceSecret,
+      config,
+    );
+    return { ok: true, seal: next };
   } finally {
     unsealed.seed.fill(0);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Legacy (v1/v2) migration
+// Legacy (v1–v3) migration
 // ---------------------------------------------------------------------------
 
 export type MigrateError = VaultUnsealError | 'mnemonic_required';
 export type MigrateResult = { ok: true; seal: VaultSeal } | { ok: false; error: MigrateError };
 
+function legacyFailure(error: MigrateError): MigrateResult {
+  return { ok: false, error };
+}
+
 /**
- * Migrate a v1 or v2 seal (stored `aad`, unauthenticated key wrap) to the current format.
+ * Migrate a v1, v2 or v3 seal to the current format.
  *
- * - v2 carries its own mnemonic.
- * - v1 never stored one, so the caller must supply the user's recovery phrase; it must
+ * - v1: stored `aad`, no stored mnemonic, so the caller must supply the recovery phrase; it must
  *   regenerate the stored seed ('seed_mnemonic_mismatch' otherwise, 'mnemonic_required' if absent).
+ * - v2: stored `aad` + its own mnemonic.
+ * - v3: recomputed AAD + the old device-secret combination; needs no phrase.
  * The legacy Argon2id parameters must satisfy KDF_BOUNDS (checked before any KDF work).
- * Legacy biometric wraps were non-functional and are dropped (re-enable via the new flow).
+ * Legacy biometric wraps were non-functional or bound to the old vault key and are dropped.
  */
 export async function migrateLegacySeal(
   legacy: LegacyVaultSeal,
@@ -589,27 +853,32 @@ export async function migrateLegacySeal(
   deviceSecret?: Uint8Array,
   mnemonic?: string,
 ): Promise<MigrateResult> {
-  const fail = (error: MigrateError): MigrateResult => ({ ok: false, error });
   const s = legacy as unknown as Record<string, unknown>;
 
   const version = s['version'];
-  if (version !== 1 && version !== 2) return fail('unsupported_version');
+  if (version !== 1 && version !== 2 && version !== 3) {
+    return legacyFailure('unsupported_version');
+  }
   const hasDeviceSecret = s['hasDeviceSecret'];
-  if (typeof hasDeviceSecret !== 'boolean') return fail('malformed_seal');
+  if (typeof hasDeviceSecret !== 'boolean') return legacyFailure('malformed_seal');
   const params = readParams(s);
-  if (params === null) return fail('malformed_seal');
+  if (params === null) return legacyFailure('malformed_seal');
 
   const salt = parseHex(s['passcodeSalt'], SALT_BYTES);
   const wrappedKey = parseHex(s['passcodeWrappedKey'], WRAPPED_KEY_BYTES);
   const seedIv = parseHex(s['iv'], IV_BYTES);
   const seedCt = parseHex(s['encryptedSeed'], SEED_CT_BYTES);
-  const aad = parseHex(s['aad']);
-  if (!salt || !wrappedKey || !seedIv || !seedCt || !aad || aad.length > 256) {
-    return fail('malformed_seal');
+  let storedAad: Uint8Array | null = null;
+  if (version === 1 || version === 2) {
+    const aad = parseHex(s['aad']);
+    if (!aad || aad.length > 256) return legacyFailure('malformed_seal');
+    storedAad = aad;
   }
+  if (!salt || !wrappedKey || !seedIv || !seedCt) return legacyFailure('malformed_seal');
+
   let storedMnemonicIv: Uint8Array | null = null;
   let storedMnemonicCt: Uint8Array | null = null;
-  if (version === 2) {
+  if (version === 2 || version === 3) {
     storedMnemonicIv = parseHex(s['mnemonicIv'], IV_BYTES);
     storedMnemonicCt = parseHex(s['encryptedMnemonic']);
     if (
@@ -618,60 +887,70 @@ export async function migrateLegacySeal(
       storedMnemonicCt.length < MNEMONIC_CT_MIN_BYTES ||
       storedMnemonicCt.length > MNEMONIC_CT_MAX_BYTES
     ) {
-      return fail('malformed_seal'); // v2 without mnemonic fields: no silent downgrade
+      return legacyFailure('malformed_seal'); // no silent downgrade
     }
   }
-  if (!paramsInBounds(params)) return fail('invalid_params');
+  if (!paramsInBounds(params)) return legacyFailure('invalid_params');
   if (
     hasDeviceSecret &&
     (deviceSecret === undefined || deviceSecret.length !== DEVICE_SECRET_BYTES)
   ) {
-    return fail('device_secret_missing');
+    return legacyFailure('device_secret_missing');
   }
 
   let wrappingKey: Uint8Array | null = null;
   let vaultKey: Uint8Array | null = null;
   let seed: Uint8Array | null = null;
   try {
-    wrappingKey = await deriveWrappingKey(
+    // Every legacy version was written with the old combination; v4 is the first to use
+    // conventional HKDF.
+    wrappingKey = await deriveLegacyV3WrappingKey(
       passcode,
       salt,
       params,
       hasDeviceSecret ? deviceSecret : undefined,
     );
-    if (wrappingKey === null) return fail('kdf_unavailable');
+    if (wrappingKey === null) return legacyFailure('kdf_unavailable');
 
     try {
-      // Legacy wrap was encrypted without AAD.
       vaultKey = await aesDecrypt(
         wrappedKey.slice(IV_BYTES),
         wrappingKey,
         wrappedKey.slice(0, IV_BYTES),
-        new Uint8Array(0),
+        version === 3 ? buildAad('vault-key', version, hasDeviceSecret, params) : new Uint8Array(0),
       );
     } catch {
-      return fail('wrong_passcode');
+      return legacyFailure('wrong_passcode');
     }
 
     let recovered: string | undefined;
     try {
-      seed = await aesDecrypt(seedCt, vaultKey, seedIv, aad);
+      const seedAad =
+        version === 3
+          ? buildAad('seed', version, hasDeviceSecret, params)
+          : (storedAad as Uint8Array);
+      seed = await aesDecrypt(seedCt, vaultKey, seedIv, seedAad);
       if (storedMnemonicCt && storedMnemonicIv) {
-        const bytes = await aesDecrypt(storedMnemonicCt, vaultKey, storedMnemonicIv, aad);
+        const mnAad =
+          version === 3
+            ? buildAad('mnemonic', version, hasDeviceSecret, params)
+            : (storedAad as Uint8Array);
+        const bytes = await aesDecrypt(storedMnemonicCt, vaultKey, storedMnemonicIv, mnAad);
         recovered = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         bytes.fill(0);
       }
     } catch {
-      return fail('tampered_data');
+      return legacyFailure('tampered_data');
     }
 
     const phrase = recovered ?? mnemonic;
-    if (phrase === undefined) return fail('mnemonic_required');
+    if (phrase === undefined) return legacyFailure('mnemonic_required');
     const normalized = normalizeMnemonic(phrase);
+    if (!validateMnemonicPhrase(normalized).valid) return legacyFailure('mnemonic_required');
     const derived = mnemonicToSeed(normalized);
     const matches = constantTimeEqual(derived, seed);
     derived.fill(0);
-    if (!matches) return fail('seed_mnemonic_mismatch');
+    if (!matches) return legacyFailure('seed_mnemonic_mismatch');
 
     const newSeal = await sealVault(seed, normalized, passcode, deviceSecret, params);
     return { ok: true, seal: newSeal };
@@ -683,17 +962,171 @@ export async function migrateLegacySeal(
 }
 
 // ---------------------------------------------------------------------------
-// Passcode policy (reworked in A7)
+// Passcode policy (A7)
 // ---------------------------------------------------------------------------
 
-export function evaluatePasscodeStrength(passcode: string, hasDeviceSecretWrap: boolean): string {
-  if (passcode.length < (hasDeviceSecretWrap ? 4 : 8)) {
-    return hasDeviceSecretWrap
-      ? 'Passcode must be at least 4 characters'
-      : 'Without device-secret locking, passcode must be at least 8 characters';
+/**
+ * Result of evaluating a passcode. `unprotectedByDeviceSecret` is true when no device secret is
+ * available: the seal can then be attacked offline if its ciphertext is copied, so the UI MUST
+ * show a warning.
+ */
+export interface PasscodePolicy {
+  ok: boolean;
+  /** Human-readable reason when `ok` is false. Never contains the passcode. */
+  error?: string;
+  /** True when the vault has no device-secret factor (weaker protection, show a warning). */
+  unprotectedByDeviceSecret: boolean;
+  /** What kind of input the policy treated this as. */
+  kind: 'pin' | 'passphrase';
+  minLength: number;
+}
+
+const PASSPHRASE_BLOCKLIST = new Set([
+  'password',
+  'password1',
+  'password123',
+  'passw0rd',
+  'qwertyuiop',
+  'qwertyuiop123',
+  'qwerty123456',
+  'password12345',
+  'letmein',
+  'iloveyou',
+  'admin',
+  'welcome',
+  'monkey',
+  'dragon',
+  'football',
+  'baseball',
+  'sunshine',
+  'princess',
+  'trustno1',
+  '123456789',
+  '1234567890',
+  '123456789012',
+  'abcdefgh',
+  'abcd1234',
+  'correcthorsebatterystaple',
+]);
+
+/** True for a PIN that is all one digit or a straight ascending/descending run. */
+function isWeakPin(pin: string): boolean {
+  if (/^(\d)\1+$/.test(pin)) return true;
+  const ascending = '01234567890123456789';
+  const descending = '98765432109876543210';
+  return ascending.includes(pin) || descending.includes(pin);
+}
+
+/**
+ * Passcode policy.
+ *
+ * - With a device secret: a 6+ digit PIN or an 8+ character passphrase, trivially weak PINs
+ *   rejected. The PIN is only as strong as the secrecy of the device secret (Keychain/Keystore).
+ * - Without a device secret: at least 12 characters and not on a small embedded blocklist.
+ *   The UI must surface `unprotectedByDeviceSecret`.
+ *
+ * Argon2id parameters are NOT part of this policy; measure them with measureKdf().
+ */
+export function evaluatePasscodeStrength(
+  passcode: string,
+  hasDeviceSecretWrap: boolean,
+): PasscodePolicy {
+  const isPin = /^\d+$/.test(passcode);
+  const unprotectedByDeviceSecret = !hasDeviceSecretWrap;
+
+  if (hasDeviceSecretWrap) {
+    if (isPin) {
+      if (passcode.length < 6) {
+        return {
+          ok: false,
+          error: 'PIN must be at least 6 digits',
+          unprotectedByDeviceSecret,
+          kind: 'pin',
+          minLength: 6,
+        };
+      }
+      if (isWeakPin(passcode)) {
+        return {
+          ok: false,
+          error: 'PIN is too easy to guess (repeated or sequential digits)',
+          unprotectedByDeviceSecret,
+          kind: 'pin',
+          minLength: 6,
+        };
+      }
+      return { ok: true, unprotectedByDeviceSecret, kind: 'pin', minLength: 6 };
+    }
+    if (passcode.length < 8) {
+      return {
+        ok: false,
+        error: 'Passcode must be at least 8 characters',
+        unprotectedByDeviceSecret,
+        kind: 'passphrase',
+        minLength: 8,
+      };
+    }
+    return { ok: true, unprotectedByDeviceSecret, kind: 'passphrase', minLength: 8 };
   }
-  if (!hasDeviceSecretWrap && !/\d/.test(passcode)) {
-    return 'Without device-secret locking, passcode should include at least one digit';
+
+  if (passcode.length < 12) {
+    return {
+      ok: false,
+      error: 'Without device-secret locking, use a passphrase of at least 12 characters',
+      unprotectedByDeviceSecret,
+      kind: 'passphrase',
+      minLength: 12,
+    };
   }
-  return '';
+  if (PASSPHRASE_BLOCKLIST.has(passcode.trim().toLowerCase())) {
+    return {
+      ok: false,
+      error: 'This passphrase is too common; choose another',
+      unprotectedByDeviceSecret,
+      kind: 'passphrase',
+      minLength: 12,
+    };
+  }
+  return { ok: true, unprotectedByDeviceSecret, kind: 'passphrase', minLength: 12 };
+}
+
+// ---------------------------------------------------------------------------
+// KDF benchmark helper (A7)
+// ---------------------------------------------------------------------------
+
+export interface KdfMeasurement {
+  /** Wall-clock time of one Argon2id derivation, in milliseconds. */
+  ms: number;
+  argon2TimeCost: number;
+  argon2MemoryCost: number;
+  argon2Parallelism: number;
+}
+
+/**
+ * Measure an Argon2id derivation so the app can choose parameters on first setup, within
+ * KDF_BOUNDS. Runs with a fixed non-secret password and a random salt; the result is timing
+ * data only and reveals nothing about the user's passcode. Throws Error('KDF_UNAVAILABLE') if
+ * WebAssembly is unavailable.
+ *
+ * The timing is device- and WebView-specific; do not treat it as a constant.
+ */
+export async function measureKdf(
+  config?: VaultConfig,
+  rounds: number = 1,
+): Promise<KdfMeasurement> {
+  const params = { ...DEFAULT_VAULT_CONFIG, ...config };
+  if (!paramsInBounds(params)) throw new Error('INVALID_KDF_PARAMS');
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const start = performance.now();
+  for (let i = 0; i < Math.max(1, Math.floor(rounds)); i++) {
+    const key = await derivePasscodeKey('kdf-benchmark-not-a-secret', salt, params);
+    if (key === null) throw new Error('KDF_UNAVAILABLE');
+    key.fill(0);
+  }
+  const ms = (performance.now() - start) / Math.max(1, Math.floor(rounds));
+  return {
+    ms,
+    argon2TimeCost: params.argon2TimeCost,
+    argon2MemoryCost: params.argon2MemoryCost,
+    argon2Parallelism: params.argon2Parallelism,
+  };
 }

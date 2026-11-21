@@ -87,10 +87,18 @@ export function validateMnemonicPhrase(phrase: string): MnemonicValidation {
   }
 
   const wordlistSet = new Set(WORDLIST);
-  const unknownWords = words.filter((w) => !wordlistSet.has(w));
-  if (unknownWords.length > 0) {
+  // Report POSITIONS only. Never echo a user-typed word: the phrase is the master secret and a
+  // validation error must not end up in logs, analytics or crash reports.
+  const unknownPositions: number[] = [];
+  words.forEach((w, index) => {
+    if (!wordlistSet.has(w)) unknownPositions.push(index + 1);
+  });
+  if (unknownPositions.length > 0) {
+    const shown = unknownPositions.slice(0, 5).join(', ');
+    const more =
+      unknownPositions.length > 5 ? ` and ${String(unknownPositions.length - 5)} more` : '';
     errors.push(
-      `Unknown words: ${unknownWords.slice(0, 3).join(', ')}${unknownWords.length > 3 ? '...' : ''}`,
+      `Word${unknownPositions.length > 1 ? 's' : ''} at position${unknownPositions.length > 1 ? 's' : ''} ${shown}${more} not in the BIP-39 English wordlist`,
     );
   }
 
@@ -110,13 +118,4 @@ export function validateMnemonicPhrase(phrase: string): MnemonicValidation {
  */
 export function mnemonicToSeed(normalizedPhrase: string, passphrase: string = ''): Uint8Array {
   return mnemonicToSeedSync(normalizedPhrase, passphrase);
-}
-
-/**
- * Zero-fill a Uint8Array.
- * Note: this is best-effort in JavaScript. The runtime may keep copies.
- * See docs/VAULT_DESIGN.md for limits.
- */
-export function zeroFill(buf: Uint8Array): void {
-  buf.fill(0);
 }

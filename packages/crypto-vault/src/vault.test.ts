@@ -13,8 +13,10 @@ import {
   createSeal,
   changePasscode,
   migrateLegacySeal,
+  combineWithDeviceSecret,
   buildAad,
   KDF_BOUNDS,
+  VAULT_FORMAT_VERSION,
   type VaultSeal,
   type LegacyVaultSeal,
 } from './vault';
@@ -70,7 +72,7 @@ async function openVaultKey(seal: VaultSeal, passcode: string, ds?: Uint8Array) 
     hashLength: 32,
     outputType: 'binary',
   });
-  const wrapping = ds ? hkdf(sha256, pk, ds, 'onezerowallet-vault-combined', 32) : pk;
+  const wrapping = ds ? combineWithDeviceSecret(pk, ds) : pk;
   const wrapped = hexToBytes(seal.passcodeWrappedKey);
   const params = {
     argon2TimeCost: seal.argon2TimeCost,
@@ -142,7 +144,7 @@ describe('A4: AAD binding and tamper detection (each asserts the specific error)
   });
 
   it('changing version -> unsupported_version (no decrypt attempted)', async () => {
-    for (const v of [1, 2, 4, 0, -1]) {
+    for (const v of [1, 2, 3, 5, 0, -1]) {
       expect(await unsealVault({ ...seal, version: v }, PASS)).toEqual({
         success: false,
         error: 'unsupported_version',
@@ -353,24 +355,32 @@ describe('A4: device secret', () => {
   });
 });
 
-describe('A4: changePasscode (return type is reworked in A10)', () => {
+describe('A10: changePasscode returns a discriminated result', () => {
   it('re-seals with a fresh vault key, salt and IVs; old passcode stops working on the new seal', async () => {
     const seal = await createSeal(MNEMONIC_12_HARDHAT, PASS, undefined, FAST);
-    const next = await changePasscode(seal, PASS, 'another passphrase 987', undefined, FAST);
-    expect('version' in next).toBe(true);
-    const ns = next as VaultSeal;
+    const result = await changePasscode(seal, PASS, 'another passphrase 987', undefined, FAST);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const ns = result.seal;
     expect(ns.passcodeSalt).not.toBe(seal.passcodeSalt);
     expect(ns.passcodeWrappedKey).not.toBe(seal.passcodeWrappedKey);
     expect(ns.encryptedSeed).not.toBe(seal.encryptedSeed);
     expect((await unsealVault(ns, 'another passphrase 987')).success).toBe(true);
     expect(await unsealVault(ns, PASS)).toEqual({ success: false, error: 'wrong_passcode' });
   });
-  it('wrong old passcode returns the error result', async () => {
+  it('wrong old passcode returns { ok: false, error }', async () => {
     const seal = await createSeal(MNEMONIC_12_HARDHAT, PASS, undefined, FAST);
-    expect(await changePasscode(seal, 'bad', 'x', undefined, FAST)).toEqual({
-      success: false,
+    expect(await changePasscode(seal, 'bad', 'long enough pass 123', undefined, FAST)).toEqual({
+      ok: false,
       error: 'wrong_passcode',
     });
+  });
+  it('drops any biometric wrap (the vault key rotates)', async () => {
+    const seal = await createSeal(MNEMONIC_12_HARDHAT, PASS, undefined, FAST);
+    const withBio: VaultSeal = { ...seal, biometricWrappedKey: '00'.repeat(60) };
+    const result = await changePasscode(withBio, PASS, 'another passphrase 987', undefined, FAST);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.seal.biometricWrappedKey).toBeUndefined();
   });
 });
 
@@ -428,6 +438,84 @@ async function makeLegacySeal(
   return legacy;
 }
 
+/** Re-create a v3 seal exactly as the previous format did: recomputed AAD, old HKDF form. */
+async function makeLegacyV3Seal(
+  mnemonic: string,
+  passcode: string,
+  ds?: Uint8Array,
+): Promise<LegacyVaultSeal> {
+  const params = { ...FAST };
+  const seed = seedOf(mnemonic);
+  const vaultKey = crypto.getRandomValues(new Uint8Array(32));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const pk = await argon2id({
+    password: passcode.normalize('NFKD'),
+    salt,
+    parallelism: params.argon2Parallelism,
+    iterations: params.argon2TimeCost,
+    memorySize: params.argon2MemoryCost,
+    hashLength: 32,
+    outputType: 'binary',
+  });
+  // The v3 combination (unconventional): salt = deviceSecret, info = fixed label.
+  const wrapping = ds ? hkdf(sha256, pk, ds, 'onezerowallet-vault-combined', 32) : pk;
+  const seedEnc = await gcmEncrypt(seed, vaultKey, buildAad('seed', 3, ds !== undefined, params));
+  const mnEnc = await gcmEncrypt(
+    new TextEncoder().encode(mnemonic),
+    vaultKey,
+    buildAad('mnemonic', 3, ds !== undefined, params),
+  );
+  const wrapEnc = await gcmEncrypt(
+    vaultKey,
+    wrapping,
+    buildAad('vault-key', 3, ds !== undefined, params),
+  );
+  return {
+    version: 3,
+    passcodeWrappedKey: bytesToHex(wrapEnc.iv) + bytesToHex(wrapEnc.ct),
+    hasDeviceSecret: ds !== undefined,
+    encryptedSeed: bytesToHex(seedEnc.ct),
+    iv: bytesToHex(seedEnc.iv),
+    passcodeSalt: bytesToHex(salt),
+    argon2TimeCost: params.argon2TimeCost,
+    argon2MemoryCost: params.argon2MemoryCost,
+    argon2Parallelism: params.argon2Parallelism,
+    encryptedMnemonic: bytesToHex(mnEnc.ct),
+    mnemonicIv: bytesToHex(mnEnc.iv),
+  };
+}
+
+describe('A10: migration of v3 seals (HKDF scheme change)', () => {
+  it('v3 seal migrates to v4 and opens with the same passcode', async () => {
+    const legacy = await makeLegacyV3Seal(MNEMONIC_12_HARDHAT, PASS);
+    const m = await migrateLegacySeal(legacy, PASS);
+    expect(m.ok).toBe(true);
+    if (!m.ok) return;
+    expect(m.seal.version).toBe(VAULT_FORMAT_VERSION);
+    const r = await unsealVault(m.seal, PASS);
+    expect(r.success && r.mnemonic).toBe(MNEMONIC_12_HARDHAT);
+  });
+
+  it('v3 seal with a device secret migrates only with the device secret', async () => {
+    const legacy = await makeLegacyV3Seal(MNEMONIC_12_ABANDON, PASS, DEVICE_SECRET);
+    expect(await migrateLegacySeal(legacy, PASS)).toEqual({
+      ok: false,
+      error: 'device_secret_missing',
+    });
+    const m = await migrateLegacySeal(legacy, PASS, DEVICE_SECRET);
+    expect(m.ok).toBe(true);
+    if (m.ok) expect((await unsealVault(m.seal, PASS, DEVICE_SECRET)).success).toBe(true);
+  });
+
+  it('a v4 seal presented to migration is rejected as unsupported_version', async () => {
+    const current = await createSeal(MNEMONIC_12_ABANDON, PASS, undefined, FAST);
+    expect(await migrateLegacySeal(current as unknown as LegacyVaultSeal, PASS)).toEqual({
+      ok: false,
+      error: 'unsupported_version',
+    });
+  });
+});
+
 describe('A4: migration of v1/v2 seals', () => {
   it('current-format seals are rejected by unsealVault as unsupported_version when presented as legacy', async () => {
     const legacy = await makeLegacySeal(2, MNEMONIC_12_ABANDON, PASS);
@@ -442,7 +530,7 @@ describe('A4: migration of v1/v2 seals', () => {
     const m = await migrateLegacySeal(legacy, PASS);
     expect(m.ok).toBe(true);
     if (!m.ok) return;
-    expect(m.seal.version).toBe(3);
+    expect(m.seal.version).toBe(VAULT_FORMAT_VERSION);
     expect(Object.keys(m.seal)).not.toContain('aad');
     const r = await unsealVault(m.seal, PASS);
     expect(r.success && r.mnemonic).toBe(MNEMONIC_12_HARDHAT);
@@ -501,10 +589,12 @@ describe('A4: migration of v1/v2 seals', () => {
 
   it('tampered legacy stored aad -> tampered_data', async () => {
     const legacy = await makeLegacySeal(2, MNEMONIC_12_ABANDON, PASS);
-    expect(await migrateLegacySeal({ ...legacy, aad: flipBit(legacy.aad, 2) }, PASS)).toEqual({
-      ok: false,
-      error: 'tampered_data',
-    });
+    expect(await migrateLegacySeal({ ...legacy, aad: flipBit(legacy.aad ?? '', 2) }, PASS)).toEqual(
+      {
+        ok: false,
+        error: 'tampered_data',
+      },
+    );
   });
 
   it('legacy seal with out-of-range params -> invalid_params without running Argon2', async () => {
@@ -519,7 +609,7 @@ describe('A4: migration of v1/v2 seals', () => {
 
   it('unknown version -> unsupported_version', async () => {
     const legacy = await makeLegacySeal(2, MNEMONIC_12_ABANDON, PASS);
-    expect(await migrateLegacySeal({ ...legacy, version: 3 }, PASS)).toEqual({
+    expect(await migrateLegacySeal({ ...legacy, version: 5 }, PASS)).toEqual({
       ok: false,
       error: 'unsupported_version',
     });
