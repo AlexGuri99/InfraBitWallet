@@ -9,26 +9,26 @@ Last verified: 2026-11-21 — `license-check: 92 package entries, all allow-list
 
 ## Direct dependencies
 
-| Package                 | License      | Use                                  |
-| ----------------------- | ------------ | ------------------------------------ |
-| `@noble/curves`         | MIT          | Ed25519 / secp256k1                   |
-| `@noble/hashes`         | MIT          | SHA-2/512, HMAC, HKDF, keccak         |
-| `@scure/bip32`          | MIT          | BIP-32 derivation                     |
-| `@scure/bip39`          | MIT          | BIP-39 mnemonic                       |
-| `hash-wasm`             | MIT          | Argon2id (WebAssembly)                |
-| `zod`                   | MIT          | Seal / config schema validation       |
-| `viem`                  | MIT          | EVM encoding + test cross-checks      |
-| `ethers`                | MIT          | EVM cross-check (dev)                 |
-| `tronweb`               | MIT          | TRON cross-check (dev)                |
-| `fake-indexeddb`        | Apache-2.0   | IndexedDB adapter tests (dev)         |
-| `fast-check`            | MIT          | Property tests                        |
-| `vitest`                | MIT          | Unit tests                            |
-| `@playwright/test`      | MIT          | E2E tests                             |
-| `@telegram-apps/sdk`    | MIT          | Telegram Mini Apps SDK                |
-| `react`, `react-dom`    | MIT          | UI framework                          |
-| `zustand`               | MIT          | State (no secrets)                    |
-| `tailwindcss`           | MIT          | Styling                               |
-| `valibot` (override)    | MIT          | Transitive pin `>=1.4.2` for advisories |
+| Package              | License    | Use                                     |
+| -------------------- | ---------- | --------------------------------------- |
+| `@noble/curves`      | MIT        | Ed25519 / secp256k1                     |
+| `@noble/hashes`      | MIT        | SHA-2/512, HMAC, HKDF, keccak           |
+| `@scure/bip32`       | MIT        | BIP-32 derivation                       |
+| `@scure/bip39`       | MIT        | BIP-39 mnemonic                         |
+| `hash-wasm`          | MIT        | Argon2id (WebAssembly)                  |
+| `zod`                | MIT        | Seal / config schema validation         |
+| `viem`               | MIT        | EVM encoding + test cross-checks        |
+| `ethers`             | MIT        | EVM cross-check (dev)                   |
+| `tronweb`            | MIT        | TRON cross-check (dev)                  |
+| `fake-indexeddb`     | Apache-2.0 | IndexedDB adapter tests (dev)           |
+| `fast-check`         | MIT        | Property tests                          |
+| `vitest`             | MIT        | Unit tests                              |
+| `@playwright/test`   | MIT        | E2E tests                               |
+| `@telegram-apps/sdk` | MIT        | Telegram Mini Apps SDK                  |
+| `react`, `react-dom` | MIT        | UI framework                            |
+| `zustand`            | MIT        | State (no secrets)                      |
+| `tailwindcss`        | MIT        | Styling                                 |
+| `valibot` (override) | MIT        | Transitive pin `>=1.4.2` for advisories |
 
 ## Notes
 
