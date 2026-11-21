@@ -1,239 +1,247 @@
 # OneZeroWallet — Vault Design
 
-## Threat Model for the Vault
+Last rewritten: 2026-11-21 (Stage A). Every statement here describes code in
+`packages/crypto-vault/src` as of that date; the named tests in `*.test.ts` prove the behaviours.
+Anything that is not verified is listed in `docs/UNVERIFIED.md`.
 
-### Assets Protected
+## 1. Assets and adversaries
 
-- **BIP-39 24-word seed phrase** — controls all funds on all chains
-- **Derived private keys** — per-chain keys derived from the seed
-- **Vault key** — random 256-bit key that encrypts the seed
+| Asset                         | Where it exists                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| BIP-39 phrase (master secret) | Never stored in plaintext. Encrypted in the seal; held briefly for reveal           |
+| 64-byte BIP-39 seed           | Encrypted in the seal; in session memory only while unlocked                        |
+| Per-chain private keys        | Derived per signing call, zero-filled immediately after                             |
+| Random vault key              | Only inside `sealVault`/`unsealVault` and briefly in biometric enable               |
+| Device secret                 | Secure adapter only (Telegram SecureStorage / Keychain / Keystore)                  |
+| Biometric token               | Returned to the caller; stored by Telegram's BiometricManager, never by this module |
 
-### Adversary Goals
+Adversary goals: extract the phrase or keys from storage/memory; brute-force the passcode offline
+from a copied seal; bypass the passcode; capture secrets from a live session; phish the phrase.
 
-1. **Extract the seed** from device storage, network traffic, or memory dumps
-2. **Brute-force the passcode** offline using stolen wrapped vault key + ciphertext
-3. **Bypass passcode** via biometric spoofing or SecureStorage extraction
-4. **Extract secrets from memory** during an active session
-5. **Social-engineer** the user into revealing their seed phrase
+## 2. Seal format (version 4)
 
-### Attack Vectors and Mitigations
+`VaultSeal` (all binary fields are lowercase hex, `vault.ts`):
 
-| Attack Vector                                                     | Severity                         | Mitigation                                                                                          |
-| ----------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------- |
-| IndexedDB dump → stolen ciphertext                                | High                             | Ciphertext is AES-256-GCM encrypted; attacker also needs vault key                                  |
-| IndexedDB dump + SecureStorage dump → wrapped key + ciphertext    | Critical (without device secret) | Device secret wrap combines passcode-derived key with a device-specific secret; attacker needs BOTH |
-| Offline passcode brute-force from stolen wrapped key + ciphertext | High                             | Argon2id (timeCost=3, mem=64MiB, par=1) makes each guess ~1 second on mid-range phone               |
-| Clipboard/injection exfiltration of seed                          | Critical                         | Seed never leaves vault module; exposed as derived keys only                                        |
-| Memory dump during active session                                 | Medium                           | Best-effort zero-fill after use; JS memory wiping is not guaranteed                                 |
-| Biometric bypass                                                  | Low                              | Biometrics never replace passcode; always dual-factor (passcode + biometric)                        |
+| Field                                                       | Meaning                                                                                  |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `version`                                                   | `4` (`VAULT_FORMAT_VERSION`)                                                             |
+| `passcodeWrappedKey`                                        | `iv(12) ‖ ct(32) ‖ tag(16)` — vault key wrapped by the passcode (or passcode+device) key |
+| `hasDeviceSecret`                                           | Whether the device secret is required                                                    |
+| `biometricWrappedKey?`                                      | Optional `iv(12) ‖ ct(32) ‖ tag(16)` — vault key wrapped by a key derived from the token |
+| `encryptedSeed`                                             | `ct(64) ‖ tag(16)` under the vault key                                                   |
+| `iv`                                                        | IV for `encryptedSeed`                                                                   |
+| `encryptedMnemonic`                                         | UTF-8 mnemonic `ct ‖ tag` under the vault key                                            |
+| `mnemonicIv`                                                | IV for `encryptedMnemonic`                                                               |
+| `passcodeSalt`                                              | 16-byte Argon2id salt                                                                    |
+| `argon2TimeCost` / `argon2MemoryCost` / `argon2Parallelism` | KDF parameters (KiB for memory)                                                          |
 
-### What Telegram Storage Guarantees
+There is deliberately **no stored `aad`**. Every ciphertext is authenticated with AAD that is
+recomputed at open time from the format version, the Argon2id parameters, the device-secret flag
+and a role label (`vault-key`, `seed`, `mnemonic`, `biometric-key`). A ciphertext moved between
+roles, or opened under a different version or parameter set, fails GCM. Tests:
+`vault.test.ts › A4: AAD binding and tamper detection` (each asserts the specific error),
+`vault.test.ts › AAD binds the role`.
 
-| Feature                             | Guarantees                                                                                                                                                                          | Limitations                                                                                            |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **SecureStorage** (Bot API 9.0+)    | OS-native encryption (iOS Keychain, Android Keystore). On reinstall, Telegram may prompt the user to approve a restore request — data is not automatically restored on all clients. | Not available on Desktop/Web. 10-item limit. Data may be cleared by Telegram/OS. Same-bot access only. |
-| **BiometricManager** (Bot API 7.2+) | Secure biometric authentication (fingerprint/face). Can store encrypted token.                                                                                                      | Desktop/Web may lack biometrics entirely. Biometric token needs SecureStorage.                         |
-| **DeviceStorage** (Bot API 9.0+)    | Persistent local storage, ~5 MB.                                                                                                                                                    | **Not encrypted.** Do not store secrets.                                                               |
-| **CloudStorage** (Bot API 6.9+)     | Persistent across devices.                                                                                                                                                          | **Never use for secrets.** Accessible to Telegram's infrastructure.                                    |
+## 3. Cryptography
 
-**Key rule:** Feature-detect everything. Don't assume any Bot API version. Passcode is always the fallback.
+- **AES-256-GCM** (NIST SP 800-38D) via Web Crypto; fresh 96-bit IV per encryption; 128-bit tag.
+- **Argon2id** (RFC 9106) via `hash-wasm`, hashLength 32.
+- **HKDF-SHA256** (RFC 5869) via `@noble/hashes`.
+- **BIP-39** via `@scure/bip39`; **SLIP-10 Ed25519** and **BIP-32 secp256k1** via `@noble/*`.
 
-## Exact Algorithms and Parameters
+### Argon2id parameters
 
-### Mnemonic Generation
+Defaults: `timeCost=3`, `memoryCost=65536` KiB (64 MiB), `parallelism=1`. These are **our choice**,
+not a measured OWASP minimum and not benchmarked on a real mobile WebView
+(`docs/UNVERIFIED.md`). Bounds (`KDF_BOUNDS`) are checked **before** Argon2id runs:
 
-- **Algorithm:** BIP-39 (English wordlist)
-- **Library:** `@scure/bip39` v1.6.0 (MIT, audited)
-- **Entropy:** `crypto.getRandomValues()` — 256 bits for 24 words, 128 bits for 12 words
-- **Normalization:** NFKD + lowercase + whitespace collapse
-- **Seed derivation:** `mnemonicToSeedSync` (PBKDF2-SHA512, 2048 rounds)
+| Parameter      | Min   | Max    | Purpose                                 |
+| -------------- | ----- | ------ | --------------------------------------- |
+| timeCost       | 2     | 10     | reject downgrade / CPU-exhaustion seals |
+| memoryCost KiB | 19456 | 262144 | 19 MiB floor, 256 MiB ceiling           |
+| parallelism    | 1     | 4      | sane bounds                             |
 
-### Key Derivation
+Tests: `vault.test.ts › A4: KDF bounds are enforced BEFORE Argon2 runs` (asserts `argon2id` is
+never called).
 
-| Chain    | Path                | Curve     | Algorithm             |
-| -------- | ------------------- | --------- | --------------------- |
-| TON      | `m/44'/607'/0'`     | Ed25519   | SLIP-10 (HMAC-SHA512) |
-| TRON     | `m/44'/195'/0'/0/0` | secp256k1 | BIP-32                |
-| Ethereum | `m/44'/60'/0'/0/0`  | secp256k1 | BIP-32                |
+`measureKdf(config?, rounds?)` times one derivation so the setup screen can choose parameters
+inside the bounds (`policy.test.ts › A7: measureKdf`). The timing is device-specific; do not treat
+it as a constant.
 
-Sources:
+### Key wrap with a device secret
 
-- SLIP-44: https://github.com/satoshilabs/slips/blob/master/slip-0044.md (fetched 2026-11-20)
-- TON V5R1: https://docs.ton.org/contracts/standard/wallets/v5 (fetched 2026-11-20)
-
-### Vault Encryption
-
-- **Cipher:** AES-256-GCM (NIST SP 800-38D)
-- **Implementation:** Web Crypto API (`crypto.subtle`)
-- **IV:** 96-bit (12 bytes), fresh `crypto.getRandomValues()` per encryption
-- **Key:** 256-bit (32 bytes), random via `crypto.getRandomValues()`
-- **Tag:** 128-bit (16 bytes), appended by GCM mode
-- **Format:** IV (12 bytes) || ciphertext || GCM tag (16 bytes)
-
-### Passcode Key Derivation
-
-- **Algorithm:** Argon2id (RFC 9106)
-- **Library:** `hash-wasm` v4.13.0 (MIT, WebAssembly)
-- **Parameters (default):**
-
-| Parameter              | Value               | Rationale                                                        |
-| ---------------------- | ------------------- | ---------------------------------------------------------------- |
-| Time cost (iterations) | 3                   | OWASP minimum 2026; ~1s on Pixel 6                               |
-| Memory cost            | 64 MiB (65536 KiB)  | OWASP minimum 2026; 64 MiB                                       |
-| Parallelism            | 1                   | Single-threaded mobile; parallel gains are minimal on phone CPUs |
-| Hash length            | 32 bytes (256 bits) | Matches AES-256 key size                                         |
-| Salt                   | 16 bytes random     | Per-seal unique                                                  |
-
-- **Fallback (if WASM unavailable):** scrypt via `@noble/hashes/scrypt` with N=2^17, r=8, p=1. Documented but not implemented in v1.
-
-### Device Secret Wrap (Optional)
-
-- **Secret:** 256-bit random, stored in SecureStorage
-- **Combination:** Encrypted vault key is further encrypted with device secret. Both the passcode-derived key AND the device secret are required to unwrap.
-
-### Biometric Wrap (Optional)
-
-- **Mechanism:** Telegram BiometricManager (`@telegram-apps/sdk`, Bot API 7.2+)
-- **authenticate() behavior:** Always shows a native OS biometric popup (Face ID / fingerprint) with a custom reason string. There is no silent/background mode — the user must interact on every call. The callback receives `(success, token)` — the token is the OS-native biometric credential.
-- **Token storage:** The biometric token is stored in **device-native secure storage** (iOS Keychain, Android Keystore) via `updateBiometricToken(token)`. This is NOT the same as Telegram `SecureStorage` — it is a separate, lower-level storage managed by the biometric subsystem. The token is matched to the device via `deviceId`.
-- **Token availability:** On a device where a token was previously saved, `isBiometricTokenSaved` returns true, and calling `authenticate()` prompts the user and then releases the stored token on success.
-- **Source:** core.telegram.org/bots/webapps (BiometricManager section, fetched 2026-11-20)
-
-**Unlock model (dual-factor):** Passcode MUST always be entered. Biometrics is an additional factor that wraps a separate copy of the vault key (`biometricWrappedKey`). The main `unsealVault()` function ALWAYS uses the passcode-derived key — there is no biometric-only unlock path in the core vault module. The app layer may use the biometric wrap for convenience (e.g., quicker re-authentication within a session), but the passcode remains mandatory for the initial unlock.
-
-- **Constraint:** Biometrics never replace passcode. The passcode is always the fallback (Desktop/Web may lack biometrics entirely). On devices without biometrics, the vault works in passcode-only mode; the biometric wrap fields are simply absent from the seal.
-
-**Threat model update:**
-
-| Attack                                    | Severity | Mitigation                                                                                                                                                                      |
-| ----------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Biometric bypass / spoof                  | Low      | Biometrics are a SECOND factor layered on top of the passcode — both are required. The OS-native biometric subsystem (Face ID / fingerprint sensor) has its own anti-spoofing.  |
-| Biometric unavailable (Desktop/Web)       | Low      | Passcode-only mode works without biometrics. The min passcode length is stricter (8+ chars with digit) when no biometric or device-secret wrap is configured.                   |
-| Device without biometric sensor           | None     | Passcode is always the fallback. Biometric fields are simply absent from the JSON seal. No code path depends on their presence.                                                 |
-| biometricWrappedKey stored alongside seal | High     | biometricWrappedKey is encrypted with the biometric token. An attacker who steals both the seal and the biometric token (from device secure storage) can extract the vault key. |
-
-## What We Do NOT Protect Against
-
-These attack scenarios are **out of scope** for the vault's threat model. Users must be aware that no amount of client-side cryptography defends against them.
-
-| Scenario                                                                        | Why It Is Not Protected                                                                                                                 | Mitigation (user responsibility)                                      |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Device malware** (keylogger, screen scraper, infostealer, clipboard hijacker) | Malware running on the same device has full access to memory, keystrokes, and the screen.                                               | Use a clean device; enable OS-level malware protection.               |
-| **Compromised host serving malicious JS**                                       | If the deployed app JS is replaced by an attacker (CDN hijack, Vercel compromise, MITM), it can exfiltrate the seed or keys at runtime. | Verify build hashes; use a hardware wallet for large amounts.         |
-| **User voluntarily shares their recovery phrase**                               | Social engineering, phishing, or coercion cannot be prevented by client code.                                                           | Never share the 24-word phrase with anyone, ever.                     |
-| **Screenshots / screen recording**                                              | The OS or a malicious app can capture the screen without the app's knowledge.                                                           | Enable Telegram's anti-screenshot controls; use a privacy screen.     |
-| **Shoulder surfing**                                                            | An observer looking at the screen can see the passcode or seed words being entered.                                                     | Shield the screen during entry; use biometric unlock where available. |
-| **Compromised Telegram client**                                                 | A malicious or backdoored Telegram client can read the Mini App's memory and storage.                                                   | Use the official Telegram client from a trusted source.               |
-
-## Known Limits of JavaScript Memory Wiping
-
-JavaScript has no guaranteed way to zero-fill memory:
-
-1. **Garbage collector:** The `Uint8Array` may be cloned, aliased, or interned by the runtime.
-2. **Optimizer:** V8's optimizing compiler may eliminate "dead stores" (including `fill(0)`) if it can prove the buffer is never read again.
-3. **Closures:** A closure capturing the seed keeps it alive indefinitely.
-4. **Stack traces:** Exception stack traces may capture buffer contents.
-
-**Mitigations employed:**
-
-- `Uint8Array.fill(0)` on sensitive buffers immediately after last use
-- Seed and keys never stored in React state, DOM, or any global scope
-- All derived keys cleared on session lock
-- No persistent references to seed or keys outside vault module
-
-**Known limitations (accepted):**
-
-- Runtime may keep copies in registers or on the stack
-- V8 may optimize out `fill(0)` in production (configurable with `--allow-natives-syntax` but not in production)
-- A memory dump at the exact moment after unlock but before zero-fill captures the seed
-
-## Recovery Behavior When Local Data Is Cleared
-
-### Scenario: User's IndexedDB and SecureStorage are cleared (e.g., Telegram reinstall)
-
-**User has backed up their 24-word seed phrase:**
-
-1. User imports 24-word phrase
-2. New vault key generated
-3. New passcode set
-4. New device secret stored in SecureStorage
-5. All funds accessible
-
-**User has NOT backed up:**
-
-- **Funds are unrecoverable.** No server-side recovery is possible.
-- The app must clearly warn during onboarding that local data may be cleared and the seed phrase is the only backup.
-
-### Design for Recovery
-
-- Forced backup verification during onboarding (confirm N random words from the phrase)
-- Clear warnings that Telegram/OS may clear local data
-- No server-side key storage or seed escrow
-- User is encouraged to write down the seed phrase on paper
-
-## Storage Adapter Interface
-
-```typescript
-interface StorageAdapter {
-  get(key: string): Promise<string | null>;
-  set(key: string, value: string): Promise<void>;
-  delete(key: string): Promise<void>;
-  clear(): Promise<void>;
-}
-```
-
-Implementations:
-
-- `SecureStorageAdapter` — wraps Telegram `SecureStorage` (Bot API 9.0+)
-- `IndexedDBAdapter` — uses IndexedDB for ciphertext (passcode-wrapped only)
-- `InMemoryStorage` — test-only implementation
-
-## Session Lifecycle
+Conventional HKDF (v4):
 
 ```
-START
-  │
-  ▼
-[Locked] ───────────────────────┐
-  │                             │
-  │  User enters passcode       │  Auto-lock: inactivity timeout
-  │  ↓                          │  or visibilitychange (background)
-  ▼                             │
-[Unlocking]                     │
-  │                             │
-  │  Argon2id(salt, passcode)   │
-  │  ↓                          │
-  │  Unwrap vault key           │
-  │  ↓                          │
-  │  Decrypt seed               │
-  │  ↓                          │
-  │  Derive all chain keys      │
-  │  ↓                          │
-  │  Zero-fill seed             │
-  ▼                             │
-[Active session] ───────────────┘
-  │
-  │  User triggers sign or
-  │  send operation
-  ▼
-[Sign] → uses derived key → zero-fill after
+IKM  = len32(argon2Key) ‖ argon2Key ‖ len32(deviceSecret) ‖ deviceSecret
+salt = "onezerowallet/vault/v4/hkdf-salt"      (fixed, not secret)
+info = "vault-key-wrap"
+OKM  = HKDF-SHA256(IKM, salt, info, 32)
 ```
 
-## Configuration Parameters (VaultSeal JSON)
+Length prefixes prevent one input being shifted into the other. Without a device secret the
+Argon2id output is the wrapping key directly.
 
-```typescript
-{
-  version: 1,                        // format version for migration
-  passcodeWrappedKey: string,         // iv(12) + ciphertext(48), hex
-  deviceWrappedKey?: string,          // optional: device secret wrap
-  biometricWrappedKey?: string,       // optional: biometric wrap
-  encryptedSeed: string,              // iv(12) + ciphertext(80), hex
-  iv: string,                         // IV for seed encryption (hex)
-  passcodeSalt: string,               // salt for Argon2id (hex)
-  argon2TimeCost: number,             // iterations
-  argon2MemoryCost: number,           // KiB
-  argon2Parallelism: number           // threads
-}
-```
+## 4. Biometric wrap
 
-The `version` field allows future parameter upgrades (e.g., stronger Argon2id, different cipher). When the vault is opened with an older version, automatic re-sealing with current parameters is performed.
+Sources: <https://core.telegram.org/bots/webapps> (fetched 2026-11-21) — BiometricManager is
+available since Bot API 7.2. `authenticate()` shows a native prompt and, on success, returns the
+token previously stored with `updateBiometricToken()`; the token lives in device secure storage.
+
+Implementation (`vault.ts`):
+
+- `enableBiometric(seal, passcode, deviceSecret?)` unwraps the vault key with the passcode, makes a
+  fresh random 32-byte token, derives `bioKey = HKDF-SHA256(token [, deviceSecret], salt,
+"biometric-vault-key-wrap")`, wraps the vault key with AES-GCM (random IV stored in the blob,
+  role-labelled AAD), and returns `{ seal, token }`. **The module never persists the token** — the
+  caller must call `updateBiometricToken`.
+- `unlockWithBiometric(seal, tokenHex, deviceSecret?)` validates the token (exactly 64 hex chars),
+  requires the device secret when `hasDeviceSecret`, unwraps the vault key, then decrypts and
+  verifies the payload exactly as passcode unlock does.
+- `disableBiometric(seal)` drops the wrap.
+- A passcode change rotates the vault key; any old biometric wrap is dropped and must be recreated
+  (`vault-manager.ts` recreates it and returns a fresh token).
+
+**Factor model (stated plainly):** biometric unlock is a **convenience path**. On a device where
+Telegram is already unlocked, a successful biometric check releases the token, and the token (plus
+the device secret when configured) opens the vault without typing the passcode. This is a
+deliberate trade-off: it is not a second independent secret. The passcode is still required for
+**revealing the phrase** (`revealMnemonic`), for **changing the passcode**, and for **disabling
+biometrics**. Consequence: someone holding the unlocked device and passing the biometric check can
+create transactions. See the threat table update in `docs/THREAT_MODEL.md`.
+
+Tests: `biometric.test.ts` (round trip, wrong token, malformed token, tampered blob, unique IV,
+passcode change invalidates, device secret still required).
+
+## 5. Session API
+
+`session.ts` keeps the seed in a closure. The returned `VaultSession` has functions only:
+
+| Member                                    | Behaviour                                                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `getPublicInfo(accountIndex)`             | public keys / intermediate address forms per chain; a copy on every call                                     |
+| `signDigest(chain, accountIndex, digest)` | Ed25519 (TON, 64 bytes) or recoverable secp256k1 (TRON/EVM, `r‖s‖recovery`); per-call key, zero-filled after |
+| `reauthenticate(passcode)`                | fresh Argon2id check; opens the reveal window (default 60 s)                                                 |
+| `revealMnemonic()`                        | returns the phrase once per successful re-auth, then clears the window                                       |
+| `lock()`                                  | zero-fills the seed, clears the window, removes listeners                                                    |
+
+**Blind-signing warning.** `signDigest` signs any 32 bytes. Chain adapters **must** build the
+payload themselves, hash it, and show a human-readable preview generated from that payload before
+signing. `SigningRequest` (with `payloadHex` and `summary`) is the TODO-backed interface that will
+replace the bare digest when adapters exist.
+
+**What we cannot guarantee.** `fill(0)` is best effort: the engine may copy buffers, and the
+mnemonic is a JavaScript string that cannot be wiped. The phrase is kept out of any store and is
+returned only on demand by `revealMnemonic`. Tests: `session.test.ts` (no secret property at any
+depth, `JSON.stringify` clean, signatures verify with noble/viem, lock and reveal semantics),
+`logging.test.ts` (whole flow logs nothing secret).
+
+## 6. Unlock backoff and wipe
+
+`backoff.ts`:
+
+- A failed attempt computes the delay once and persists `nextAllowedAt` (absolute ms), so repeated
+  reads do not re-roll jitter.
+- **Only `wrong_passcode` counts.** `kdf_unavailable` and `device_secret_missing` do not.
+- Rate limiting returns `{ success: false, error: 'rate_limited', retryAfterMs }` — never
+  `wrong_passcode` — and **does not run Argon2id** (`backoff.test.ts › A8: rate limiting`).
+- Storage is mandatory: helpers throw `STORAGE_REQUIRED`; `unlockSession` without storage returns
+  `storage_required` (fail closed).
+- The wipe threshold (`wipeAfterFailures`) is disabled by default. When reached, the stored seal
+  and device secret are deleted and the result is `{ success: false, error: 'wiped' }`.
+- This only defends the on-device UI. Clock changes can bypass the delay, and it does nothing
+  against an offline attack on a copied seal.
+
+Auto-lock: inactivity timer plus one `visibilitychange` listener registered once and removed on
+lock (`backoff.test.ts › A8: visibility listener lifecycle`). Telegram's `activated`/`deactivated`
+events are handled by the app adapter (`apps/miniapp/src/adapters/telegram-lifecycle.ts`), not by
+this package.
+
+## 7. Passcode policy
+
+`evaluatePasscodeStrength(passcode, hasDeviceSecretWrap)` returns
+`{ ok, error?, unprotectedByDeviceSecret, kind, minLength }`. Errors never echo the input.
+
+| Factor available | Requirement                                                         |
+| ---------------- | ------------------------------------------------------------------- |
+| device secret    | 6+ digit PIN (repeated/sequential rejected) **or** 8+ characters    |
+| none             | 12+ characters, not on a small embedded common-passphrase blocklist |
+
+`unprotectedByDeviceSecret: true` means the seal can be attacked offline if copied; the UI must
+show a warning. This corrects earlier wording: a PIN is protected only by the secrecy of the
+device secret.
+
+Tests: `policy.test.ts`.
+
+## 8. Storage
+
+`StorageAdapter = { get, set, delete, clear }`.
+
+- `InMemoryStorage` — tests only.
+- `IndexedDBAdapter` — seal ciphertext and backoff only; IDBFactory injectable.
+- `SecureStorageAdapter` (app adapter, `apps/miniapp/src/adapters/secure-storage.ts`) — Telegram
+  SecureStorage, feature-detected on the object and Bot API 9.0. Handles the callback API,
+  `getItem` returning null, and the user-approved `restoreItem`. Budget: uses **1** of the
+  **10** items Telegram allows per bot per user.
+- `CompositeStorage` — routes `DEVICE_SECRET` to the secure adapter and everything else to the
+  bulk adapter, so the device secret never lands in IndexedDB.
+
+Persisted keys: `vault_seal`, `device_secret` (secure only), `backoff_count`,
+`backoff_next_allowed_at`.
+
+## 9. VaultManager
+
+`vault-manager.ts` wires the pieces:
+
+`hasVault`, `createWallet(passcode, mnemonic?)`, `importWallet(mnemonic, passcode)`, `unlock`,
+`unlockWithBiometric`, `lock`, `changePasscode`, `enableBiometric`, `disableBiometric`, `migrate`,
+`wipe`, `evaluatePasscode`, `getSession`.
+
+- Creating uses a device secret whenever a secure adapter is configured; otherwise the seal has no
+  device factor and the stricter passphrase policy applies.
+- `saveSeal` validates with zod before persisting, so a malformed envelope is never written and a
+  malformed stored one is never trusted (`seal-store.ts`, `seal-store.test.ts`).
+
+### Device-secret loss
+
+If Telegram/the OS clears SecureStorage while the seal requires a device secret, the seal **cannot**
+be opened with the passcode alone (`device_secret_missing`). The only recovery is to wipe the seal
+and re-import the recovery phrase. Tested: `vault-manager.test.ts › cannot open the seal if the
+device secret is lost; only re-import recovers`.
+
+## 10. Format migration
+
+`migrateLegacySeal` upgrades v1–v3 to v4:
+
+- v1: stored `aad`, no stored mnemonic → caller must supply the phrase.
+- v2: stored `aad` + stored mnemonic.
+- v3: recomputed AAD, but the old HKDF combination → migrations use the old combination to open,
+  then reseal with v4.
+
+Nothing legacy is ever written back. `migrateStoredSeal` loads, migrates and saves.
+Tests: `vault.test.ts › A4: migration of v1/v2 seals`, `› A10: migration of v3 seals`.
+
+## 11. Recovery behaviour when local data is cleared
+
+If the user has the phrase: import it, set a passcode, and (if a secure adapter exists) a fresh
+device secret is created. If the user does not: funds are unrecoverable; there is no server-side
+escrow. The UI must warn that Telegram/OS may clear local data.
+
+## 12. Known gaps (Stage A)
+
+- **No UI yet.** Stage C builds onboarding/unlock/backup screens on this API.
+- **No real addresses.** TON/TRON/EVM results are intermediate forms (`publicKeyHex`, `hexAddress`,
+  `rawAddress`); real address computation is Stage B.
+- **Argon2id timing is unmeasured** on a real mobile WebView; defaults are our choice.
+- **Account-index convention is unresolved** for other wallets (see `docs/DECISIONS.md`).
+- **WebKit is not in the Playwright run** (see `docs/UNVERIFIED.md`).
+- **Signing is blind at this layer** until adapters build `SigningRequest`s.
+- **JavaScript cannot guarantee memory wiping**, as described above.
+
+## 13. Manual checks required before any release
+
+1. Open the deployed preview inside Telegram Desktop, Web, iOS and Android.
+2. Confirm SecureStorage is present (Bot API 9.0+) and the item count stays within the budget.
+3. Confirm BiometricManager flows: requestAccess, authenticate returning the stored token,
+   updateBiometricToken on enable/change, and behaviour when biometrics are denied.
+4. Confirm the auto-lock fires on Telegram `deactivated` (backgrounding) on each platform.

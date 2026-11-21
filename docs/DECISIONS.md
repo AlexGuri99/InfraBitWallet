@@ -240,3 +240,50 @@ Until then, TRON v1 covers receive and send (TRX, USDT) with energy handling onl
 | 8   | **TRON "no USDC" claim** — Brief says Circle ended native USDC on TRON. Date and current status of existing USDC need verification.                                                                                   | UNVERIFIED — verify in P4             |
 | 9   | **TON wallet V5R1** — Confirmed: "Most wallet apps use Wallet V5R1... by default."                                                                                                                                    | ✅ Confirmed                          |
 | 10  | **Derivation paths confirmed** — TON `m/44'/607'/0'`, TRON `m/44'/195'/0'/0/0`, ETH `m/44'/60'/0'/0/0` all from SLIP-44.                                                                                              | ✅ Confirmed                          |
+
+---
+
+## Decision: Account-index convention in derivation paths (OPEN — needs owner approval)
+
+**Status:** Proposed (2026-11-21). Code has NOT changed; current behaviour is described below.
+
+**What the code does now**
+
+| Chain    | Path                | Account index lives on |
+| -------- | ------------------- | ---------------------- |
+| TON      | `m/44'/607'/N'`     | hardened account level |
+| TRON     | `m/44'/195'/N'/0/0` | hardened account level |
+| Ethereum | `m/44'/60'/N'/0/0`  | hardened account level |
+
+So account 0 matches the common single-account path on every chain. Account 1 and beyond take a
+different branch from wallets that vary the last (non-hardened) component instead.
+
+**Verified facts**
+
+- BIP-44 defines `m / purpose' / coin_type' / account' / change / address_index`; purpose, coin
+  type and account are hardened; change and address_index use public derivation. Accounts are
+  numbered from 0. Source: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
+  (fetched 2026-11-21).
+- SLIP-44 fixes the coin types (607 TON, 195 TRON, 60 ETH). Source:
+  https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+
+**Not verified this session** (see UNVERIFIED.md): the exact path each of MetaMask, Ledger Live,
+TronLink and Tonkeeper uses for _additional_ accounts, and whether they place the index on the
+hardened account level or the non-hardened address_index. Source fetches returned 404/redirects.
+
+**Options**
+
+1. Keep `…/N'/…` (current; matches the common "account" reading of BIP-44 and Ledger-Live-style
+   hardened account levels, per the fact above).
+2. Use `…/0/…/N` (address_index), matching wallets that derive extra accounts as addresses of
+   account 0.
+3. Expose a per-chain convention setting at import time and store which one was used.
+
+**Recommendation:** option 1 for v1 **plus** a documented import note explaining that only
+account 0 is guaranteed to match other wallets until the conventions are confirmed, and option 3
+later if users report import mismatches. Do not change the derivation until the owner approves and
+the per-wallet conventions are verified with sources.
+
+**Consequence if we get it wrong:** a user who imports their 24 words into another wallet and
+selects "account 2" in our app may see a different address there, and may think funds are lost.
+The recovery phrase is the same; only the account branch differs.

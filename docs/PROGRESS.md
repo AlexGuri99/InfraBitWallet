@@ -92,6 +92,32 @@ All P1a tasks are now complete. The vault module (`packages/crypto-vault`) imple
 
 ---
 
+### Stage A: Review fixes (2026-11-21)
+
+Branch `stage-a-fixes`. A0–A5 were completed earlier in this branch; A6–A11 in this round.
+(Older P1a/P1c bullets above overstated what was implemented — e.g. a working biometric wrap
+and "dual-factor" model. `docs/VAULT_DESIGN.md` now matches the code.)
+
+| ID  | Task                                                | Status | Evidence (file › test)                                                                                |
+| --- | --------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| A0  | E2E in a fresh clone; verify includes e2e + install | DONE   | `e2e-prepare.mjs`, `secret-scan.test.ts`, `playwright.config.ts`                                      |
+| A1  | TON/TRON/EVM intermediate forms, no fake address    | DONE   | `derivation.ts`, `index.test.ts › A1:`                                                                |
+| A2  | Session keeps keys in a closure                     | DONE   | `session.ts`, `session.test.ts`                                                                       |
+| A3  | Remove seed export, allowlist public API            | DONE   | `index.ts`, `index.test.ts › A3:`                                                                     |
+| A4  | Real AAD binding, KDF bounds, migration             | DONE   | `vault.ts`, `vault.test.ts › A4:`                                                                     |
+| A5  | Real published vectors                              | DONE   | `vectors.test.ts`, `fixtures/`                                                                        |
+| A6  | Biometrics (enable/unlock/disable)                  | DONE   | `vault.ts`, `biometric.test.ts`                                                                       |
+| A7  | Passcode policy + measureKdf                        | DONE   | `vault.ts`, `policy.test.ts`                                                                          |
+| A8  | Backoff rewrite, rate_limited, wipe, listeners      | DONE   | `backoff.ts`, `backoff.test.ts`, `session.ts`                                                         |
+| A9  | Device secret, seal store, adapters, VaultManager   | DONE   | `device-secret.ts`, `seal-store.ts`, `indexeddb.ts`, `vault-manager.ts`, `apps/miniapp/src/adapters/` |
+| A10 | Misc fixes (HKDF form, errors, logging, dead code)  | DONE   | `vault.ts` (v4), `mnemonic.ts`, `logging.test.ts`, `seal-store.test.ts`                               |
+| A11 | Docs match code                                     | DONE   | `VAULT_DESIGN.md`, `THREAT_MODEL.md`, `DECISIONS.md`, `UNVERIFIED.md`                                 |
+
+Open decisions: account-index convention (see DECISIONS.md) — recommendation pending owner
+approval. Cadence: one commit per task.
+
+---
+
 ### P1b: UI — Onboarding, Unlock, Backup Screens
 
 **Status:** Not started
