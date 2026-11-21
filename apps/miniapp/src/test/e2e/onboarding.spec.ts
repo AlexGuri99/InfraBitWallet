@@ -114,8 +114,10 @@ test.describe('onboarding and unlock', () => {
     });
 
     expect(dump.keys.sort()).toEqual(['vault_seal']);
+    // The stored envelope is JSON of hex fields; it must not contain the phrase as plaintext.
+    // (Individual short words are not checked: random hex can contain e.g. "face".)
     expect(dump.values).not.toContain(words.join(' '));
-    for (const word of words) expect(dump.values.toLowerCase()).not.toContain(word.toLowerCase());
+    expect(dump.values).toContain('passcodeWrappedKey');
   });
 
   test('imports a wallet phrase', async ({ page }) => {
