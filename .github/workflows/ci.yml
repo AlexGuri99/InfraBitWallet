@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  PNPM_VERSION: '9'
+  PNPM_VERSION: '12.21.0'
   NODE_VERSION: '22.22.2'
 
 jobs:
@@ -29,36 +29,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint
+      - name: Install Playwright system dependencies
+        run: pnpm --filter @onezerowallet/miniapp exec playwright install-deps chromium
 
-      - name: Type check
-        run: pnpm type-check
-
-      - name: Unit tests
-        run: pnpm test
-
-      - name: Build
-        run: pnpm build
-
-      - name: Build hash
-        id: build_hash
-        run: echo "hash=$(sha256sum apps/miniapp/dist/index.html | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-
-      - name: License scan
-        run: npx license-checker --summary --production --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;CC-BY-3.0;CC-BY-4.0;Unlicense' --excludePrivatePackages
-
-      - name: E2E tests
-        run: npx playwright install --with-deps && pnpm test:e2e
-
-      - name: Audit
-        run: pnpm audit --audit-level=high
-        continue-on-error: true
-        id: audit
-
-      - name: Check formatting
-        run: pnpm format:check
-
-      - name: Notify audit failures
-        if: steps.audit.outcome == 'failure'
-        run: echo "::warning::pnpm audit found high or critical vulnerabilities. Review needed."
+      - name: Verify (lint, type-check, test, build, format, audit, license, e2e)
+        run: pnpm run verify

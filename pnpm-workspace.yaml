@@ -3,5 +3,8 @@ packages:
   - 'packages/*'
   - 'services/*'
 
+allowBuilds:
+  esbuild: false
+
 overrides:
   valibot: '>=1.4.2'

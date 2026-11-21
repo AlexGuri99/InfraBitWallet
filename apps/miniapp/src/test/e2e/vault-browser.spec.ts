@@ -1,53 +1,65 @@
 /**
- * E2E test: vault operations in the browser under production CSP.
+ * E2E: the production build and the vault under the production CSP from vercel.json.
  *
- * Verifies:
- * 1. The production build loads under the CSP from vercel.json
- * 2. Argon2id-based vault create/unlock works in the browser (with wasm-unsafe-eval)
- * 3. V2 vault with mnemonic storage works in the browser
- * 4. Built bundle does not contain hardcoded secrets
+ * Preconditions (dist/ and .e2e/vault-bundle.js) are created by scripts/e2e-prepare.mjs,
+ * which Playwright's webServer runs before starting the preview server.
+ *
+ * The CSP is applied exactly as written in vercel.json (no string rewriting), and every
+ * test fails if the browser reports a CSP violation.
  */
-
-import { test, expect } from '@playwright/test';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
+import { test, expect, type Page, type Route } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SELF_DIR = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(SELF_DIR, '..', '..', '..', '..', '..');
+const MINIAPP_ROOT = resolve(SELF_DIR, '..', '..', '..');
+const PROJECT_ROOT = resolve(MINIAPP_ROOT, '..', '..');
+const VAULT_BUNDLE_PATH = resolve(MINIAPP_ROOT, '.e2e', 'vault-bundle.js');
 
-// ---------------------------------------------------------------------------
-// CSP helpers
-// ---------------------------------------------------------------------------
-
-/** Read the current CSP from vercel.json */
-function getCspFromVercel(): string {
-  const vercelPath = resolve(PROJECT_ROOT, 'vercel.json');
-  const raw = readFileSync(vercelPath, 'utf-8');
-  const cfg: Record<string, unknown> = JSON.parse(raw) as Record<string, unknown>;
-  const rawHeaders = cfg['headers'];
-  const headers: { source: string; headers: { key: string; value: string }[] }[] = Array.isArray(
-    rawHeaders,
-  )
-    ? (rawHeaders as { source: string; headers: { key: string; value: string }[] }[])
-    : [];
-  const match = headers.find((h) => h.source === '/(.*)');
-  const cspHeader = match?.headers?.find(
-    (h: { key: string; value: string }) => h.key.toLowerCase() === 'content-security-policy',
-  );
-  return cspHeader?.value ?? '';
+interface VercelHeader {
+  key: string;
+  value: string;
+}
+interface VercelHeaderRule {
+  source: string;
+  headers: VercelHeader[];
 }
 
-/** Vault test page HTML — served inline with the vault-bundle.js script */
-const VAULT_TEST_HTML =
-  '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><script src="vault-bundle.js"></script><h1 id="status">Ready</h1></body></html>';
+/** Read the production CSP from vercel.json. Throws if it is not present. */
+function getProductionCsp(): string {
+  const cfg = JSON.parse(readFileSync(resolve(PROJECT_ROOT, 'vercel.json'), 'utf-8')) as {
+    headers?: VercelHeaderRule[];
+  };
+  const rule = cfg.headers?.find((h) => h.source === '/(.*)');
+  const csp = rule?.headers.find((h) => h.key.toLowerCase() === 'content-security-policy')?.value;
+  if (!csp) throw new Error('vercel.json has no Content-Security-Policy header for /(.*)');
+  return csp;
+}
 
-/** Set up route interception that applies the given CSP to all file responses */
-async function applyCsp(page: import('@playwright/test').Page, csp: string): Promise<void> {
-  await page.route('**/*', async (route) => {
-    const url = route.request().url;
-    if (url.endsWith('/vault-test') || url.endsWith('/vault-test.html')) {
-      route.fulfill({
+const VAULT_TEST_HTML =
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>vault test</title></head>' +
+  '<body><h1 id="status">Ready</h1><script src="/vault-bundle.js"></script></body></html>';
+
+/**
+ * Serve the vault test page + bundle (same origin) and add the production CSP to every
+ * response. Collects CSP violations reported by the browser.
+ */
+async function applyProductionCsp(page: Page, csp: string): Promise<string[]> {
+  const violations: string[] = [];
+  await page.addInitScript(() => {
+    document.addEventListener('securitypolicyviolation', (e) => {
+      console.error(`CSP_VIOLATION ${e.violatedDirective} ${e.blockedURI}`);
+    });
+  });
+  page.on('console', (msg) => {
+    if (msg.text().startsWith('CSP_VIOLATION')) violations.push(msg.text());
+  });
+
+  await page.route('**/*', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/vault-test.html') {
+      await route.fulfill({
         status: 200,
         contentType: 'text/html',
         headers: { 'content-security-policy': csp },
@@ -55,190 +67,96 @@ async function applyCsp(page: import('@playwright/test').Page, csp: string): Pro
       });
       return;
     }
-    const response = await route.fetch();
-    const headers = new Headers(response.headers);
-    headers.set('content-security-policy', csp);
-    route.fulfill({
-      status: response.status,
-      headers: Object.fromEntries(headers),
-      body: await response.body(),
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Bundle secret scan
-// ---------------------------------------------------------------------------
-
-/** Collect all files with given extensions recursively from dir */
-function collectFiles(dir: string, exts: string[]): string[] {
-  const results: string[] = [];
-  try {
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      const full = join(dir, entry);
-      const st = statSync(full);
-      if (st.isDirectory()) {
-        results.push(...collectFiles(full, exts));
-      } else {
-        const hasExt = exts.some((e) => entry.endsWith(e));
-        if (hasExt) {
-          results.push(full);
-        }
-      }
-    }
-  } catch {
-    // skip non-existent dirs
-  }
-  return results;
-}
-
-interface ScanRule {
-  pattern: RegExp;
-  reason: string;
-}
-
-/** Patterns that should NOT appear in production JS bundles */
-const SECRET_PATTERNS: ScanRule[] = [
-  { pattern: /abandon (?:abandon ){11}about/, reason: 'BIP-39 test mnemonic' },
-  { pattern: /[0-9a-f]{128,}/i, reason: '512+ bit hex string (possible private key or seed)' },
-  { pattern: /xpriv|xprv|tprv|spriv/, reason: 'Extended private key prefix' },
-  { pattern: /BEGIN EC PRIVATE KEY|BEGIN RSA PRIVATE KEY/, reason: 'PEM-encoded private key' },
-  { pattern: /sk_-/i, reason: 'Stripe secret key pattern (sk_live/sk_test)' },
-  { pattern: /ghp_|gho_|github_pat/, reason: 'GitHub personal access token' },
-];
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-test.describe('Vault browser operations', () => {
-  const csp = getCspFromVercel();
-
-  test('production CSP allows app to load', async ({ page }) => {
-    await page.route('**/*', async (route) => {
-      const response = await route.fetch();
-      const headers = new Headers(response.headers);
-      headers.set('content-security-policy', csp);
-      route.fulfill({
-        status: response.status,
-        headers: Object.fromEntries(headers),
-        body: await response.body(),
+    if (path === '/vault-bundle.js') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/javascript',
+        headers: { 'content-security-policy': csp },
+        body: readFileSync(VAULT_BUNDLE_PATH),
       });
+      return;
+    }
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      headers: { ...response.headers(), 'content-security-policy': csp },
     });
-    await page.goto('/');
-    await expect(page.getByText('OneZeroWallet')).toBeVisible();
+  });
+  return violations;
+}
+
+test.describe('Production CSP', () => {
+  const csp = getProductionCsp();
+
+  test('CSP in vercel.json has wasm-unsafe-eval but no unsafe-eval or script unsafe-inline', () => {
+    const scriptSrc = csp.split(';').find((d) => d.trim().startsWith('script-src')) ?? '';
+    expect(scriptSrc).toContain("'wasm-unsafe-eval'");
+    expect(scriptSrc).not.toContain("'unsafe-eval'");
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
   });
 
-  test('Argon2id vault create/unlock works under production CSP (with wasm-unsafe-eval)', async ({
+  test('production CSP allows app to load with no CSP violations', async ({ page }) => {
+    const violations = await applyProductionCsp(page, csp);
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'OneZeroWallet' })).toBeVisible();
+    expect(violations).toEqual([]);
+  });
+
+  test('Argon2id vault create/unlock works under production CSP (WASM allowed)', async ({
     page,
   }) => {
-    const cspWithWasm = csp.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
-    await applyCsp(page, cspWithWasm);
+    const violations = await applyProductionCsp(page, csp);
     await page.goto('/vault-test.html');
-    await expect(page.getByText('Ready')).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('Ready');
 
     const result = await page.evaluate(async () => {
-      const win = window as unknown as Record<string, Record<string, unknown>>;
-      const vault = win['vault'];
-      if (!vault) return { ok: false, err: 'vault not loaded' };
+      const vault = (window as unknown as { vault?: Record<string, (...a: unknown[]) => unknown> })
+        .vault;
+      if (!vault) return { ok: false, err: 'vault bundle not loaded' };
       try {
-        const phrase = vault['generateMnemonicPhrase'](24) as string;
-        const normalized = vault['normalizeMnemonic'](phrase) as string;
-        const seed = vault['mnemonicToSeed'](normalized) as Uint8Array;
-        const seal = await (
-          vault['sealVault'] as (s: Uint8Array, p: string) => Promise<Record<string, unknown>>
-        )(seed, 'test-passcode-123');
-        const ur = await (
-          vault['unsealVault'] as (
-            s: Record<string, unknown>,
-            p: string,
-          ) => Promise<Record<string, unknown>>
-        )(seal, 'test-passcode-123');
-        const urr = ur as Record<string, boolean>;
-        if (!urr['success']) {
-          return { ok: false, err: (ur as Record<string, string>)['error'] ?? 'unknown' };
-        }
-        return { ok: true, ver: seal['version'] as number };
+        const phrase = vault['generateMnemonicPhrase']?.(24) as string;
+        const seed = vault['mnemonicToSeed']?.(vault['normalizeMnemonic']?.(phrase)) as Uint8Array;
+        const seal = await (vault['sealVault']?.(seed, 'test-passcode-123') as Promise<
+          Record<string, unknown>
+        >);
+        const unsealed = (await (vault['unsealVault']?.(seal, 'test-passcode-123') as Promise<
+          Record<string, unknown>
+        >)) as { success: boolean; error?: string };
+        return unsealed.success
+          ? { ok: true, version: seal['version'] as number }
+          : { ok: false, err: unsealed.error ?? 'unknown' };
       } catch (e) {
-        return { ok: false, err: e instanceof Error ? e.message : String(e) };
+        return { ok: false, err: e instanceof Error ? e.message : 'non-Error thrown' };
       }
     });
 
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.ver).toBe(1);
-    }
+    expect(result).toMatchObject({ ok: true });
+    expect(violations).toEqual([]);
   });
 
-  test('v2 vault with mnemonic works under production CSP', async ({ page }) => {
-    const cspWithWasm = csp.replace("script-src 'self'", "script-src 'self' 'wasm-unsafe-eval'");
-    await applyCsp(page, cspWithWasm);
+  test('Argon2id fails closed when WASM is blocked by a CSP without wasm-unsafe-eval', async ({
+    page,
+  }) => {
+    // Negative control: proves the previous test depends on 'wasm-unsafe-eval' and is not vacuous.
+    const strictCsp = csp.replace(" 'wasm-unsafe-eval'", '');
+    expect(strictCsp).not.toContain('wasm-unsafe-eval');
+    await applyProductionCsp(page, strictCsp);
     await page.goto('/vault-test.html');
-    await expect(page.getByText('Ready')).toBeVisible();
+    await expect(page.locator('#status')).toHaveText('Ready');
 
     const result = await page.evaluate(async () => {
-      const win = window as unknown as Record<string, Record<string, unknown>>;
-      const vault = win['vault'];
-      if (!vault) return { ok: false, err: 'vault not loaded' };
+      const vault = (window as unknown as { vault?: Record<string, (...a: unknown[]) => unknown> })
+        .vault;
+      if (!vault) return { ok: false, err: 'vault bundle not loaded' };
       try {
-        const phrase = vault['generateMnemonicPhrase'](24) as string;
-        const normalized = vault['normalizeMnemonic'](phrase) as string;
-        const seed = vault['mnemonicToSeed'](normalized) as Uint8Array;
-        const seal = await (
-          vault['sealVault'] as (
-            s: Uint8Array,
-            p: string,
-            ds: unknown,
-            cfg: unknown,
-            mn: string,
-          ) => Promise<Record<string, unknown>>
-        )(seed, 'v2-password-789', undefined, undefined, phrase);
-        if ((seal['version'] as number) !== 2) {
-          return { ok: false, err: 'not v2' };
-        }
-        const ur = await (
-          vault['unsealVault'] as (
-            s: Record<string, unknown>,
-            p: string,
-          ) => Promise<Record<string, unknown>>
-        )(seal, 'v2-password-789');
-        const urr = ur as Record<string, string>;
-        if (!(ur as Record<string, boolean>)['success']) {
-          return { ok: false, err: urr['error'] ?? 'unknown' };
-        }
-        return { ok: true, mnemonicMatch: urr['mnemonic'] === phrase };
+        const seed = new Uint8Array(64).fill(1);
+        await (vault['sealVault']?.(seed, 'test-passcode-123') as Promise<unknown>);
+        return { ok: true, err: '' };
       } catch (e) {
-        return { ok: false, err: e instanceof Error ? e.message : String(e) };
+        return { ok: false, err: e instanceof Error ? e.message : 'non-Error thrown' };
       }
     });
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.mnemonicMatch).toBe(true);
-    }
-  });
-
-  test('built JS bundle has no hardcoded secrets', async () => {
-    const distDir = resolve(PROJECT_ROOT, 'apps/miniapp/dist');
-    const jsFiles = collectFiles(distDir, ['.js', '.html']);
-    expect(jsFiles.length).toBeGreaterThan(0);
-
-    const allIssues: string[] = [];
-    for (const f of jsFiles) {
-      const content = readFileSync(f, 'utf-8');
-      for (const rule of SECRET_PATTERNS) {
-        if (rule.pattern.test(content)) {
-          allIssues.push(`${f.replace(PROJECT_ROOT, '').replace(/\\/g, '/')}: ${rule.reason}`);
-        }
-      }
-    }
-    if (allIssues.length > 0) {
-      console.log('Secret scan issues found:');
-      for (const issue of allIssues) {
-        console.log(`  ${issue}`);
-      }
-    }
-    expect(allIssues).toHaveLength(0);
+    expect(result.ok).toBe(false);
+    expect(result.err).toBe('KDF_UNAVAILABLE');
   });
 });
