@@ -6,13 +6,8 @@
  * guessed at. Legacy envelopes (v1–v3) are returned to the caller so they can be migrated with
  * the passcode, and are never written back unchanged.
  */
-import { z } from 'zod';
+import { z } from './zod-jitless';
 import type { StorageAdapter } from './storage';
-
-// Strict CSP forbids `unsafe-eval`; zod's JIT compiles validators with `new Function`, which the
-// browser reports as a script-src eval violation. Disable it before any schema runs. Only seal
-// parsing uses zod, so the cost is negligible. Source: zod v4 global config (`jitless`).
-z.config({ jitless: true });
 import { STORAGE_KEYS } from './storage';
 import {
   migrateLegacySeal,
@@ -33,9 +28,12 @@ const paraParams = {
 };
 
 /** Current (v4) envelope. `biometricWrappedKey` is optional. */
+const accountTypeSchema = z.enum(['bip39-multichain', 'ton-native-only']);
+
 export const VaultSealSchema = z
   .object({
     version: z.literal(VAULT_FORMAT_VERSION),
+    accountType: accountTypeSchema,
     passcodeWrappedKey: hexBytes(60),
     hasDeviceSecret: z.boolean(),
     biometricWrappedKey: hexBytes(60).optional(),
@@ -53,7 +51,8 @@ export const VaultSealSchema = z
 
 /** Legacy envelope shape (v1–v3). Used only to hand data to the migration function. */
 export const LegacyVaultSealSchema = z.looseObject({
-  version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  version: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+  accountType: accountTypeSchema.optional(),
   passcodeWrappedKey: hexBytes(60),
   hasDeviceSecret: z.boolean(),
   biometricWrappedKey: hexBytes(60).optional(),

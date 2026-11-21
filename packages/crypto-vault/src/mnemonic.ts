@@ -10,6 +10,11 @@
  */
 import { generateMnemonic, validateMnemonic, mnemonicToSeedSync } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
+import {
+  mnemonicNew as tonMnemonicNewImpl,
+  mnemonicToSeed as tonMnemonicToSeedImpl,
+  mnemonicValidate as tonMnemonicValidateImpl,
+} from '@ton/crypto';
 
 const WORDLIST = wordlist;
 
@@ -118,4 +123,40 @@ export function validateMnemonicPhrase(phrase: string): MnemonicValidation {
  */
 export function mnemonicToSeed(normalizedPhrase: string, passphrase: string = ''): Uint8Array {
   return mnemonicToSeedSync(normalizedPhrase, passphrase);
+}
+
+// ---------------------------------------------------------------------------
+// TON-native mnemonics (B2)
+// ---------------------------------------------------------------------------
+//
+// TON's own 24-word scheme uses the BIP-39 English wordlist but NOT the BIP-39 checksum and NOT
+// the BIP-39 seed derivation. Source (MIT): @ton/crypto mnemonic/mnemonic.js, which mirrors
+// ton-blockchain/ton tonlib/tonlib/keys/Mnemonic.cpp:
+//   entropy = HMAC-SHA512(words joined, password || "")
+//   valid   = PBKDF2-SHA512(entropy, "TON seed version", 100000/256, 64)[0] === 0
+//   seed    = PBKDF2-SHA512(entropy, "TON default seed", 100000, 64)
+//   key     = Ed25519 from seed[0..32]
+// Exported for the TON-native-only account path; never used for a bip39-multichain account.
+
+/** Generate a TON-native 24-word phrase (the library retries until the TON seed check passes). */
+export async function generateTonNativeMnemonicPhrase(): Promise<string> {
+  const words = await tonMnemonicNewImpl(24);
+  return words.join(' ');
+}
+
+/** TON-native validation (not a BIP-39 checksum check). */
+export async function validateTonMnemonicPhrase(phrase: string): Promise<boolean> {
+  const words = normalizeMnemonic(phrase).split(' ');
+  if (words.length !== 24) return false;
+  return tonMnemonicValidateImpl(words);
+}
+
+/**
+ * 64-byte seed used by TON-native accounts: PBKDF2-SHA512(entropy, "TON default seed", 100000).
+ * The Ed25519 private key is seed[0..32].
+ */
+export async function tonNativeMnemonicToSeed(phrase: string): Promise<Uint8Array> {
+  const words = normalizeMnemonic(phrase).split(' ');
+  const seed = await tonMnemonicToSeedImpl(words, 'TON default seed', '');
+  return new Uint8Array(seed);
 }

@@ -7,8 +7,15 @@
  * an export fails CI until someone consciously updates the list.
  */
 
-export { generateMnemonicPhrase, validateMnemonicPhrase, normalizeMnemonic } from './mnemonic';
+export {
+  generateMnemonicPhrase,
+  validateMnemonicPhrase,
+  normalizeMnemonic,
+  generateTonNativeMnemonicPhrase,
+  validateTonMnemonicPhrase,
+} from './mnemonic';
 export type { MnemonicLength, MnemonicValidation } from './mnemonic';
+export type { AccountType } from './account-type';
 
 export {
   createSeal,
@@ -57,6 +64,19 @@ export {
   isWipeThresholdReached,
   getBackoffCount,
 } from './backoff';
+
+export {
+  toEip55Address,
+  isValidEvmAddress,
+  toBase58TronAddress,
+  isValidTronAddress,
+  tonAddressesFromPublicKey,
+  validateTonAddress,
+  TON_MAINNET_GLOBAL_ID,
+  TON_TESTNET_GLOBAL_ID,
+  TON_V5R1_DEFAULT_WALLET_ID,
+} from './address';
+export type { TonAddressForms, TonAddressValidation } from './address';
 
 export { InMemoryStorage, CompositeStorage, STORAGE_KEYS } from './storage';
 export type { StorageAdapter } from './storage';

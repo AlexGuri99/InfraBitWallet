@@ -144,7 +144,7 @@ describe('A4: AAD binding and tamper detection (each asserts the specific error)
   });
 
   it('changing version -> unsupported_version (no decrypt attempted)', async () => {
-    for (const v of [1, 2, 3, 5, 0, -1]) {
+    for (const v of [1, 2, 3, 4, 6, 0, -1]) {
       expect(await unsealVault({ ...seal, version: v }, PASS)).toEqual({
         success: false,
         error: 'unsupported_version',
@@ -484,6 +484,70 @@ async function makeLegacyV3Seal(
     mnemonicIv: bytesToHex(mnEnc.iv),
   };
 }
+
+/** Re-create a v4 seal: conventional HKDF, no account type, AAD without the at= field. */
+async function makeLegacyV4Seal(
+  mnemonic: string,
+  passcode: string,
+  ds?: Uint8Array,
+): Promise<LegacyVaultSeal> {
+  const params = { ...FAST };
+  const seed = seedOf(mnemonic);
+  const vaultKey = crypto.getRandomValues(new Uint8Array(32));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const pk = await argon2id({
+    password: passcode.normalize('NFKD'),
+    salt,
+    parallelism: params.argon2Parallelism,
+    iterations: params.argon2TimeCost,
+    memorySize: params.argon2MemoryCost,
+    hashLength: 32,
+    outputType: 'binary',
+  });
+  const wrapping = ds ? combineWithDeviceSecret(pk, ds) : pk;
+  const aadFor = (role: 'seed' | 'mnemonic' | 'vault-key') =>
+    buildAad(role, 4, ds !== undefined, params);
+  const seedEnc = await gcmEncrypt(seed, vaultKey, aadFor('seed'));
+  const mnEnc = await gcmEncrypt(new TextEncoder().encode(mnemonic), vaultKey, aadFor('mnemonic'));
+  const wrapEnc = await gcmEncrypt(vaultKey, wrapping, aadFor('vault-key'));
+  return {
+    version: 4,
+    passcodeWrappedKey: bytesToHex(wrapEnc.iv) + bytesToHex(wrapEnc.ct),
+    hasDeviceSecret: ds !== undefined,
+    encryptedSeed: bytesToHex(seedEnc.ct),
+    iv: bytesToHex(seedEnc.iv),
+    passcodeSalt: bytesToHex(salt),
+    argon2TimeCost: params.argon2TimeCost,
+    argon2MemoryCost: params.argon2MemoryCost,
+    argon2Parallelism: params.argon2Parallelism,
+    encryptedMnemonic: bytesToHex(mnEnc.ct),
+    mnemonicIv: bytesToHex(mnEnc.iv),
+  };
+}
+
+describe('B2: migration of v4 seals (account type added)', () => {
+  it('v4 migrates to v5 as bip39-multichain and opens', async () => {
+    const legacy = await makeLegacyV4Seal(MNEMONIC_12_HARDHAT, PASS);
+    const m = await migrateLegacySeal(legacy, PASS);
+    expect(m.ok).toBe(true);
+    if (!m.ok) return;
+    expect(m.seal.version).toBe(VAULT_FORMAT_VERSION);
+    expect(m.seal.accountType).toBe('bip39-multichain');
+    const r = await unsealVault(m.seal, PASS);
+    expect(r.success && r.mnemonic).toBe(MNEMONIC_12_HARDHAT);
+  });
+
+  it('v4 with a device secret migrates only with the device secret', async () => {
+    const legacy = await makeLegacyV4Seal(MNEMONIC_12_ABANDON, PASS, DEVICE_SECRET);
+    expect(await migrateLegacySeal(legacy, PASS)).toEqual({
+      ok: false,
+      error: 'device_secret_missing',
+    });
+    const m = await migrateLegacySeal(legacy, PASS, DEVICE_SECRET);
+    expect(m.ok).toBe(true);
+    if (m.ok) expect((await unsealVault(m.seal, PASS, DEVICE_SECRET)).success).toBe(true);
+  });
+});
 
 describe('A10: migration of v3 seals (HKDF scheme change)', () => {
   it('v3 seal migrates to v4 and opens with the same passcode', async () => {

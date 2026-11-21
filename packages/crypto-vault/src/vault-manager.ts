@@ -28,7 +28,14 @@ import {
   type VaultConfig,
   type VaultSeal,
 } from './vault';
-import { generateMnemonicPhrase, normalizeMnemonic, validateMnemonicPhrase } from './mnemonic';
+import {
+  generateMnemonicPhrase,
+  generateTonNativeMnemonicPhrase,
+  normalizeMnemonic,
+  validateMnemonicPhrase,
+  validateTonMnemonicPhrase,
+} from './mnemonic';
+import { DEFAULT_ACCOUNT_TYPE, type AccountType } from './account-type';
 import { createDeviceSecret, deleteDeviceSecret, readDeviceSecret } from './device-secret';
 import { loadSeal, migrateStoredSeal, saveSeal, type MigrateStoredResult } from './seal-store';
 import {
@@ -104,7 +111,11 @@ export class VaultManager {
   }
 
   /** Create a new wallet. The generated phrase (if any) is returned ONCE for backup. */
-  async createWallet(passcode: string, mnemonic?: string): Promise<CreateWalletResult> {
+  async createWallet(
+    passcode: string,
+    mnemonic?: string,
+    options: { accountType?: AccountType | undefined } = {},
+  ): Promise<CreateWalletResult> {
     if (await this.hasVault()) return { ok: false, error: 'vault_exists' };
 
     const policy = this.evaluatePasscode(passcode);
@@ -112,14 +123,22 @@ export class VaultManager {
       return { ok: false, error: 'weak_passcode', message: policy.error };
     }
 
+    const accountType = options.accountType ?? DEFAULT_ACCOUNT_TYPE;
     let phrase: string;
     let generated = false;
     if (mnemonic === undefined) {
-      phrase = generateMnemonicPhrase(24);
+      phrase =
+        accountType === 'ton-native-only'
+          ? await generateTonNativeMnemonicPhrase()
+          : generateMnemonicPhrase(24);
       generated = true;
     } else {
       phrase = normalizeMnemonic(mnemonic);
-      if (!validateMnemonicPhrase(phrase).valid) return { ok: false, error: 'invalid_mnemonic' };
+      const valid =
+        accountType === 'ton-native-only'
+          ? await validateTonMnemonicPhrase(phrase)
+          : validateMnemonicPhrase(phrase).valid;
+      if (!valid) return { ok: false, error: 'invalid_mnemonic' };
     }
 
     let deviceSecret: Uint8Array | undefined;
@@ -127,7 +146,13 @@ export class VaultManager {
       deviceSecret = await createDeviceSecret(this.secureStorage);
     }
     try {
-      const seal = await createSeal(phrase, passcode, deviceSecret, this.options.config);
+      const seal = await createSeal(
+        phrase,
+        passcode,
+        deviceSecret,
+        this.options.config,
+        accountType,
+      );
       const saved = await saveSeal(this.sealStorage, seal);
       if (!saved.ok) return { ok: false, error: 'storage_error' };
       return generated ? { ok: true, seal, mnemonic: phrase } : { ok: true, seal };
@@ -136,9 +161,13 @@ export class VaultManager {
     }
   }
 
-  /** Import an existing wallet. The phrase must be valid. */
-  async importWallet(mnemonic: string, passcode: string): Promise<CreateWalletResult> {
-    return this.createWallet(passcode, mnemonic);
+  /** Import an existing wallet. The phrase must be valid for the chosen account type. */
+  async importWallet(
+    mnemonic: string,
+    passcode: string,
+    options: { accountType?: AccountType | undefined } = {},
+  ): Promise<CreateWalletResult> {
+    return this.createWallet(passcode, mnemonic, options);
   }
 
   /** Unlock with a passcode. Legacy seals report unsupported_version until migrated. */

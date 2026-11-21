@@ -26,6 +26,8 @@
 import type { StorageAdapter } from './storage';
 import { STORAGE_KEYS } from './storage';
 import { deriveTonKey, deriveTronKey, deriveEvmKey } from './derivation';
+import { toBase58TronAddress, toEip55Address, tonAddressesFromPublicKey } from './address';
+import type { AccountType } from './account-type';
 import { ed25519 } from '@noble/curves/ed25519';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { unsealVault, unlockWithBiometric } from './vault';
@@ -41,9 +43,23 @@ export type Chain = 'ton' | 'tron' | 'evm';
 /** Public material for one account on every chain. Nothing here is secret. */
 export interface PublicAccountInfo {
   accountIndex: number;
-  ton: { path: string; publicKeyHex: string };
-  tron: { path: string; publicKeyHex: string; hexAddress: string };
-  evm: { path: string; publicKeyHex: string; rawAddress: string };
+  accountType: AccountType;
+  ton: {
+    path: string;
+    publicKeyHex: string;
+    /** Wallet V5R1 mainnet raw "0:<hex>". */
+    addressRaw: string;
+    /** Wallet V5R1 mainnet, bounceable (EQ…). */
+    addressBounceable: string;
+    /** Wallet V5R1 mainnet, non-bounceable (UQ…). */
+    addressNonBounceable: string;
+    /** Wallet V5R1 testnet-only, non-bounceable (0Q…). */
+    addressTestnetNonBounceable: string;
+  };
+  /** Absent for ton-native-only accounts. */
+  tron?: { path: string; publicKeyHex: string; hexAddress: string; address: string } | undefined;
+  /** Absent for ton-native-only accounts. */
+  evm?: { path: string; publicKeyHex: string; rawAddress: string; address: string } | undefined;
 }
 
 export type SignError = 'locked' | 'invalid_chain' | 'invalid_digest' | 'invalid_account';
@@ -171,19 +187,47 @@ export async function wipeStoredVault(storage: StorageAdapter): Promise<void> {
   await resetBackoff(storage);
 }
 
-function publicInfoFor(seed: Uint8Array, accountIndex: number): PublicAccountInfo {
-  const ton = deriveTonKey(seed, accountIndex);
-  const tron = deriveTronKey(seed, accountIndex);
-  const evm = deriveEvmKey(seed, accountIndex);
+function publicInfoFor(
+  seed: Uint8Array,
+  accountIndex: number,
+  accountType: AccountType,
+): PublicAccountInfo {
+  const ton = deriveTonKey(seed, accountIndex, accountType);
+  const tonAddresses = tonAddressesFromPublicKey(ton.publicKeyHex);
   const info: PublicAccountInfo = {
     accountIndex,
-    ton: { path: ton.path, publicKeyHex: ton.publicKeyHex },
-    tron: { path: tron.path, publicKeyHex: tron.publicKeyHex, hexAddress: tron.hexAddress },
-    evm: { path: evm.path, publicKeyHex: evm.publicKeyHex, rawAddress: evm.rawAddress },
+    accountType,
+    ton: {
+      path: ton.path,
+      publicKeyHex: ton.publicKeyHex,
+      addressRaw: tonAddresses.raw,
+      addressBounceable: tonAddresses.bounceable,
+      addressNonBounceable: tonAddresses.nonBounceable,
+      addressTestnetNonBounceable: tonAddresses.testnetNonBounceable,
+    },
   };
   ton.privateKey.fill(0);
-  tron.privateKey.fill(0);
-  evm.privateKey.fill(0);
+
+  // A TON-native phrase has no TRON/EVM accounts: those derivations would silently produce
+  // unrelated keys that the user never backed up under that scheme.
+  if (accountType === 'bip39-multichain') {
+    const tron = deriveTronKey(seed, accountIndex);
+    const evm = deriveEvmKey(seed, accountIndex);
+    info.tron = {
+      path: tron.path,
+      publicKeyHex: tron.publicKeyHex,
+      hexAddress: tron.hexAddress,
+      address: toBase58TronAddress(tron.hexAddress),
+    };
+    info.evm = {
+      path: evm.path,
+      publicKeyHex: evm.publicKeyHex,
+      rawAddress: evm.rawAddress,
+      address: toEip55Address(evm.rawAddress),
+    };
+    tron.privateKey.fill(0);
+    evm.privateKey.fill(0);
+  }
   return info;
 }
 
@@ -233,9 +277,10 @@ function createSession(
   const session: VaultSession = {
     getPublicInfo(accountIndex = 0) {
       if (isLocked() || !validAccount(accountIndex)) return null;
+      if (seal.accountType === 'ton-native-only' && accountIndex !== 0) return null;
       let info = publicCache.get(accountIndex);
       if (!info) {
-        info = publicInfoFor(seed, accountIndex);
+        info = publicInfoFor(seed, accountIndex, seal.accountType);
         publicCache.set(accountIndex, info);
       }
       return structuredClone(info);
@@ -246,14 +291,20 @@ function createSession(
       if (!(CHAINS as readonly string[]).includes(chain)) {
         return { ok: false, error: 'invalid_chain' };
       }
+      if (seal.accountType === 'ton-native-only' && chain !== 'ton') {
+        return { ok: false, error: 'invalid_chain' };
+      }
       if (!validAccount(accountIndex)) return { ok: false, error: 'invalid_account' };
+      if (seal.accountType === 'ton-native-only' && accountIndex !== 0) {
+        return { ok: false, error: 'invalid_account' };
+      }
       if (!(digest instanceof Uint8Array) || digest.length !== 32) {
         return { ok: false, error: 'invalid_digest' };
       }
       touchSession();
       const key =
         chain === 'ton'
-          ? deriveTonKey(seed, accountIndex)
+          ? deriveTonKey(seed, accountIndex, seal.accountType)
           : chain === 'tron'
             ? deriveTronKey(seed, accountIndex)
             : deriveEvmKey(seed, accountIndex);

@@ -54,7 +54,7 @@ describe('A9: VaultManager create/import/unlock', () => {
     if (!unlocked.success) return;
     const info = unlocked.session.getPublicInfo(0);
     const seed = mnemonicToSeed(MNEMONIC_12_HARDHAT);
-    expect(info?.evm.rawAddress).toBe(deriveEvmKey(seed).rawAddress);
+    expect(info?.evm?.rawAddress).toBe(deriveEvmKey(seed).rawAddress);
   });
 
   it('rejects a second wallet while one exists', async () => {

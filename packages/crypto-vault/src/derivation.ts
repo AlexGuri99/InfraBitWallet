@@ -19,6 +19,7 @@ import { hmac } from '@noble/hashes/hmac';
 import { sha512 } from '@noble/hashes/sha2';
 import { bytesToHex } from '@noble/hashes/utils';
 import { keccak_256 } from '@noble/hashes/sha3';
+import { DEFAULT_ACCOUNT_TYPE, type AccountType } from './account-type';
 
 // ---------------------------------------------------------------------------
 // SLIP-10 Ed25519 derivation
@@ -113,7 +114,24 @@ export type DerivedKey = DerivedTonKey | DerivedTronKey | DerivedEvmKey;
  *
  * Source: SLIP-44 coin type 607
  */
-export function deriveTonKey(seed: Uint8Array, accountIndex: number = 0): DerivedTonKey {
+export function deriveTonKey(
+  seed: Uint8Array,
+  accountIndex: number = 0,
+  accountType: AccountType = DEFAULT_ACCOUNT_TYPE,
+): DerivedTonKey {
+  if (accountType === 'ton-native-only') {
+    // TON-native key: Ed25519 secret key is the first 32 bytes of the TON seed
+    // (@ton/crypto mnemonicToPrivateKey -> keyPairFromSeed(seed[0..32])). No HD path exists,
+    // and the phrase maps to exactly one account.
+    if (accountIndex !== 0) throw new Error('TON_NATIVE_SINGLE_ACCOUNT');
+    const privateKey = seed.slice(0, 32);
+    return {
+      chain: 'ton',
+      path: 'ton-native',
+      privateKey,
+      publicKeyHex: bytesToHex(ed25519.getPublicKey(privateKey)),
+    };
+  }
   const path = `m/44'/607'/${String(accountIndex)}'`;
   const { privateKey } = deriveSlip10Node(seed, path);
   const publicKey = ed25519.getPublicKey(privateKey);

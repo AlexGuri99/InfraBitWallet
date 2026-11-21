@@ -43,7 +43,14 @@
 import { argon2id } from 'hash-wasm';
 import { hkdf } from '@noble/hashes/hkdf';
 import { sha256 } from '@noble/hashes/sha2';
-import { mnemonicToSeed, normalizeMnemonic, validateMnemonicPhrase } from './mnemonic';
+import {
+  mnemonicToSeed,
+  normalizeMnemonic,
+  tonNativeMnemonicToSeed,
+  validateMnemonicPhrase,
+  validateTonMnemonicPhrase,
+} from './mnemonic';
+import { DEFAULT_ACCOUNT_TYPE, isAccountType, type AccountType } from './account-type';
 
 // ---------------------------------------------------------------------------
 // Types and constants
@@ -62,7 +69,7 @@ export const DEFAULT_VAULT_CONFIG: Required<VaultConfig> = {
 };
 
 /** Current seal format version. */
-export const VAULT_FORMAT_VERSION = 4;
+export const VAULT_FORMAT_VERSION = 5;
 
 /**
  * Accepted Argon2id parameter ranges. These numbers are OUR choice, not an external
@@ -100,6 +107,8 @@ const MNEMONIC_CT_MAX_BYTES = 1024;
  */
 export interface VaultSeal {
   version: number;
+  /** Which derivation the phrase belongs to; authenticated in the AAD. */
+  accountType: AccountType;
   /** Vault key wrapped by the passcode (or passcode+device secret) key: iv(12) || ct(32) || tag(16). */
   passcodeWrappedKey: string;
   /** True if the device secret is required. */
@@ -127,6 +136,8 @@ export interface VaultSeal {
  */
 export interface LegacyVaultSeal {
   version: number;
+  /** Absent before v5; migrations default to 'bip39-multichain'. */
+  accountType?: AccountType;
   passcodeWrappedKey: string;
   hasDeviceSecret: boolean;
   biometricWrappedKey?: string;
@@ -272,18 +283,21 @@ export function buildAad(
   version: number,
   hasDeviceSecret: boolean,
   params: Required<VaultConfig>,
+  accountType: AccountType = DEFAULT_ACCOUNT_TYPE,
 ): Uint8Array {
-  return new TextEncoder().encode(
-    [
-      'onezerowallet/vault',
-      `role=${role}`,
-      `v=${String(version)}`,
-      `t=${String(params.argon2TimeCost)}`,
-      `m=${String(params.argon2MemoryCost)}`,
-      `p=${String(params.argon2Parallelism)}`,
-      `ds=${hasDeviceSecret ? '1' : '0'}`,
-    ].join('|'),
-  );
+  const parts = [
+    'onezerowallet/vault',
+    `role=${role}`,
+    `v=${String(version)}`,
+    `t=${String(params.argon2TimeCost)}`,
+    `m=${String(params.argon2MemoryCost)}`,
+    `p=${String(params.argon2Parallelism)}`,
+    `ds=${hasDeviceSecret ? '1' : '0'}`,
+  ];
+  // v5 binds the account type. Older versions never had the field, so omitting it keeps their
+  // AAD byte-identical for decryption.
+  if (version >= 5) parts.push(`at=${accountType}`);
+  return new TextEncoder().encode(parts.join('|'));
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +405,7 @@ async function deriveLegacyV3WrappingKey(
 
 interface ParsedSeal {
   version: number;
+  accountType: AccountType;
   hasDeviceSecret: boolean;
   params: Required<VaultConfig>;
   salt: Uint8Array;
@@ -419,10 +434,19 @@ function readParams(s: Record<string, unknown>): Required<VaultConfig> | null {
   };
 }
 
-/** Parse the v3/v4 field set (identical apart from the optional biometric wrap). */
+/** Parse the v3–v5 field set (v5 adds a required account type; v4+ may carry a biometric wrap). */
 function parseSealBody(s: Record<string, unknown>, version: number): ParsedSeal | null {
   const hasDeviceSecret = s['hasDeviceSecret'];
   if (typeof hasDeviceSecret !== 'boolean') return null;
+
+  const rawAccountType = s['accountType'];
+  const accountType: AccountType | 'invalid' =
+    version >= 5
+      ? isAccountType(rawAccountType)
+        ? rawAccountType
+        : 'invalid'
+      : DEFAULT_ACCOUNT_TYPE;
+  if (accountType === 'invalid') return null;
 
   const params = readParams(s);
   if (params === null) return null;
@@ -447,6 +471,7 @@ function parseSealBody(s: Record<string, unknown>, version: number): ParsedSeal 
 
   return {
     version,
+    accountType,
     hasDeviceSecret,
     params,
     salt,
@@ -495,6 +520,7 @@ export async function sealVault(
   passcode: string,
   deviceSecret?: Uint8Array,
   config?: VaultConfig,
+  accountType: AccountType = DEFAULT_ACCOUNT_TYPE,
 ): Promise<VaultSeal> {
   const params = { ...DEFAULT_VAULT_CONFIG, ...config };
   if (!paramsInBounds(params)) throw new Error('INVALID_KDF_PARAMS');
@@ -515,21 +541,22 @@ export async function sealVault(
     const seedEnc = await aesEncrypt(
       seed,
       vaultKey,
-      buildAad('seed', version, hasDeviceSecret, params),
+      buildAad('seed', version, hasDeviceSecret, params, accountType),
     );
     const mnemonicEnc = await aesEncrypt(
       new TextEncoder().encode(mnemonic),
       vaultKey,
-      buildAad('mnemonic', version, hasDeviceSecret, params),
+      buildAad('mnemonic', version, hasDeviceSecret, params, accountType),
     );
     const wrapEnc = await aesEncrypt(
       vaultKey,
       wrappingKey,
-      buildAad('vault-key', version, hasDeviceSecret, params),
+      buildAad('vault-key', version, hasDeviceSecret, params, accountType),
     );
 
     return {
       version,
+      accountType,
       passcodeWrappedKey: bytesToHex(concat(wrapEnc.iv, wrapEnc.ciphertext)),
       hasDeviceSecret,
       encryptedSeed: bytesToHex(seedEnc.ciphertext),
@@ -556,14 +583,19 @@ export async function createSeal(
   passcode: string,
   deviceSecret?: Uint8Array,
   config?: VaultConfig,
+  accountType: AccountType = DEFAULT_ACCOUNT_TYPE,
 ): Promise<VaultSeal> {
   const normalized = normalizeMnemonic(mnemonic);
-  if (!validateMnemonicPhrase(normalized).valid) {
-    throw new Error('INVALID_MNEMONIC');
+  let seed: Uint8Array;
+  if (accountType === 'ton-native-only') {
+    if (!(await validateTonMnemonicPhrase(normalized))) throw new Error('INVALID_MNEMONIC');
+    seed = await tonNativeMnemonicToSeed(normalized);
+  } else {
+    if (!validateMnemonicPhrase(normalized).valid) throw new Error('INVALID_MNEMONIC');
+    seed = mnemonicToSeed(normalized);
   }
-  const seed = mnemonicToSeed(normalized);
   try {
-    return await sealVault(seed, normalized, passcode, deviceSecret, config);
+    return await sealVault(seed, normalized, passcode, deviceSecret, config, accountType);
   } finally {
     seed.fill(0);
   }
@@ -581,13 +613,13 @@ async function openPayload(p: ParsedSeal, vaultKey: Uint8Array): Promise<VaultUn
       p.seedCt,
       vaultKey,
       p.seedIv,
-      buildAad('seed', p.version, p.hasDeviceSecret, p.params),
+      buildAad('seed', p.version, p.hasDeviceSecret, p.params, p.accountType),
     );
     mnemonicBytes = await aesDecrypt(
       p.mnemonicCt,
       vaultKey,
       p.mnemonicIv,
-      buildAad('mnemonic', p.version, p.hasDeviceSecret, p.params),
+      buildAad('mnemonic', p.version, p.hasDeviceSecret, p.params, p.accountType),
     );
   } catch {
     return { success: false, error: 'tampered_data' };
@@ -603,7 +635,11 @@ async function openPayload(p: ParsedSeal, vaultKey: Uint8Array): Promise<VaultUn
     mnemonicBytes.fill(0);
   }
 
-  const derived = mnemonicToSeed(normalizeMnemonic(mnemonic));
+  const normalized = normalizeMnemonic(mnemonic);
+  const derived =
+    p.accountType === 'ton-native-only'
+      ? await tonNativeMnemonicToSeed(normalized)
+      : mnemonicToSeed(normalized);
   const matches = constantTimeEqual(derived, seed);
   derived.fill(0);
   if (!matches) {
@@ -651,7 +687,7 @@ export async function unsealVault(
         p.wrappedKey.slice(IV_BYTES),
         wrappingKey,
         p.wrappedKey.slice(0, IV_BYTES),
-        buildAad('vault-key', p.version, p.hasDeviceSecret, p.params),
+        buildAad('vault-key', p.version, p.hasDeviceSecret, p.params, p.accountType),
       );
     } catch {
       // GCM cannot tell a wrong passcode from a modified wrapped key.
@@ -713,7 +749,7 @@ export async function enableBiometric(
         p.wrappedKey.slice(IV_BYTES),
         wrappingKey,
         p.wrappedKey.slice(0, IV_BYTES),
-        buildAad('vault-key', p.version, p.hasDeviceSecret, p.params),
+        buildAad('vault-key', p.version, p.hasDeviceSecret, p.params, p.accountType),
       );
     } catch {
       return { ok: false, error: 'wrong_passcode' };
@@ -724,7 +760,7 @@ export async function enableBiometric(
     const wrapEnc = await aesEncrypt(
       vaultKey,
       bioKey,
-      buildAad('biometric-key', p.version, p.hasDeviceSecret, p.params),
+      buildAad('biometric-key', p.version, p.hasDeviceSecret, p.params, p.accountType),
     );
     return {
       ok: true,
@@ -779,7 +815,7 @@ export async function unlockWithBiometric(
         p.biometricWrappedKey.slice(IV_BYTES),
         bioKey,
         p.biometricWrappedKey.slice(0, IV_BYTES),
-        buildAad('biometric-key', p.version, p.hasDeviceSecret, p.params),
+        buildAad('biometric-key', p.version, p.hasDeviceSecret, p.params, p.accountType),
       );
     } catch {
       return { success: false, error: 'wrong_passcode' };
@@ -819,6 +855,7 @@ export async function changePasscode(
       newPasscode,
       deviceSecret,
       config,
+      seal.accountType,
     );
     return { ok: true, seal: next };
   } finally {
@@ -856,9 +893,12 @@ export async function migrateLegacySeal(
   const s = legacy as unknown as Record<string, unknown>;
 
   const version = s['version'];
-  if (version !== 1 && version !== 2 && version !== 3) {
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
     return legacyFailure('unsupported_version');
   }
+  const accountType: AccountType = isAccountType(s['accountType'])
+    ? s['accountType']
+    : DEFAULT_ACCOUNT_TYPE;
   const hasDeviceSecret = s['hasDeviceSecret'];
   if (typeof hasDeviceSecret !== 'boolean') return legacyFailure('malformed_seal');
   const params = readParams(s);
@@ -878,7 +918,7 @@ export async function migrateLegacySeal(
 
   let storedMnemonicIv: Uint8Array | null = null;
   let storedMnemonicCt: Uint8Array | null = null;
-  if (version === 2 || version === 3) {
+  if (version === 2 || version === 3 || version === 4) {
     storedMnemonicIv = parseHex(s['mnemonicIv'], IV_BYTES);
     storedMnemonicCt = parseHex(s['encryptedMnemonic']);
     if (
@@ -902,14 +942,21 @@ export async function migrateLegacySeal(
   let vaultKey: Uint8Array | null = null;
   let seed: Uint8Array | null = null;
   try {
-    // Every legacy version was written with the old combination; v4 is the first to use
-    // conventional HKDF.
-    wrappingKey = await deriveLegacyV3WrappingKey(
-      passcode,
-      salt,
-      params,
-      hasDeviceSecret ? deviceSecret : undefined,
-    );
+    // v1–v3 used the old combination; v4 is the first to use conventional HKDF.
+    wrappingKey =
+      version === 4
+        ? await deriveWrappingKey(
+            passcode,
+            salt,
+            params,
+            hasDeviceSecret ? deviceSecret : undefined,
+          )
+        : await deriveLegacyV3WrappingKey(
+            passcode,
+            salt,
+            params,
+            hasDeviceSecret ? deviceSecret : undefined,
+          );
     if (wrappingKey === null) return legacyFailure('kdf_unavailable');
 
     try {
@@ -917,7 +964,7 @@ export async function migrateLegacySeal(
         wrappedKey.slice(IV_BYTES),
         wrappingKey,
         wrappedKey.slice(0, IV_BYTES),
-        version === 3 ? buildAad('vault-key', version, hasDeviceSecret, params) : new Uint8Array(0),
+        version >= 3 ? buildAad('vault-key', version, hasDeviceSecret, params) : new Uint8Array(0),
       );
     } catch {
       return legacyFailure('wrong_passcode');
@@ -926,13 +973,13 @@ export async function migrateLegacySeal(
     let recovered: string | undefined;
     try {
       const seedAad =
-        version === 3
+        version >= 3
           ? buildAad('seed', version, hasDeviceSecret, params)
           : (storedAad as Uint8Array);
       seed = await aesDecrypt(seedCt, vaultKey, seedIv, seedAad);
       if (storedMnemonicCt && storedMnemonicIv) {
         const mnAad =
-          version === 3
+          version >= 3
             ? buildAad('mnemonic', version, hasDeviceSecret, params)
             : (storedAad as Uint8Array);
         const bytes = await aesDecrypt(storedMnemonicCt, vaultKey, storedMnemonicIv, mnAad);
@@ -952,7 +999,7 @@ export async function migrateLegacySeal(
     derived.fill(0);
     if (!matches) return legacyFailure('seed_mnemonic_mismatch');
 
-    const newSeal = await sealVault(seed, normalized, passcode, deviceSecret, params);
+    const newSeal = await sealVault(seed, normalized, passcode, deviceSecret, params, accountType);
     return { ok: true, seal: newSeal };
   } finally {
     wrappingKey?.fill(0);

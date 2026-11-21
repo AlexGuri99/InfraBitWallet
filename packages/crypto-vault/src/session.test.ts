@@ -10,6 +10,7 @@ import { recoverPublicKey, type Hex } from 'viem';
 import { createSeal, type VaultSeal } from './vault';
 import { mnemonicToSeed } from './mnemonic';
 import { deriveTonKey, deriveTronKey, deriveEvmKey } from './derivation';
+import { isValidEvmAddress, isValidTronAddress, validateTonAddress } from './address';
 import { unlockSession, lockSession, getSession, type VaultSession } from './session';
 import { InMemoryStorage } from './storage';
 import { MNEMONIC_12_HARDHAT } from './fixtures/mnemonics';
@@ -118,18 +119,37 @@ describe('A2: the session object does not expose secrets', () => {
   it('getPublicInfo returns a copy: mutating it does not affect later calls', async () => {
     const s = await open();
     const a = s.getPublicInfo(0);
-    if (!a) throw new Error('expected info');
+    if (!a?.evm) throw new Error('expected info');
     a.evm.rawAddress = 'tampered';
-    expect(s.getPublicInfo(0)?.evm.rawAddress).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(s.getPublicInfo(0)?.evm?.rawAddress).toMatch(/^0x[0-9a-f]{40}$/);
   });
 
   it('getPublicInfo matches independently derived public material', async () => {
     const s = await open();
     const seed = mnemonicToSeed(MNEMONIC_12_HARDHAT);
     const info = s.getPublicInfo(0);
-    expect(info?.evm.rawAddress).toBe(deriveEvmKey(seed).rawAddress);
+    expect(info?.evm?.rawAddress).toBe(deriveEvmKey(seed).rawAddress);
     expect(info?.ton.publicKeyHex).toBe(deriveTonKey(seed).publicKeyHex);
-    expect(info?.tron.hexAddress).toBe(deriveTronKey(seed).hexAddress);
+    expect(info?.tron?.hexAddress).toBe(deriveTronKey(seed).hexAddress);
+  });
+
+  it('B1: getPublicInfo exposes checksummed EVM, base58 TRON and V5R1 TON addresses', async () => {
+    const s = await open();
+    const info = s.getPublicInfo(0);
+    if (!info?.evm || !info.tron) throw new Error('expected info');
+    // Hardhat mnemonic first account: published EIP-55 address.
+    expect(info.evm.address).toBe('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266');
+    expect(isValidEvmAddress(info.evm.address)).toBe(true);
+    expect(info.tron.address).toMatch(/^T[1-9A-HJ-NP-Za-km-z]{33}$/);
+    expect(isValidTronAddress(info.tron.address)).toBe(true);
+    expect(info.ton.addressRaw).toMatch(/^0:[0-9a-f]{64}$/);
+    expect(info.ton.addressBounceable.startsWith('EQ')).toBe(true);
+    expect(info.ton.addressNonBounceable.startsWith('UQ')).toBe(true);
+    expect(info.ton.addressTestnetNonBounceable.startsWith('0Q')).toBe(true);
+    expect(validateTonAddress(info.ton.addressNonBounceable).valid).toBe(true);
+    // Mutating the returned copy must not change later calls.
+    info.evm.address = 'tampered';
+    expect(s.getPublicInfo(0)?.evm?.address).toBe('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266');
   });
 
   it('getPublicInfo rejects invalid account indexes', async () => {
@@ -159,7 +179,7 @@ describe('A2: signatures verify against the public key (noble)', () => {
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       expect(r.signature).toHaveLength(65);
-      const pubHex = s.getPublicInfo(0)?.[chain].publicKeyHex ?? '';
+      const pubHex = s.getPublicInfo(0)?.[chain]?.publicKeyHex ?? '';
       const compact = r.signature.slice(0, 64);
       expect(secp256k1.verify(compact, DIGEST, hexToBytes(pubHex), { lowS: true })).toBe(true);
       // Independent recovery with viem (not the signer's own library).
