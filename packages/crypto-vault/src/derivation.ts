@@ -68,23 +68,48 @@ function deriveSlip10Node(seed: Uint8Array, path: string): Slip10Key {
 // Public API
 // ---------------------------------------------------------------------------
 
-export interface DerivedKey {
-  chain: 'ton' | 'tron' | 'evm';
+interface DerivedKeyBase {
   path: string;
   privateKey: Uint8Array;
-  address: string;
 }
+
+/**
+ * TON key material. There is deliberately NO `address` field: a TON wallet address is the
+ * hash of the wallet contract's StateInit (code + data incl. the public key), not the
+ * public key itself. Sending funds to `0:<publicKeyHex>` would lose them. Real address
+ * computation (WalletContractV5R1) is Stage B.
+ */
+export interface DerivedTonKey extends DerivedKeyBase {
+  chain: 'ton';
+  /** Ed25519 public key, 32 bytes, lowercase hex. NOT an address. */
+  publicKeyHex: string;
+}
+
+/** TRON key material. `hexAddress` is an intermediate form, not a user-facing address. */
+export interface DerivedTronKey extends DerivedKeyBase {
+  chain: 'tron';
+  /** 0x41 prefix + last 20 bytes of keccak256(pubkey[1:]), hex. Base58check T... form is Stage B. */
+  hexAddress: string;
+}
+
+/** EVM key material. `rawAddress` is lowercase and NOT EIP-55 checksummed (Stage B). */
+export interface DerivedEvmKey extends DerivedKeyBase {
+  chain: 'evm';
+  /** 0x + 20 bytes hex, lowercase, no checksum. */
+  rawAddress: string;
+}
+
+export type DerivedKey = DerivedTonKey | DerivedTronKey | DerivedEvmKey;
 
 /**
  * Derive a TON Ed25519 key pair.
  *
  * Path: m/44'/607'/0'  (SLIP-10, Ed25519)
- * Address: raw TON address format (workchain:pubkey_hash)
- * Full V5R1 address computed in chain-ton package.
+ * Returns the public key only; the wallet address is computed in Stage B.
  *
  * Source: SLIP-44 coin type 607
  */
-export function deriveTonKey(seed: Uint8Array, accountIndex: number = 0): DerivedKey {
+export function deriveTonKey(seed: Uint8Array, accountIndex: number = 0): DerivedTonKey {
   const path = `m/44'/607'/${String(accountIndex)}'`;
   const { privateKey } = deriveSlip10Node(seed, path);
   const publicKey = ed25519.getPublicKey(privateKey);
@@ -92,7 +117,7 @@ export function deriveTonKey(seed: Uint8Array, accountIndex: number = 0): Derive
     chain: 'ton',
     path,
     privateKey,
-    address: `0:${bytesToHex(publicKey)}`,
+    publicKeyHex: bytesToHex(publicKey),
   };
 }
 
@@ -100,14 +125,13 @@ export function deriveTonKey(seed: Uint8Array, accountIndex: number = 0): Derive
  * Derive a TRON secp256k1 key pair.
  *
  * Path: m/44'/195'/0'/0/0 (BIP-32, secp256k1)
- * Address (hex): 41 + keccak256(publicKey[1:])[-20:]
- * Full base58 address computed in chain-tron package.
+ * hexAddress: 41 + keccak256(publicKey[1:])[-20:] (intermediate form; base58check is Stage B)
  *
  * Sources:
  * - SLIP-44 coin type 195 (TRX)
  * - TRON accounts: https://developers.tron.network/docs/account
  */
-export function deriveTronKey(seed: Uint8Array, accountIndex: number = 0): DerivedKey {
+export function deriveTronKey(seed: Uint8Array, accountIndex: number = 0): DerivedTronKey {
   const path = `m/44'/195'/${String(accountIndex)}'/0/0`;
   const hdKey = HDKey.fromMasterSeed(seed);
   const child = hdKey.derive(path);
@@ -124,7 +148,7 @@ export function deriveTronKey(seed: Uint8Array, accountIndex: number = 0): Deriv
     chain: 'tron',
     path,
     privateKey: child.privateKey,
-    address: tronHexAddress,
+    hexAddress: tronHexAddress,
   };
 }
 
@@ -132,14 +156,14 @@ export function deriveTronKey(seed: Uint8Array, accountIndex: number = 0): Deriv
  * Derive an Ethereum secp256k1 key pair.
  *
  * Path: m/44'/60'/0'/0/0 (BIP-32, secp256k1)
- * Address: 0x + keccak256(publicKey[1:])[-20:] (lowercase; EIP-55 in chain-evm)
+ * rawAddress: 0x + keccak256(publicKey[1:])[-20:] (lowercase, no EIP-55 checksum; Stage B)
  *
  * Sources:
  * - BIP-44: https://github.com/bitcoin/bips/blob/master/bip-0044.mediawiki
  * - EIP-55: https://eips.ethereum.org/EIPS/eip-55
  * - SLIP-44 coin type 60
  */
-export function deriveEvmKey(seed: Uint8Array, accountIndex: number = 0): DerivedKey {
+export function deriveEvmKey(seed: Uint8Array, accountIndex: number = 0): DerivedEvmKey {
   const path = `m/44'/60'/${String(accountIndex)}'/0/0`;
   const hdKey = HDKey.fromMasterSeed(seed);
   const child = hdKey.derive(path);
@@ -156,14 +180,14 @@ export function deriveEvmKey(seed: Uint8Array, accountIndex: number = 0): Derive
     chain: 'evm',
     path,
     privateKey: child.privateKey,
-    address: ethAddress,
+    rawAddress: ethAddress,
   };
 }
 
 export interface DerivedKeys {
-  ton: DerivedKey;
-  tron: DerivedKey;
-  evm: DerivedKey;
+  ton: DerivedTonKey;
+  tron: DerivedTronKey;
+  evm: DerivedEvmKey;
 }
 
 /**

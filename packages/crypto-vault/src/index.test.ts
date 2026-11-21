@@ -145,7 +145,7 @@ describe('Derivation', () => {
     expect(key.chain).toBe('ton');
     expect(key.privateKey).toHaveLength(32);
     expect(key.path).toBe("m/44'/607'/0'");
-    expect(key.address).toMatch(/^0:[0-9a-f]+$/);
+    expect(key.publicKeyHex).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('derives TRON key from seed', () => {
@@ -154,7 +154,7 @@ describe('Derivation', () => {
     expect(key.chain).toBe('tron');
     expect(key.privateKey).toHaveLength(32);
     expect(key.path).toBe("m/44'/195'/0'/0/0");
-    expect(key.address).toMatch(/^41[0-9a-f]{40}$/i);
+    expect(key.hexAddress).toMatch(/^41[0-9a-f]{40}$/);
   });
 
   it('derives EVM key from seed', () => {
@@ -163,7 +163,7 @@ describe('Derivation', () => {
     expect(key.chain).toBe('evm');
     expect(key.privateKey).toHaveLength(32);
     expect(key.path).toBe("m/44'/60'/0'/0/0");
-    expect(key.address).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(key.rawAddress).toMatch(/^0x[0-9a-f]{40}$/);
   });
 
   it('derives all keys from one seed', () => {
@@ -172,8 +172,32 @@ describe('Derivation', () => {
     expect(keys.ton).toBeDefined();
     expect(keys.tron).toBeDefined();
     expect(keys.evm).toBeDefined();
-    expect(keys.ton.address).not.toBe(keys.tron.address);
-    expect(keys.tron.address).not.toBe(keys.evm.address);
+    expect(keys.ton.publicKeyHex).not.toBe(keys.tron.hexAddress);
+    expect(keys.tron.hexAddress).not.toBe(keys.evm.rawAddress);
+  });
+
+  it('A1: TON derivation exposes no address; any address-like property must not contain the public key', () => {
+    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const key = deriveTonKey(seed) as unknown as Record<string, unknown>;
+    const pub = key['publicKeyHex'] as string;
+    expect(pub).toMatch(/^[0-9a-f]{64}$/);
+    // The misleading field must not exist at all.
+    expect(Object.keys(key)).not.toContain('address');
+    expect(key['address']).toBeUndefined();
+    // Defence in depth: no string property other than publicKeyHex may equal or contain the pubkey,
+    // so a future "address" under any name that is just the raw key fails here.
+    for (const [name, value] of Object.entries(key)) {
+      if (name === 'publicKeyHex' || typeof value !== 'string') continue;
+      expect(value.toLowerCase()).not.toContain(pub);
+    }
+  });
+
+  it('A1: TRON and EVM results do not use the name "address" for intermediate forms', () => {
+    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    expect(Object.keys(deriveTronKey(seed))).not.toContain('address');
+    expect(Object.keys(deriveTronKey(seed))).toContain('hexAddress');
+    expect(Object.keys(deriveEvmKey(seed))).not.toContain('address');
+    expect(Object.keys(deriveEvmKey(seed))).toContain('rawAddress');
   });
 
   it('different accounts get different keys', () => {
