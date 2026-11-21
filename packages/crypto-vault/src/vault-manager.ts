@@ -98,6 +98,18 @@ export class VaultManager {
     return this.secureStorage !== undefined;
   }
 
+  /** True when the stored seal has a biometric wrap. */
+  async hasBiometric(): Promise<boolean> {
+    const loaded = await loadSeal(this.sealStorage);
+    return loaded.ok && loaded.seal.biometricWrappedKey !== undefined;
+  }
+
+  /** Account type of the stored seal, or null when there is no readable seal. */
+  async getAccountType(): Promise<AccountType | null> {
+    const loaded = await loadSeal(this.sealStorage);
+    return loaded.ok ? loaded.seal.accountType : null;
+  }
+
   /** Evaluate the policy for a passcode at the manager's current factor level. */
   evaluatePasscode(passcode: string): PasscodePolicy {
     return evaluatePasscodeStrength(passcode, this.usesDeviceSecret);
