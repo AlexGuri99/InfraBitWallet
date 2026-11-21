@@ -290,9 +290,9 @@ The recovery phrase is the same; only the account branch differs.
 
 ---
 
-## Decision: TON account model — BIP-39 default, TON-native import supported (OPEN — needs owner approval)
+## Decision: TON account model — BIP-39 default, TON-native import supported
 
-**Status:** Proposed (2026-11-21, Stage B). The code now supports both account types in the seal
+**Status:** Accepted (2026-11-21; owner approved Stage B). The code now supports both account types in the seal
 (`accountType: 'bip39-multichain' | 'ton-native-only'`). The default for new wallets remains
 `bip39-multichain`. The branding/UX choice is NOT final and needs the owner's approval.
 
@@ -350,7 +350,7 @@ The recovery phrase is the same; only the account branch differs.
 
 **Recommendation: option 3.** Default to BIP-39 multichain; offer TON-native import with an
 explicit warning that it is TON-only. Document that Ledger users need a custom path and see V4
-addresses. **Please approve or redirect the default before Stage C builds the onboarding copy.**
+addresses. **Approved:** BIP-39 remains the default; TON-native import is offered for TON-only accounts.
 
 ### Consequences in code
 
