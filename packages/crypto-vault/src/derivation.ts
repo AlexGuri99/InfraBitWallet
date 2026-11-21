@@ -33,7 +33,7 @@ interface Slip10Key {
  * Derive an Ed25519 key pair using SLIP-10.
  * See: https://github.com/satoshilabs/slips/blob/master/slip-0010.md
  */
-function deriveSlip10Node(seed: Uint8Array, path: string): Slip10Key {
+export function deriveSlip10Node(seed: Uint8Array, path: string): Slip10Key {
   if (!path.startsWith('m/')) {
     throw new Error(`Invalid SLIP-10 path: ${path}. Must start with "m/".`);
   }

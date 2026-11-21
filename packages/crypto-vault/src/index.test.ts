@@ -39,6 +39,7 @@ import {
 } from './index';
 
 import type { MnemonicLength } from './index';
+import { MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,10 +51,6 @@ function testSeed(): Uint8Array {
   const normalized = normalizeMnemonic(mnemonic);
   return mnemonicToSeed(normalized);
 }
-
-/** Known test mnemonic (BIP-39 spec example) */
-const TEST_MNEMONIC_24 =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 // ---------------------------------------------------------------------------
 // 1. Mnemonic tests
@@ -79,7 +76,7 @@ describe('Mnemonic', () => {
   });
 
   it('validates a known good mnemonic', () => {
-    const result = validateMnemonicPhrase(TEST_MNEMONIC_24);
+    const result = validateMnemonicPhrase(MNEMONIC_24_ABANDON);
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
@@ -107,7 +104,7 @@ describe('Mnemonic', () => {
   });
 
   it('produces a 64-byte seed from mnemonic', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     expect(seed).toHaveLength(64);
   });
 
@@ -140,7 +137,7 @@ describe('Mnemonic', () => {
 
 describe('Derivation', () => {
   it('derives TON key from seed', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     const key = deriveTonKey(seed);
     expect(key.chain).toBe('ton');
     expect(key.privateKey).toHaveLength(32);
@@ -149,7 +146,7 @@ describe('Derivation', () => {
   });
 
   it('derives TRON key from seed', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     const key = deriveTronKey(seed);
     expect(key.chain).toBe('tron');
     expect(key.privateKey).toHaveLength(32);
@@ -158,7 +155,7 @@ describe('Derivation', () => {
   });
 
   it('derives EVM key from seed', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     const key = deriveEvmKey(seed);
     expect(key.chain).toBe('evm');
     expect(key.privateKey).toHaveLength(32);
@@ -167,7 +164,7 @@ describe('Derivation', () => {
   });
 
   it('derives all keys from one seed', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     const keys = deriveAllKeys(seed);
     expect(keys.ton).toBeDefined();
     expect(keys.tron).toBeDefined();
@@ -177,7 +174,7 @@ describe('Derivation', () => {
   });
 
   it('A1: TON derivation exposes no address; any address-like property must not contain the public key', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     const key = deriveTonKey(seed) as unknown as Record<string, unknown>;
     const pub = key['publicKeyHex'] as string;
     expect(pub).toMatch(/^[0-9a-f]{64}$/);
@@ -193,7 +190,7 @@ describe('Derivation', () => {
   });
 
   it('A1: TRON and EVM results do not use the name "address" for intermediate forms', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     expect(Object.keys(deriveTronKey(seed))).not.toContain('address');
     expect(Object.keys(deriveTronKey(seed))).toContain('hexAddress');
     expect(Object.keys(deriveEvmKey(seed))).not.toContain('address');
@@ -201,7 +198,7 @@ describe('Derivation', () => {
   });
 
   it('different accounts get different keys', () => {
-    const seed = mnemonicToSeed(normalizeMnemonic(TEST_MNEMONIC_24));
+    const seed = mnemonicToSeed(normalizeMnemonic(MNEMONIC_24_ABANDON));
     const key0 = deriveTonKey(seed, 0);
     const key1 = deriveTonKey(seed, 1);
     expect(key0.privateKey).not.toEqual(key1.privateKey);
