@@ -11,7 +11,8 @@
 import { StorageAdapter, STORAGE_KEYS } from './storage';
 import { deriveAllKeys } from './derivation';
 import type { DerivedKeys } from './derivation';
-import { unsealVault, VaultSeal } from './vault';
+import { unsealVault } from './vault';
+import type { VaultSeal, VaultUnsealError } from './vault';
 
 // ---------------------------------------------------------------------------
 // Backoff
@@ -127,7 +128,7 @@ export async function unlockSession(
   | { success: true; session: VaultSession }
   | {
       success: false;
-      error: 'wrong_passcode' | 'device_secret_missing' | 'tampered_data' | 'kdf_unavailable';
+      error: VaultUnsealError;
     }
 > {
   // Check backoff

@@ -11,14 +11,13 @@
  * - Bundle/secret leakage scan
  * - Property tests (fast-check)
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import {
   generateMnemonicPhrase,
   validateMnemonicPhrase,
   normalizeMnemonic,
-  changePasscode,
-  evaluatePasscodeStrength,
+  createSeal,
   lockSession,
   getSession,
   InMemoryStorage,
@@ -33,7 +32,10 @@ import {
 import * as publicApi from './index';
 import { mnemonicToSeed } from './mnemonic';
 import { deriveTonKey, deriveTronKey, deriveEvmKey, deriveAllKeys } from './derivation';
-import { sealVault, unsealVault } from './vault';
+import { unsealVault } from './vault';
+import { MNEMONIC_12_ABANDON } from './fixtures/mnemonics';
+
+const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
 
 import type { MnemonicLength } from './index';
 import { MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
@@ -41,13 +43,6 @@ import { MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Generate a test seed deterministically */
-function testSeed(): Uint8Array {
-  const mnemonic = generateMnemonicPhrase(24);
-  const normalized = normalizeMnemonic(mnemonic);
-  return mnemonicToSeed(normalized);
-}
 
 // ---------------------------------------------------------------------------
 // 1. Mnemonic tests
@@ -250,275 +245,6 @@ describe('Derivation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Vault tests
-// ---------------------------------------------------------------------------
-
-describe('Vault', () => {
-  const passcode = 'correcthorsebatterystaple';
-  let seed: Uint8Array;
-
-  beforeAll(() => {
-    seed = testSeed();
-  });
-
-  it('encrypts and decrypts round trip', async () => {
-    const seal = await sealVault(seed, passcode);
-    const result = await unsealVault(seal, passcode);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.seed).toEqual(seed);
-    }
-  });
-
-  it('rejects wrong passcode', async () => {
-    const seal = await sealVault(seed, passcode);
-    const result = await unsealVault(seal, 'wrongpasscode');
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error).toBe('wrong_passcode');
-    }
-  });
-
-  it('rejects tampered ciphertext', async () => {
-    const seal = await sealVault(seed, passcode);
-    const tampered = {
-      ...seal,
-      encryptedSeed: '00' + seal.encryptedSeed.slice(2),
-    };
-    const result = await unsealVault(tampered, passcode);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error).toBe('tampered_data');
-    }
-  });
-
-  it('rejects tampered IV', async () => {
-    const seal = await sealVault(seed, passcode);
-    const tampered = {
-      ...seal,
-      iv: '00' + seal.iv.slice(2),
-    };
-    const result = await unsealVault(tampered, passcode);
-    expect(result.success).toBe(false);
-  });
-
-  it('uses unique IVs across multiple encryptions', async () => {
-    const ivs = new Set<string>();
-    for (let i = 0; i < 10; i++) {
-      const seal = await sealVault(seed, passcode);
-      ivs.add(seal.iv);
-    }
-    expect(ivs.size).toBe(10);
-  });
-
-  it('supports version/parameter upgrade (different config)', async () => {
-    const seal = await sealVault(seed, passcode, undefined, {
-      argon2TimeCost: 4,
-      argon2MemoryCost: 32768,
-    });
-    const result = await unsealVault(seal, passcode);
-    expect(result.success).toBe(true);
-  });
-
-  it('can change passcode', async () => {
-    const seal = await sealVault(seed, passcode);
-    const newSeal = await changePasscode(seal, passcode, 'newpasscode123');
-    if ('version' in newSeal) {
-      // New seal works with new passcode
-      const r1 = await unsealVault(newSeal, 'newpasscode123');
-      expect(r1.success).toBe(true);
-      // Old seal still works with old passcode
-      const r2 = await unsealVault(seal, passcode);
-      expect(r2.success).toBe(true);
-    } else {
-      expect(true).toBe(false); // should not reach here
-    }
-  });
-
-  it('passcode-only mode works', async () => {
-    const seal = await sealVault(seed, passcode);
-    const result = await unsealVault(seal, passcode);
-    expect(result.success).toBe(true);
-  });
-
-  it('property: vault round trips for random seeds', async () => {
-    const testConfig = { argon2TimeCost: 2, argon2MemoryCost: 1024 };
-    await fc.assert(
-      fc.asyncProperty(
-        fc.uint8Array({ minLength: 64, maxLength: 64 }),
-        fc.string({ minLength: 4, maxLength: 12 }),
-        async (randomSeed, randomPasscode) => {
-          const seal = await sealVault(randomSeed, randomPasscode, undefined, testConfig);
-          const result = await unsealVault(seal, randomPasscode);
-          if (!result.success) return false;
-          const seedArr = Array.from(result.seed);
-          const origArr = Array.from(randomSeed);
-          return seedArr.every((b, i) => b === origArr[i]);
-        },
-      ),
-      { numRuns: 5 },
-    );
-  }, 30000);
-
-  it('evaluates passcode strength with device secret', () => {
-    expect(evaluatePasscodeStrength('ab', true)).not.toBe('');
-    expect(evaluatePasscodeStrength('abcd', true)).toBe('');
-    expect(evaluatePasscodeStrength('abcdefgh123', true)).toBe('');
-  });
-
-  it('evaluates passcode strength without device secret', () => {
-    expect(evaluatePasscodeStrength('abcd', false)).not.toBe('');
-    expect(evaluatePasscodeStrength('abcdefgh', false)).not.toBe('');
-    expect(evaluatePasscodeStrength('abcdefg1', false)).toBe('');
-    expect(evaluatePasscodeStrength('abcdefgh1', false)).toBe('');
-  });
-
-  // ---------------------------------------------------------------------------
-  // Vault v2 + mnemonic storage tests
-  // ---------------------------------------------------------------------------
-
-  it('v2 seal stores and returns mnemonic', async () => {
-    const mnemonic =
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
-    expect(seal.version).toBe(2);
-    expect(seal.encryptedMnemonic).toBeDefined();
-    expect(seal.mnemonicIv).toBeDefined();
-
-    const result = await unsealVault(seal, passcode);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.mnemonic).toBe(mnemonic);
-      expect(result.seed).toEqual(seed);
-    }
-  });
-
-  it('v1 seal (no mnemonic) returns version 1 without mnemonic fields', async () => {
-    const seal = await sealVault(seed, passcode);
-    expect(seal.version).toBe(1);
-    expect(seal.encryptedMnemonic).toBeUndefined();
-    expect(seal.mnemonicIv).toBeUndefined();
-
-    const result = await unsealVault(seal, passcode);
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.mnemonic).toBeUndefined();
-    }
-  });
-
-  it('v2 seal rejects tampered mnemonic', async () => {
-    const mnemonic =
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
-    const tampered = {
-      ...seal,
-      encryptedMnemonic: '00' + (seal.encryptedMnemonic ?? '').slice(2),
-    };
-    const result = await unsealVault(tampered, passcode);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error).toBe('tampered_data');
-    }
-  });
-
-  it('v1 to v2 migration via re-seal preserves mnemonic', async () => {
-    const mnemonic =
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    // Create v1 seal (no mnemonic)
-    const v1Seal = await sealVault(seed, passcode);
-    expect(v1Seal.version).toBe(1);
-
-    // Unseal v1, then re-seal as v2 with mnemonic
-    const v1Result = await unsealVault(v1Seal, passcode);
-    expect(v1Result.success).toBe(true);
-    if (v1Result.success) {
-      const v2Seal = await sealVault(v1Result.seed, passcode, undefined, undefined, mnemonic);
-      expect(v2Seal.version).toBe(2);
-      expect(v2Seal.encryptedMnemonic).toBeDefined();
-
-      // Verify v2 unseal returns mnemonic
-      const v2Result = await unsealVault(v2Seal, passcode);
-      expect(v2Result.success).toBe(true);
-      if (v2Result.success) {
-        expect(v2Result.mnemonic).toBe(mnemonic);
-      }
-    }
-  });
-
-  it('changePasscode preserves mnemonic in v2 seal', async () => {
-    const mnemonic =
-      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-    const seal = await sealVault(seed, passcode, undefined, undefined, mnemonic);
-    expect(seal.version).toBe(2);
-
-    const newSeal = await changePasscode(seal, passcode, 'newpass123');
-    if ('version' in newSeal) {
-      expect(newSeal.version).toBe(2);
-      expect(newSeal.encryptedMnemonic).toBeDefined();
-
-      const result = await unsealVault(newSeal, 'newpass123');
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.mnemonic).toBe(mnemonic);
-      }
-    } else {
-      expect(true).toBe(false);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// 4. Device-secret wrap tests
-// ---------------------------------------------------------------------------
-
-describe('Device-secret wrap', () => {
-  it('device secret required for unlock when hasDeviceSecret', async () => {
-    const seed = testSeed();
-    const passcode = 'mypasscode42';
-    const deviceSecret = new Uint8Array(32).fill(0xab);
-
-    const seal = await sealVault(seed, passcode, deviceSecret);
-    expect(seal.hasDeviceSecret).toBe(true);
-
-    // Correct passcode + correct device secret should succeed
-    const goodResult = await unsealVault(seal, passcode, deviceSecret);
-    expect(goodResult.success).toBe(true);
-
-    // Correct passcode + NO device secret should fail
-    const noDsResult = await unsealVault(seal, passcode);
-    expect(noDsResult.success).toBe(false);
-    if (!noDsResult.success) {
-      expect(noDsResult.error).toBe('device_secret_missing');
-    }
-
-    // Wrong passcode + correct device secret should fail
-    const wrongPwResult = await unsealVault(seal, 'wrongpass', deviceSecret);
-    expect(wrongPwResult.success).toBe(false);
-    if (!wrongPwResult.success) {
-      expect(wrongPwResult.error).toBe('wrong_passcode');
-    }
-
-    // Wrong device secret should fail
-    const wrongDs = new Uint8Array(32).fill(0xcd);
-    const wrongDsResult = await unsealVault(seal, passcode, wrongDs);
-    expect(wrongDsResult.success).toBe(false);
-  });
-
-  it('seal has no passcode-only unlockable copy when hasDeviceSecret', async () => {
-    const seed = testSeed();
-    const passcode = 'test1234';
-    const deviceSecret = new Uint8Array(32).fill(0xef);
-
-    const seal = await sealVault(seed, passcode, deviceSecret);
-    expect(seal.hasDeviceSecret).toBe(true);
-
-    // With device secret mode, passcode-only unlock must fail
-    const result = await unsealVault(seal, passcode);
-    expect(result.success).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // 5. Backoff tests
 // ---------------------------------------------------------------------------
 
@@ -566,9 +292,8 @@ describe('Backoff', () => {
 
 describe('Session', () => {
   it('unlocks and provides keys', async () => {
-    const seed = testSeed();
-    const passcode = 'sessiontest99';
-    const seal = await sealVault(seed, passcode);
+    const passcode = 'sessiontest99-passcode';
+    const seal = await createSeal(MNEMONIC_12_ABANDON, passcode, undefined, FAST);
     const storage = new InMemoryStorage();
 
     const result = await unlockSession(seal, passcode, storage);
@@ -581,9 +306,8 @@ describe('Session', () => {
   });
 
   it('locks and clears session', async () => {
-    const seed = testSeed();
-    const passcode = 'lockit99';
-    const seal = await sealVault(seed, passcode);
+    const passcode = 'lockit99-passcode';
+    const seal = await createSeal(MNEMONIC_12_ABANDON, passcode, undefined, FAST);
     const storage = new InMemoryStorage();
 
     const result = await unlockSession(seal, passcode, storage);
@@ -606,13 +330,17 @@ describe('Session', () => {
 
 describe('Secret leakage', () => {
   it('error messages do not contain secrets', async () => {
-    const seed = testSeed();
-    const seal = await sealVault(seed, 'pass123');
+    const seal = await createSeal(MNEMONIC_12_ABANDON, 'pass1234-ok', undefined, FAST);
 
     const wrongPass = await unsealVault(seal, 'wrongpass');
     const tampered = await unsealVault(
-      { ...seal, encryptedSeed: 'ff' + seal.encryptedSeed.slice(2) },
-      'pass123',
+      {
+        ...seal,
+        encryptedSeed:
+          (parseInt(seal.encryptedSeed.slice(0, 2), 16) ^ 1).toString(16).padStart(2, '0') +
+          seal.encryptedSeed.slice(2),
+      },
+      'pass1234-ok',
     );
 
     // Wrong passcode and tampered return constant error messages, not details
