@@ -1892,6 +1892,11 @@ describe('A9: CompositeStorage routes the device secret to the secure adapter', 
  */
 import { z } from 'zod';
 import type { StorageAdapter } from './storage';
+
+// Strict CSP forbids `unsafe-eval`; zod's JIT compiles validators with `new Function`, which the
+// browser reports as a script-src eval violation. Disable it before any schema runs. Only seal
+// parsing uses zod, so the cost is negligible. Source: zod v4 global config (`jitless`).
+z.config({ jitless: true });
 import { STORAGE_KEYS } from './storage';
 import {
   migrateLegacySeal,

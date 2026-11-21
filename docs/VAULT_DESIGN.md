@@ -186,6 +186,10 @@ Tests: `policy.test.ts`.
 - `CompositeStorage` — routes `DEVICE_SECRET` to the secure adapter and everything else to the
   bulk adapter, so the device secret never lands in IndexedDB.
 
+Zod runs in `jitless` mode (`z.config({ jitless: true })`) because its JIT compiles validators
+with `new Function`, which strict CSP (no `unsafe-eval`) rejects. Proven by
+`vault-browser.spec.ts › Argon2id vault create/unlock works under production CSP`.
+
 Persisted keys: `vault_seal`, `device_secret` (secure only), `backoff_count`,
 `backoff_next_allowed_at`.
 
