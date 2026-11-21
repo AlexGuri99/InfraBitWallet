@@ -231,18 +231,73 @@ If the user has the phrase: import it, set a passcode, and (if a secure adapter 
 device secret is created. If the user does not: funds are unrecoverable; there is no server-side
 escrow. The UI must warn that Telegram/OS may clear local data.
 
-## 12. Known gaps (Stage A)
+## 12. Addresses and account types (Stage B)
+
+### EVM
+
+`getPublicInfo().evm` exposes `rawAddress` (lowercase) and `address` (EIP-55). Checked against the
+official EIP-55 vectors, the published Hardhat first account and viem. `isValidEvmAddress` accepts
+all-lower/all-upper input and requires a correct checksum for mixed case.
+
+### TRON
+
+`hexAddress` is the intermediate 0x41-prefixed form; `address` is base58check (`T…`, double
+SHA-256 4-byte checksum). Cross-checked against TronWeb. `isValidTronAddress` decodes and requires
+21 bytes starting with 0x41.
+
+### TON
+
+`tonAddressesFromPublicKey` produces Wallet **V5R1** forms from the Ed25519 public key (workchain
+0, subwallet 0; mainnet global id -239, testnet -3):
+
+| Form                   | Prefix | Flags       |
+| ---------------------- | ------ | ----------- |
+| raw                    | `0:`   | —           |
+| mainnet bounceable     | `EQ`   | 0x11        |
+| mainnet non-bounceable | `UQ`   | 0x51        |
+| testnet bounceable     | `kQ`   | 0x11 + 0x80 |
+| testnet non-bounceable | `0Q`   | 0x51 + 0x80 |
+
+Flags per docs.ton.org address formats. `validateTonAddress` accepts raw and user-friendly forms
+(CRC16 checked by @ton/core) and reports the testnet flag. The address is cross-checked against an
+independent StateInit hash (`contractAddress`) in `address.test.ts`.
+
+**Receive UX rule (first-time recipients):** show and prefer the **non-bounceable** mainnet
+address (`UQ…`) for wallet contracts, so funds are credited even if the recipient wallet is not yet
+initialized. The app must explain this in plain language and still show the bounceable form for
+users who need it. Testnet addresses are clearly labelled and never shown without the testnet
+warning.
+
+### Account types
+
+- `bip39-multichain` (default): BIP-39 phrase → TON `m/44'/607'/N'` (SLIP-10), TRON
+  `m/44'/195'/N'/0/0`, EVM `m/44'/60'/N'/0/0`.
+- `ton-native-only`: a TON-native 24-word phrase → Ed25519 key via @ton/crypto; TON only, account
+  index 0. No TRON/EVM keys are derived or shown.
+
+The type is stored in seal v5 and authenticated in the AAD. Migration from v1–v4 defaults to
+`bip39-multichain`. Tests: `account-type.test.ts` (official @ton/crypto vector),
+`vault.test.ts › B2: migration of v4 seals`.
+
+Interop caveats (source-cited in `docs/DECISIONS.md`): Keeper's BIP-39 path matches our account 0;
+Ledger defaults to a different path and Wallet V4, so its address differs; My Wallet was not
+inspected by design.
+
+## 13. Known gaps (Stage A/B)
 
 - **No UI yet.** Stage C builds onboarding/unlock/backup screens on this API.
-- **No real addresses.** TON/TRON/EVM results are intermediate forms (`publicKeyHex`, `hexAddress`,
-  `rawAddress`); real address computation is Stage B.
 - **Argon2id timing is unmeasured** on a real mobile WebView; defaults are our choice.
 - **Account-index convention is unresolved** for other wallets (see `docs/DECISIONS.md`).
-- **WebKit is not in the Playwright run** (see `docs/UNVERIFIED.md`).
+- **TON interop for My Wallet is unknown** (not inspected; license constraint) and the wallet
+  version Keeper defaults to is UNVERIFIED.
+- **Send-path address input validation is not wired into a UI** yet (validators exist and are
+  tested).
+- **WebKit now runs locally**, but CI system dependencies for WebKit are unverified
+  (see `docs/UNVERIFIED.md`).
 - **Signing is blind at this layer** until adapters build `SigningRequest`s.
 - **JavaScript cannot guarantee memory wiping**, as described above.
 
-## 13. Manual checks required before any release
+## 14. Manual checks required before any release
 
 1. Open the deployed preview inside Telegram Desktop, Web, iOS and Android.
 2. Confirm SecureStorage is present (Bot API 9.0+) and the item count stays within the budget.

@@ -287,3 +287,77 @@ the per-wallet conventions are verified with sources.
 **Consequence if we get it wrong:** a user who imports their 24 words into another wallet and
 selects "account 2" in our app may see a different address there, and may think funds are lost.
 The recovery phrase is the same; only the account branch differs.
+
+---
+
+## Decision: TON account model — BIP-39 default, TON-native import supported (OPEN — needs owner approval)
+
+**Status:** Proposed (2026-11-21, Stage B). The code now supports both account types in the seal
+(`accountType: 'bip39-multichain' | 'ton-native-only'`). The default for new wallets remains
+`bip39-multichain`. The branding/UX choice is NOT final and needs the owner's approval.
+
+### Verified facts (sources fetched 2026-11-21)
+
+- **TON-native derivation** (`@ton/crypto`, MIT — `mnemonic/mnemonic.js`, mirroring
+  `ton-blockchain/ton tonlib/keys/Mnemonic.cpp`):
+  `entropy = HMAC-SHA512(words, "")`; valid iff
+  `PBKDF2-SHA512(entropy, "TON seed version", 100000/256, 64)[0] === 0`;
+  seed = `PBKDF2-SHA512(entropy, "TON default seed", 100000, 64)`; Ed25519 key = seed[0..32].
+  It uses the BIP-39 English wordlist but NOT the BIP-39 checksum or seed derivation.
+- **BIP-39 derivation** is different: `PBKDF2-SHA512("mnemonic"+passphrase, "mnemonic", 2048)`.
+  The same 24 words therefore give unrelated keys under the two schemes.
+- **Tonkeeper** (`tonkeeper/tonkeeper-web`, Apache-2.0, public source):
+  - validates TON phrases with `@ton/crypto mnemonicValidate`;
+  - also accepts BIP-39 phrases and derives TON with `mnemonicToSeed` + SLIP-10
+    `pathFor('ton') = "m/44'/607'/0'"` + `keyPairFromSeed` (files: `service/mnemonicService.ts`,
+    `chains/derivation.ts`);
+  - classifies a phrase that is valid both ways as "two readings compete … the two derive
+    different keys" (`service/importWalletKindPreviewService.ts`);
+  - previews holdings "across every wallet version".
+- **Ledger TON** (`ton-core/ton-ledger-ts` README, MIT):
+  path `[44, 607, network, chain, account, 0]` (network 0 mainnet/1 testnet, chain 0 for wc 0 /
+  255 for wc -1), and "Ledger Nanoapp works with Wallet v4 for now". Custom paths "could be
+  incompatible with other apps".
+- **Address depends on wallet version**: our addresses use Wallet **V5R1**, subwallet 0.
+
+### Answers
+
+1. **Our BIP-39 words into Keeper:** Keeper's BIP-39 path is `m/44'/607'/0'`, the same as our
+   account 0, so the derived key matches. The address matches only if Keeper's active wallet
+   version is **V5R1** with subwallet 0; with V4R2 the address differs (Keeper previews all
+   versions, so funds should still be discoverable). Which version Keeper defaults to is
+   UNVERIFIED.
+2. **Our BIP-39 words into Ledger:** the default Ledger path is different
+   (`m/44'/607'/0/0/<account>/0`) and Ledger uses Wallet V4, so the address does **not** match
+   without a custom path and a V5-capable app.
+3. **Our words into a wallet that only reads TON-native phrases:** usually rejected (they fail
+   the TON seed check) rather than imported to a different address. Edge case: a phrase that
+   happens to pass both checks is interpreted as TON-native by such wallets, giving a different
+   key — our seal therefore stores the account type explicitly and the UI will state which kind
+   of phrase is being shown.
+4. My Wallet (MyTonWallet) was deliberately NOT inspected (license prohibits deriving from it).
+   Its behaviour is UNVERIFIED.
+
+### Options
+
+1. **BIP-39 for all chains with documented import instructions (current).** One phrase, three
+   chains; EVM/TRON import matches common wallets; TON account 0 matches Keeper's BIP-39 path
+   and our V5R1 address. Importing into Ledger needs a custom path.
+2. **TON-native phrase for TON + separate BIP-39 for TRON/EVM.** Matches native TON wallets but
+   requires two backups and is easy to confuse.
+3. **Support both at creation (implemented):** default BIP-39; offer "I have a TON wallet phrase"
+   import that creates a `ton-native-only` account. No EVM/TRON claims for that account.
+
+**Recommendation: option 3.** Default to BIP-39 multichain; offer TON-native import with an
+explicit warning that it is TON-only. Document that Ledger users need a custom path and see V4
+addresses. **Please approve or redirect the default before Stage C builds the onboarding copy.**
+
+### Consequences in code
+
+- Seal v5 stores `accountType`; v1–v4 seals migrate to `bip39-multichain`.
+- `deriveTonKey(seed, index, accountType)` yields the native Ed25519 key for `ton-native-only`
+  (account index must be 0) and the SLIP-10 key otherwise.
+- `getPublicInfo()` exposes TON only for native accounts; `signDigest` rejects other chains and
+  non-zero indices for them.
+- Tests: `account-type.test.ts` (official @ton/crypto vector), `vault.test.ts › B2: migration of
+v4 seals`, `session.test.ts`, `vault-manager.test.ts`.

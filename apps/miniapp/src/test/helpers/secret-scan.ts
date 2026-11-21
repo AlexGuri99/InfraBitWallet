@@ -10,6 +10,19 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+/**
+ * SHA-256 of long hex literals that are known NOT to be secrets, keyed by the exact literal.
+ * Hashing the match (rather than allowlisting a prefix) means any change to the literal fails
+ * the scan and forces a review.
+ *
+ * - 4692…886a: the Wallet V5R1 contract code cell (BOC hex) embedded by @ton/ton (MIT). It is
+ *   public contract code, not key material. Source: @ton/ton WalletContractV5R1 constructor.
+ */
+export const ALLOWED_HEX_LITERALS_SHA256 = new Set([
+  '469237e482c1835b5eaf4e0c9dbaae1cc825f6f5e90f547d85b93ec94a12886a',
+]);
 
 export interface ScanRule {
   pattern: RegExp;
@@ -79,6 +92,19 @@ export function scanDirectory(dir: string, exts: string[] = DEFAULT_EXTENSIONS):
   for (const file of files) {
     const content = readFileSync(file, 'utf-8');
     for (const rule of SECRET_RULES) {
+      if (rule.reason.includes('hex string')) {
+        // Long hex: allow only exact reviewed literals (hashed), so the rule still catches any
+        // other 512+ bit hex value. Compare case-insensitively because hex constants vary.
+        const re = new RegExp(rule.pattern.source, 'gi');
+        for (const match of content.matchAll(re)) {
+          const hash = createHash('sha256').update(match[0].toLowerCase()).digest('hex');
+          if (!ALLOWED_HEX_LITERALS_SHA256.has(hash)) {
+            issues.push(`${file}: ${rule.reason}`);
+            break;
+          }
+        }
+        continue;
+      }
       if (rule.pattern.test(content)) {
         issues.push(`${file}: ${rule.reason}`);
       }

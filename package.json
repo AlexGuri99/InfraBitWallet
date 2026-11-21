@@ -16,7 +16,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
     "verify": "pnpm lint && pnpm type-check && pnpm test && pnpm -r --if-present build && pnpm format:check && pnpm audit --audit-level=high && pnpm license-check && pnpm e2e:install && pnpm test:e2e",
     "ci": "pnpm verify",
-    "e2e:install": "pnpm --filter @onezerowallet/miniapp exec playwright install chromium"
+    "e2e:install": "pnpm --filter @onezerowallet/miniapp exec playwright install chromium webkit"
   },
   "engines": {
     "node": ">=22.22.2 <23",

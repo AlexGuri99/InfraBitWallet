@@ -30,7 +30,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright system dependencies
-        run: pnpm --filter @onezerowallet/miniapp exec playwright install-deps chromium
+        run: pnpm --filter @onezerowallet/miniapp exec playwright install-deps chromium webkit
 
       - name: Verify (lint, type-check, test, build, format, audit, license, e2e)
         run: pnpm run verify

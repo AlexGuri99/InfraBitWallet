@@ -118,6 +118,20 @@ approval. Cadence: one commit per task.
 
 ---
 
+### Stage B: Real addresses and TON interoperability (2026-11-21)
+
+| ID  | Task                                                          | Status                   | Evidence                                                                  |
+| --- | ------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------- |
+| B1  | EVM EIP-55, TRON base58check, TON V5R1 addresses + validators | DONE                     | `address.ts`, `address.test.ts`, wired in `session.ts`                    |
+| B1  | Receive UX rule (non-bounceable for uninitialized wallets)    | DONE                     | `docs/VAULT_DESIGN.md` §12                                                |
+| B2  | TON interop research (Keeper/Ledger) + recommendation         | DONE — awaiting approval | `docs/DECISIONS.md` (Stage B decision)                                    |
+| B2  | TON-native phrase import as a TON-only account; seal v5       | DONE                     | `account-type.ts`, `mnemonic.ts`, `derivation.ts`, `account-type.test.ts` |
+| B3  | Live TON API native coin symbol                               | DONE                     | TonAPI returns `TON` (not GRAM) — recorded in UNVERIFIED.md               |
+| B3  | WebKit in Playwright                                          | DONE locally             | `playwright.config.ts`; 16 e2e passed locally                             |
+| B3  | @telegram-apps/sdk mock smoke test                            | DONE                     | `apps/miniapp/src/test/sdk-smoke.test.ts`                                 |
+
+---
+
 ### P1b: UI — Onboarding, Unlock, Backup Screens
 
 **Status:** Not started

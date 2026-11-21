@@ -1,11 +1,11 @@
 # Third-party licenses
 
 Enforced by `pnpm license-check` (`scripts/license-check.mjs`), which runs in `pnpm verify` and in
-CI. It allows MIT, ISC, Apache-2.0, BSD-2-Clause and BSD-3-Clause only; anything else fails the
-build until it is reviewed and added here deliberately.
+CI. It allows MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause and Unlicense (tweetnacl); anything
+else fails the build until it is reviewed and added here deliberately.
 
-Last verified: 2026-11-21 — `license-check: 92 package entries, all allow-listed`
-(MIT 85, ISC 4, Apache-2.0 2, BSD-3-Clause 1).
+Last verified: 2026-11-21 (Stage B) — `license-check: 128 package entries, all allow-listed`
+(MIT 118, ISC 4, Apache-2.0 2, BSD-3-Clause 3, Unlicense 1).
 
 ## Direct dependencies
 
@@ -17,6 +17,11 @@ Last verified: 2026-11-21 — `license-check: 92 package entries, all allow-list
 | `@scure/bip39`       | MIT        | BIP-39 mnemonic                         |
 | `hash-wasm`          | MIT        | Argon2id (WebAssembly)                  |
 | `zod`                | MIT        | Seal / config schema validation         |
+| `@ton/core`          | MIT        | TON cells, Address, StateInit hashing   |
+| `@ton/ton`           | MIT        | Wallet V5R1 contract + address          |
+| `@ton/crypto`        | MIT        | TON-native mnemonic validation/seed     |
+| `@scure/base`        | MIT        | Base58check for TRON addresses          |
+| `buffer`             | MIT        | Browser Buffer polyfill for @ton/*      |
 | `viem`               | MIT        | EVM encoding + test cross-checks        |
 | `ethers`             | MIT        | EVM cross-check (dev)                   |
 | `tronweb`            | MIT        | TRON cross-check (dev)                  |
