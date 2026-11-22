@@ -92,6 +92,8 @@ export function providerRequestHeaders(config: ServerConfig): Record<string, str
 
 /** Base URL for the selected provider and network (no key in the URL, ever). */
 export function providerBaseUrl(config: ServerConfig): string {
-  if (config.provider === 'tonapi') return 'https://tonapi.io';
+  if (config.provider === 'tonapi') {
+    return config.network === 'testnet' ? 'https://testnet.tonapi.io' : 'https://tonapi.io';
+  }
   return config.network === 'testnet' ? 'https://testnet.toncenter.com' : 'https://toncenter.com';
 }

@@ -4,7 +4,7 @@ Enforced by `pnpm license-check` (`scripts/license-check.mjs`), which runs in `p
 CI. It allows MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause and Unlicense (tweetnacl); anything
 else fails the build until it is reviewed and added here deliberately.
 
-Last verified: 2026-11-21 (Stage B) — `license-check: 128 package entries, all allow-listed`
+Last verified: 2026-11-22 (P2a) — `license-check: 129 package entries, all allow-listed`
 (MIT 118, ISC 4, Apache-2.0 2, BSD-3-Clause 3, Unlicense 1).
 
 ## Direct dependencies
@@ -34,6 +34,7 @@ Last verified: 2026-11-21 (Stage B) — `license-check: 128 package entries, all
 | `react`, `react-dom`                                 | MIT        | UI framework                            |
 | `zustand`                                            | MIT        | State (no secrets)                      |
 | `tailwindcss`                                        | MIT        | Styling                                 |
+| `qrcode-generator`                                   | MIT        | Inline SVG receive QR codes             |
 | `valibot` (override)                                 | MIT        | Transitive pin `>=1.4.2` for advisories |
 
 ## Notes

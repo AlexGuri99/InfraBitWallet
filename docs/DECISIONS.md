@@ -446,7 +446,7 @@ of 2"), and Settings → Test your backup is covered in both.
   `apps/miniapp`, in any `VITE_*` variable, in `docs/`, in tests or in chat.** Public provider
   endpoints without a key are acceptable for early development.
 
-Template: `services/api/.env.example`. Tests: `services/api/src/config.test.ts`.
+Variable names and local usage are documented in `services/api/README.md`; no `.env.example` is committed (`.gitignore` blocks `.env*`). Tests: `services/api/src/config.test.ts`.
 
 **Not done yet:** the API service is not deployed as a serverless function and there is no proxy
 route that consumes these keys; that lands with the P2 TON read path.
