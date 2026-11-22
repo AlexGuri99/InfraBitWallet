@@ -2,6 +2,7 @@
  * Small shared UI primitives. Mobile-first, Telegram theme variables, WCAG-friendly focus styles.
  * No secret ever passes through these components as props or state.
  */
+import { useEffect } from 'react';
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -10,6 +11,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react';
 import { useTelegram } from '../telegram';
+import { t } from '../i18n';
 
 export function StepIndicator({ current, total }: { current: number; total: number }) {
   return (
@@ -102,7 +104,7 @@ export function Field({
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   label: string;
-  hint?: string;
+  hint?: string | undefined;
   id: string;
   ref?: Ref<HTMLInputElement>;
 }) {
@@ -130,7 +132,7 @@ export function PhraseInput({
   ...props
 }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   label: string;
-  hint?: string;
+  hint?: string | undefined;
   id: string;
   ref?: Ref<HTMLTextAreaElement>;
 }) {
@@ -183,5 +185,66 @@ export function Notice({
     >
       {children}
     </p>
+  );
+}
+
+export function Sheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4 flex flex-col gap-3 max-h-[85vh] overflow-y-auto"
+        style={{
+          backgroundColor: 'var(--tg-theme-bg-color, #fff)',
+          color: 'var(--tg-theme-text-color, #000)',
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t('home.close')}
+            className="min-h-9 min-w-9 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }

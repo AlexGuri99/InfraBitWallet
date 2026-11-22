@@ -164,6 +164,12 @@ approval. Cadence: one commit per task.
 
 ### P2a: TON Testnet read layer (2026-11-22)
 
+### P2b: TON Testnet send (2026-11-22)
+
+- V5R1 transfer builder/decoder with testnet wallet id invariant, TON + TEP-74 jetton, bounce rules, Max gas buffer: `packages/chain-ton/src/wallet.ts` (26 package tests).
+- `/api/ton/wallet-state|emulate|broadcast` handlers + services with TON Center primary / TonAPI fallback, validation, no key leakage; esm-smoke compiles and invokes all five handlers.
+- 3-step Send sheet: form validation (testnet prefixes only), review rendered from decoded signed BoC + emulation, Confirm & Send, Submitted link, optimistic Pending activity + polling refresh.
+
 | Area                                                                                 | Status | Evidence                                               |
 | ------------------------------------------------------------------------------------ | ------ | ------------------------------------------------------ |
 | TON types + BigInt formatting, testnet address selection, comment neutralization     | DONE   | `packages/chain-ton/src/*`, `index.test.ts` (16 tests) |

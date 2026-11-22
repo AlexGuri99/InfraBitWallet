@@ -143,6 +143,27 @@ export class TonApiClient {
     };
   }
 
+  private post<T>(path: string, body: unknown): Promise<T> {
+    return fetchJson<T>('tonapi', `${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  emulate(boc: string): Promise<unknown> {
+    return this.post<unknown>('/v2/wallet/emulate', { boc });
+  }
+
+  sendMessage(boc: string): Promise<unknown> {
+    return this.post<unknown>('/v2/blockchain/message', { boc });
+  }
+
   async events(address: string, limit: number): Promise<TonApiEvent[]> {
     const json = await this.get<unknown>(`/v2/accounts/${encodeURIComponent(address)}/events`, {
       limit: String(limit),

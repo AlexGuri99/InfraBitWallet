@@ -162,6 +162,60 @@ export class TonCenterClient {
     });
   }
 
+  private post<T>(path: string, body: unknown): Promise<T> {
+    return fetchJson<T>('toncenter', `${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        ...(this.apiKey ? { 'X-API-Key': this.apiKey } : {}),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.timeoutMs,
+    });
+  }
+
+  /** Wallet status + balance (walletInformation). */
+  async walletInfo(address: string): Promise<TonCenterAccountInfo> {
+    const json = await this.get<unknown>('/walletInformation', { address });
+    const record = asRecord(json);
+    if (!record) throw new ProviderError('toncenter');
+    return {
+      balanceRaw: asString(record['balance']) ?? '0',
+      status: parseStatus(record['status']),
+    };
+  }
+
+  /** V5R1 seqno via runGetMethod. Returns null when the method is unavailable/fails. */
+  async seqno(address: string): Promise<number | null> {
+    const json = await this.post<unknown>('/api/v3/runGetMethod', {
+      address,
+      method: 'seqno',
+      stack: [],
+    });
+    const record = asRecord(json);
+    const stack = record ? asArray(record['stack']) : [];
+    const first = asRecord(stack[0]);
+    const value = first ? first['value'] : null;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string' && /^0x[0-9a-f]+$/i.test(value)) {
+      return Number.parseInt(value, 16);
+    }
+    return null;
+  }
+
+  emulate(boc: string): Promise<unknown> {
+    return this.post<unknown>('/api/emulate/v1/emulateTrace', {
+      boc,
+      with_actions: true,
+      ignore_chksig: false,
+    });
+  }
+
+  sendMessage(boc: string): Promise<unknown> {
+    return this.post<unknown>('/api/v3/message', { boc });
+  }
+
   async transactions(address: string, limit: number): Promise<TonCenterTransactions> {
     const json = await this.get<unknown>('/transactions', {
       account: address,

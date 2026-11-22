@@ -5,11 +5,12 @@
  * On load there is a skeleton; on failure a visible offline banner with Retry — never a silent
  * $0.00. Amounts are decimal strings formatted with BigInt helpers from chain-ton.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VaultManager } from '@onezerowallet/crypto-vault';
 import {
   filterActivity,
   formatChange,
+  formatDecimal,
   formatDecimalShort,
   formatUsd,
   truncateAddress,
@@ -19,14 +20,15 @@ import {
   type TonPortfolio,
 } from '@onezerowallet/chain-ton';
 import { t } from '../i18n';
-import { createTonReadApi, type TonReadApi } from '../ton/api';
-import { Button, ErrorText, Notice, ScreenShell } from './common';
+import { createTonReadApi, type TonReadApi, type TonWriteApi } from '../ton/api';
+import { SendSheet } from './send';
+import { Button, ErrorText, Notice, ScreenShell, Sheet } from './common';
 import { QrCode } from './qr';
 
 export const UI_TON_NETWORK: TonNetwork = 'testnet';
 
 // Stable default so refresh() does not change identity on every render.
-const defaultTonApi: TonReadApi = createTonReadApi();
+const defaultTonApi: TonReadApi & TonWriteApi = createTonReadApi();
 
 type Chain = 'ton' | 'tron' | 'evm';
 type Load<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error' };
@@ -215,67 +217,6 @@ function TokenIcon({ symbol }: { symbol: string }) {
   );
 }
 
-function Sheet({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [onClose]);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4 flex flex-col gap-3 max-h-[85vh] overflow-y-auto"
-        style={{
-          backgroundColor: 'var(--tg-theme-bg-color, #fff)',
-          color: 'var(--tg-theme-text-color, #000)',
-        }}
-      >
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('home.close')}
-            className="min-h-9 min-w-9 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 interface AssetRow {
   key: string;
   testId: string;
@@ -326,7 +267,7 @@ export function HomeScreen({
   manager: VaultManager;
   onLock: () => void;
   onSettings: () => void;
-  api?: TonReadApi;
+  api?: TonReadApi & TonWriteApi;
 }) {
   const session = manager.getSession();
   const info = session?.getPublicInfo(0) ?? null;
@@ -336,6 +277,9 @@ export function HomeScreen({
   const [portfolio, setPortfolio] = useState<Load<TonPortfolio>>({ state: 'loading' });
   const [activity, setActivity] = useState<Load<TonActivityItem[]>>({ state: 'loading' });
   const [copiedPill, setCopiedPill] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [pending, setPending] = useState<TonActivityItem | null>(null);
+  const baselineRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
   // ONE canonical active address in testnet mode: the 0Q user-friendly form whose StateInit
@@ -374,6 +318,28 @@ export function HomeScreen({
       abortRef.current?.abort();
     };
   }, [refresh]);
+
+  // While a submitted transfer is pending, poll and clear when Activity grows or after 60s.
+  useEffect(() => {
+    if (!pending) return;
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 5000);
+    const timeout = window.setTimeout(() => {
+      setPending(null);
+    }, 60_000);
+    return () => {
+      window.clearInterval(interval);
+      window.clearTimeout(timeout);
+    };
+  }, [pending, refresh]);
+
+  useEffect(() => {
+    if (!pending) return;
+    if (activity.state === 'ready' && activity.value.length > baselineRef.current) {
+      setPending(null);
+    }
+  }, [activity, pending]);
 
   const portfolioReady = portfolio.state === 'ready' ? portfolio.value : null;
   const hasTron = info?.tron !== undefined;
@@ -638,9 +604,17 @@ export function HomeScreen({
                 type="button"
                 onClick={() => {
                   if (kind === 'receive') openReceive('ton');
-                  else if (kind === 'send')
-                    setSheet({ kind: 'notice', title: t('home.send'), body: t('home.sendNotice') });
-                  else if (kind === 'swap')
+                  else if (kind === 'send') {
+                    if (!portfolioReady) {
+                      setSheet({
+                        kind: 'notice',
+                        title: t('home.send'),
+                        body: t('send.syncFirst'),
+                      });
+                    } else {
+                      setSendOpen(true);
+                    }
+                  } else if (kind === 'swap')
                     setSheet({ kind: 'notice', title: t('home.swap'), body: t('home.swapNotice') });
                   else
                     setSheet({
@@ -709,12 +683,12 @@ export function HomeScreen({
                     {t('home.retry')}
                   </Button>
                 </div>
-              ) : activity.value.length === 0 ? (
+              ) : activity.value.length === 0 && !pending ? (
                 <p className="rounded-xl bg-black/5 dark:bg-white/10 p-6 text-center text-sm opacity-70">
                   {t('home.activityEmpty')}
                 </p>
               ) : (
-                activity.value.map((item) => (
+                [...(pending ? [pending] : []), ...activity.value].map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -761,6 +735,39 @@ export function HomeScreen({
       ) : (
         <ErrorText>{t('settings.error')}</ErrorText>
       )}
+
+      {sendOpen && info && portfolioReady ? (
+        <SendSheet
+          manager={manager}
+          info={info}
+          portfolio={portfolioReady}
+          api={api}
+          onClose={() => {
+            setSendOpen(false);
+          }}
+          onSubmitted={(decoded, submittedAsset) => {
+            baselineRef.current = activity.state === 'ready' ? activity.value.length : 0;
+            setPending({
+              id: `pending-${decoded.messageHash.hex.slice(0, 12)}`,
+              direction: 'out',
+              standard: decoded.asset.type === 'ton' ? 'native' : 'jetton',
+              symbol: submittedAsset.symbol,
+              decimals: submittedAsset.decimals,
+              amountRaw: decoded.amountRaw,
+              amount: formatDecimal(decoded.amountRaw, submittedAsset.decimals),
+              counterparty: decoded.recipient,
+              timestamp: Math.floor(Date.now() / 1000),
+              feeRaw: '0',
+              fee: '0',
+              status: 'pending',
+              hash: decoded.messageHash.base64,
+              comment: decoded.comment,
+              isScam: false,
+              isBounce: false,
+            });
+          }}
+        />
+      ) : null}
 
       {sheet ? (
         <Sheet
