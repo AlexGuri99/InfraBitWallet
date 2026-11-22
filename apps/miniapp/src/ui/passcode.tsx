@@ -92,6 +92,9 @@ export function PasscodeScreen({
         ref={passRef}
         label={t('passcode.label')}
         type={type}
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={4}
         autoComplete="new-password"
         autoFocus
         onChange={(event) => {
@@ -103,6 +106,9 @@ export function PasscodeScreen({
         ref={confirmRef}
         label={t('passcode.confirm')}
         type={type}
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={4}
         autoComplete="new-password"
       />
       <Button

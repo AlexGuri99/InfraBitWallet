@@ -11,8 +11,8 @@ import { lockSession } from './session';
 import { MNEMONIC_12_HARDHAT, MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
-const PASS = 'my passphrase 1';
-const PASS2 = 'my passphrase 2';
+const PASS = '2580';
+const PASS2 = '3691';
 
 function makeManager(withSecure: boolean): {
   manager: VaultManager;
@@ -71,7 +71,7 @@ describe('A9: VaultManager create/import/unlock', () => {
 
   it('rejects a weak passcode', async () => {
     const { manager } = makeManager(false); // needs 12+ chars
-    const r = await manager.importWallet(MNEMONIC_12_HARDHAT, 'short');
+    const r = await manager.importWallet(MNEMONIC_12_HARDHAT, '1234');
     expect(r).toMatchObject({ ok: false, error: 'weak_passcode' });
   });
 
@@ -121,7 +121,7 @@ describe('A9: changePasscode', () => {
   it('rejects a weak new passcode', async () => {
     const { manager } = makeManager(false);
     await manager.importWallet(MNEMONIC_12_HARDHAT, PASS);
-    expect(await manager.changePasscode(PASS, 'short')).toMatchObject({
+    expect(await manager.changePasscode(PASS, '1234')).toMatchObject({
       ok: false,
       error: 'weak_passcode',
     });

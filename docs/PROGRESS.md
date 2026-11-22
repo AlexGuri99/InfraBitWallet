@@ -150,6 +150,8 @@ approval. Cadence: one commit per task.
 | Accessibility checks                                                                                                                                                                                              | DONE (without axe) | `a11y.spec.ts`; axe-core is MPL-2.0 and was not added (see UNVERIFIED)                                 |
 | i18n scaffold                                                                                                                                                                                                     | DONE               | `src/i18n.ts`                                                                                          |
 | Onboarding UX refactor (2026-11-22): Create = phrase -> verify -> passcode; Import = 12/24 numbered grid with smart paste -> auto-detected type -> passcode; shared passcode screen with explicit A7 requirements | DONE               | `ui/onboarding.tsx`, `ui/import.tsx`, `ui/passcode.tsx`, `vault/detect.ts`; 44 component tests, 32 e2e |
+| PIN policy temporarily relaxed to a 4-digit numeric PIN (weak PINs rejected); documented as pre-mainnet debt                                                                                                      | DONE               | `vault.ts`, `policy.test.ts`, docs/DECISIONS.md, THREAT_MODEL.md, UNVERIFIED.md #21                    |
+| Home redesign: monogram + pill tabs + Testnet, gradient hero with masked balance and copy-address pill, 4 action buttons, asset list with inline badges, Receive sheet, Activity empty state                      | DONE               | `ui/wallet.tsx`, `ui-home.test.tsx`, e2e                                                               |
 
 ---
 

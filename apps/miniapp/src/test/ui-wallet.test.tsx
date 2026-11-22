@@ -17,7 +17,7 @@ async function seededVault(): Promise<ReturnType<typeof makeVault>> {
 
 async function unlockUi(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await screen.findByRole('heading', { name: 'Welcome back' });
-  await user.type(screen.getByLabelText('Passcode'), PASS);
+  await user.type(screen.getByLabelText('PIN'), PASS);
   await user.click(screen.getByRole('button', { name: 'Unlock' }));
   await screen.findByRole('heading', { name: 'Your wallet' });
 }
@@ -28,11 +28,11 @@ describe('Stage C: unlock and settings', () => {
     renderApp(await seededVault());
     await screen.findByRole('heading', { name: 'Welcome back' });
 
-    await user.type(screen.getByLabelText('Passcode'), 'wrong passphrase');
+    await user.type(screen.getByLabelText('PIN'), '1357');
     await user.click(screen.getByRole('button', { name: 'Unlock' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Wrong passcode');
 
-    await user.type(screen.getByLabelText('Passcode'), 'wrong passphrase');
+    await user.type(screen.getByLabelText('PIN'), '1357');
     await user.click(screen.getByRole('button', { name: 'Unlock' }));
     expect(await screen.findByRole('status')).toHaveTextContent(/Too many attempts/);
     expect(screen.getByRole('button', { name: 'Unlock' })).toBeDisabled();
@@ -74,7 +74,7 @@ describe('Stage C: unlock and settings', () => {
     await user.click(screen.getByRole('button', { name: 'Settings' }));
     await screen.findByRole('heading', { name: 'Settings' });
 
-    await user.type(screen.getByLabelText('Enter your passcode to continue'), 'wrong passphrase');
+    await user.type(screen.getByLabelText('Enter your passcode to continue'), '1357');
     await user.click(screen.getByRole('button', { name: 'Reveal recovery phrase' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Wrong passcode');
     expect(screen.queryByRole('heading', { name: 'Your recovery phrase' })).not.toBeInTheDocument();

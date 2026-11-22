@@ -162,14 +162,18 @@ this package.
 `evaluatePasscodeStrength(passcode, hasDeviceSecretWrap)` returns
 `{ ok, error?, unprotectedByDeviceSecret, kind, minLength }`. Errors never echo the input.
 
-| Factor available | Requirement                                                         |
-| ---------------- | ------------------------------------------------------------------- |
-| device secret    | 6+ digit PIN (repeated/sequential rejected) **or** 8+ characters    |
-| none             | 12+ characters, not on a small embedded common-passphrase blocklist |
+| Factor available | Requirement                                         |
+| ---------------- | --------------------------------------------------- |
+| device secret    | exactly 4 digits; repeated/sequential PINs rejected |
+| none             | exactly 4 digits; repeated/sequential PINs rejected |
+
+**Temporary relaxation (2026-11-22):** both environments currently accept a 4-digit numeric PIN
+(`docs/DECISIONS.md`). Without a device secret (Web/Desktop) this is brute-forceable offline if
+the IndexedDB envelope is copied; it must be tightened or gated behind a passphrase before
+mainnet (`docs/UNVERIFIED.md` #21, `docs/THREAT_MODEL.md` T11).
 
 `unprotectedByDeviceSecret: true` means the seal can be attacked offline if copied; the UI must
-show a warning. This corrects earlier wording: a PIN is protected only by the secrecy of the
-device secret.
+show a warning. A PIN is protected only by the secrecy of the device secret.
 
 Tests: `policy.test.ts`.
 

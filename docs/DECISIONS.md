@@ -361,3 +361,36 @@ addresses. **Approved:** BIP-39 remains the default; TON-native import is offere
   non-zero indices for them.
 - Tests: `account-type.test.ts` (official @ton/crypto vector), `vault.test.ts › B2: migration of
 v4 seals`, `session.test.ts`, `vault-manager.test.ts`.
+
+---
+
+## Decision: Passcode policy temporarily relaxed to a 4-digit PIN
+
+**Status:** Accepted (2026-11-22), temporary and explicitly time-boxed to pre-mainnet development.
+
+**What changed**
+
+- `evaluatePasscodeStrength` now accepts exactly `^\d{4}$` in both environments (with and without
+  a device secret) and rejects everything else.
+- Weak PINs are still rejected: all identical digits (`0000`–`9999`) and consecutive
+  ascending/descending runs (`0123`, `1234`, `2345`, `4321`, …).
+- Argon2id parameters, unlock backoff/lockout, device-secret wrapping and biometric wrapping are
+  unchanged.
+
+**Why**
+
+Early Testnet/UX iteration: a 4-digit PIN is the expected Telegram Mini App pattern and keeps the
+onboarding fast while there are no real funds.
+
+**Security consequence (must be reversed before mainnet)**
+
+- A 4-digit PIN has 10,000 combinations. On-device guessing is limited by the persisted backoff,
+  but a 4-digit PIN **without** a device secret (Web/Desktop, where SecureStorage is unavailable)
+  is brute-forceable offline if the IndexedDB envelope is copied: Argon2id slows each guess but
+  cannot make 10,000 candidates infeasible.
+- Before mainnet: either restore the stricter policy without a device secret (12+ character
+  passphrase) or gate Web/Desktop wallets behind a passphrase, and re-run the Argon2id timing
+  measurements. Tracked in `docs/UNVERIFIED.md` #21 and `docs/THREAT_MODEL.md` T11.
+
+**Tests:** `packages/crypto-vault/src/policy.test.ts`; UI tests use `2580` and assert `1234`/`0000`
+are rejected.

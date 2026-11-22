@@ -1028,35 +1028,7 @@ export interface PasscodePolicy {
   minLength: number;
 }
 
-const PASSPHRASE_BLOCKLIST = new Set([
-  'password',
-  'password1',
-  'password123',
-  'passw0rd',
-  'qwertyuiop',
-  'qwertyuiop123',
-  'qwerty123456',
-  'password12345',
-  'letmein',
-  'iloveyou',
-  'admin',
-  'welcome',
-  'monkey',
-  'dragon',
-  'football',
-  'baseball',
-  'sunshine',
-  'princess',
-  'trustno1',
-  '123456789',
-  '1234567890',
-  '123456789012',
-  'abcdefgh',
-  'abcd1234',
-  'correcthorsebatterystaple',
-]);
-
-/** True for a PIN that is all one digit or a straight ascending/descending run. */
+/** True for a 4-digit PIN that is all one digit or a consecutive ascending/descending run. */
 function isWeakPin(pin: string): boolean {
   if (/^(\d)\1+$/.test(pin)) return true;
   const ascending = '01234567890123456789';
@@ -1065,75 +1037,42 @@ function isWeakPin(pin: string): boolean {
 }
 
 /**
- * Passcode policy.
+ * Passcode policy (temporarily a 4-digit numeric PIN in every environment).
  *
- * - With a device secret: a 6+ digit PIN or an 8+ character passphrase, trivially weak PINs
- *   rejected. The PIN is only as strong as the secrecy of the device secret (Keychain/Keystore).
- * - Without a device secret: at least 12 characters and not on a small embedded blocklist.
- *   The UI must surface `unprotectedByDeviceSecret`.
+ * SECURITY NOTE: this is a deliberate, temporary relaxation. A 4-digit PIN has only 10,000
+ * combinations; with Argon2id and the backoff it is adequate for on-device guessing, but a
+ * 4-digit PIN WITHOUT a device secret (Web/Desktop) is brute-forceable offline if the IndexedDB
+ * envelope is copied. It must be tightened (or gated behind a passphrase on Web) before mainnet.
+ * Recorded in docs/DECISIONS.md, docs/THREAT_MODEL.md and docs/UNVERIFIED.md.
  *
+ * Weak PINs (all identical digits, consecutive ascending/descending runs) are rejected.
  * Argon2id parameters are NOT part of this policy; measure them with measureKdf().
  */
 export function evaluatePasscodeStrength(
   passcode: string,
   hasDeviceSecretWrap: boolean,
 ): PasscodePolicy {
-  const isPin = /^\d+$/.test(passcode);
   const unprotectedByDeviceSecret = !hasDeviceSecretWrap;
 
-  if (hasDeviceSecretWrap) {
-    if (isPin) {
-      if (passcode.length < 6) {
-        return {
-          ok: false,
-          error: 'PIN must be at least 6 digits',
-          unprotectedByDeviceSecret,
-          kind: 'pin',
-          minLength: 6,
-        };
-      }
-      if (isWeakPin(passcode)) {
-        return {
-          ok: false,
-          error: 'PIN is too easy to guess (repeated or sequential digits)',
-          unprotectedByDeviceSecret,
-          kind: 'pin',
-          minLength: 6,
-        };
-      }
-      return { ok: true, unprotectedByDeviceSecret, kind: 'pin', minLength: 6 };
-    }
-    if (passcode.length < 8) {
-      return {
-        ok: false,
-        error: 'Passcode must be at least 8 characters',
-        unprotectedByDeviceSecret,
-        kind: 'passphrase',
-        minLength: 8,
-      };
-    }
-    return { ok: true, unprotectedByDeviceSecret, kind: 'passphrase', minLength: 8 };
-  }
-
-  if (passcode.length < 12) {
+  if (!/^\d{4}$/.test(passcode)) {
     return {
       ok: false,
-      error: 'Without device-secret locking, use a passphrase of at least 12 characters',
+      error: 'Enter a 4-digit PIN',
       unprotectedByDeviceSecret,
-      kind: 'passphrase',
-      minLength: 12,
+      kind: 'pin',
+      minLength: 4,
     };
   }
-  if (PASSPHRASE_BLOCKLIST.has(passcode.trim().toLowerCase())) {
+  if (isWeakPin(passcode)) {
     return {
       ok: false,
-      error: 'This passphrase is too common; choose another',
+      error: 'PIN is too easy to guess (avoid repeated or sequential digits)',
       unprotectedByDeviceSecret,
-      kind: 'passphrase',
-      minLength: 12,
+      kind: 'pin',
+      minLength: 4,
     };
   }
-  return { ok: true, unprotectedByDeviceSecret, kind: 'passphrase', minLength: 12 };
+  return { ok: true, unprotectedByDeviceSecret, kind: 'pin', minLength: 4 };
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 
-const PASS = 'e2e passphrase one';
+const PASS = '2580';
 
 function wordLocator(page: Page) {
   return page.locator('[data-role="word"]');
@@ -42,8 +42,8 @@ async function createToPasscode(page: Page): Promise<string[]> {
 }
 
 async function finishCreate(page: Page): Promise<void> {
-  await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-  await page.getByLabel('Confirm passcode').fill(PASS);
+  await page.getByLabel('PIN', { exact: true }).fill(PASS);
+  await page.getByLabel('Confirm PIN').fill(PASS);
   await expect(page.getByRole('status')).toHaveText(/Requirements met/);
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
@@ -64,9 +64,11 @@ test.describe('onboarding and unlock', () => {
     const words = await createToPasscode(page);
     await finishCreate(page);
 
-    expect(await page.getByTestId('address-EVM').textContent()).toMatch(/^0x/);
-    expect(await page.getByTestId('address-TRON').textContent()).toMatch(/^T/);
-    expect(await page.getByTestId('address-Receive TON').textContent()).toMatch(/^UQ/);
+    await page.getByRole('button', { name: 'Receive' }).click();
+    await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
+    await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
+    await expect(page.getByTestId('address-TON')).toHaveText(/^UQ/);
+    await page.getByRole('button', { name: 'Close' }).click();
 
     const dump = await page.evaluate(() => ({
       local: JSON.stringify(localStorage),
@@ -79,14 +81,14 @@ test.describe('onboarding and unlock', () => {
 
     await page.getByRole('button', { name: 'Lock' }).click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    await page.getByLabel('Passcode', { exact: true }).fill('wrong passphrase');
+    await page.getByLabel('PIN', { exact: true }).fill('1357');
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('alert')).toHaveText(/Wrong passcode|Too many attempts/);
 
     await page.waitForTimeout(3500);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
+    await page.getByLabel('PIN', { exact: true }).fill(PASS);
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
   });
@@ -148,14 +150,100 @@ test.describe('onboarding and unlock', () => {
 
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
+    await page.getByLabel('PIN', { exact: true }).fill(PASS);
+    await page.getByLabel('Confirm PIN').fill(PASS);
     await page.getByRole('button', { name: 'Import' }).click();
 
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+    await page.getByRole('button', { name: 'Receive' }).click();
     await expect(page.getByTestId('address-EVM')).toHaveText(
       '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
     );
+  });
+
+  test('home dashboard: hero, tabs, actions and asset list', async ({ page }) => {
+    await createToPasscode(page);
+    await finishCreate(page);
+
+    await expect(page.getByText('Main Wallet')).toBeVisible();
+    await expect(page.getByText('Testnet')).toBeVisible();
+    await expect(page.getByTestId('hero-balance')).toHaveText('$0.00');
+    await expect(page.getByTestId('asset-TON')).toContainText('Toncoin');
+    await expect(page.getByTestId('asset-USDT')).toContainText('TON · Jetton');
+    await expect(page.getByTestId('asset-TRX')).toContainText('TRC-20');
+    await expect(page.getByTestId('asset-ETH')).toContainText('ERC-20');
+
+    await page.getByRole('button', { name: 'Hide balance' }).click();
+    await expect(page.getByTestId('hero-balance')).toHaveText('••••');
+    await page.getByRole('button', { name: 'Show balance' }).click();
+
+    await page.getByRole('tab', { name: 'Activity' }).click();
+    await expect(page.getByText(/No transactions yet/)).toBeVisible();
+    await page.getByRole('tab', { name: 'Wallet' }).click();
+
+    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(page.getByRole('dialog', { name: 'Send' })).toContainText('P2');
+    await page.getByRole('button', { name: 'Close' }).click();
+  });
+
+  test('ton-native import shows only TON assets and address', async ({ page }) => {
+    const tonPhrase = [
+      'hospital',
+      'stove',
+      'relief',
+      'fringe',
+      'tongue',
+      'always',
+      'charge',
+      'angry',
+      'urge',
+      'sentence',
+      'again',
+      'match',
+      'nerve',
+      'inquiry',
+      'senior',
+      'coconut',
+      'label',
+      'tumble',
+      'carry',
+      'category',
+      'beauty',
+      'bean',
+      'road',
+      'solution',
+    ].join(' ');
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Import a wallet' }).click();
+    await pastePhrase(page, tonPhrase);
+    await expect(page.getByLabel('Word 24', { exact: true })).toHaveValue('solution');
+    await page.getByRole('button', { name: 'Continue' }).click();
+
+    // If the phrase happens to be valid BIP-39 too, choose the TON-only reading.
+    if (
+      await page
+        .getByRole('heading', { name: 'Which wallet is this phrase from?' })
+        .isVisible()
+        .catch(() => false)
+    ) {
+      await page.getByRole('button', { name: 'TON-only wallet' }).click();
+    }
+    await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
+    await page.getByLabel('PIN', { exact: true }).fill(PASS);
+    await page.getByLabel('Confirm PIN').fill(PASS);
+    await page.getByRole('button', { name: 'Import' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+    await expect(page.getByTestId('asset-TON')).toBeVisible();
+    await expect(page.getByTestId('asset-USDT')).toBeVisible();
+    await expect(page.getByTestId('asset-TRX')).toHaveCount(0);
+    await expect(page.getByTestId('asset-ETH')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Receive' }).click();
+    await expect(page.getByTestId('address-TON')).toHaveText(/^UQ/);
+    await expect(page.getByTestId('address-TRON')).toHaveCount(0);
+    await expect(page.getByTestId('address-EVM')).toHaveCount(0);
   });
 
   test('settings reveal requires re-auth and clears the phrase on leaving', async ({ page }) => {

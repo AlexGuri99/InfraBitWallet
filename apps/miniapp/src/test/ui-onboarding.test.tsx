@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { makeVault, renderApp } from './ui-helpers';
 import { secretHolder } from '../vault/secret-holder';
 
-const PASS = 'test passphrase one';
+const PASS = '2580';
 const MNEMONIC_12 = 'test test test test test test test test test test test junk';
 
 function phraseWords(): string[] {
@@ -79,14 +79,16 @@ describe('Onboarding: create', () => {
     renderApp(makeVault());
     const words = await createToPasscode(user);
 
-    expect(screen.getByText(/Minimum 12 characters/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Passcode', { exact: true }), PASS);
-    await user.type(screen.getByLabelText('Confirm passcode'), PASS);
+    expect(screen.getByText(/Enter a 4-digit PIN/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('PIN', { exact: true }), PASS);
+    await user.type(screen.getByLabelText('Confirm PIN'), PASS);
     expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     await screen.findByRole('heading', { name: 'Your wallet' });
+    await user.click(screen.getByRole('button', { name: 'Receive' }));
     expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
+    await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByTestId('phrase-words')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(words.join(' '));
     expect(secretHolder.has()).toBe(false);
@@ -94,13 +96,13 @@ describe('Onboarding: create', () => {
     expect(dump).not.toContain(words[0] ?? 'never');
   });
 
-  it('shows the device-secret PIN/password requirements and accepts a 6-digit PIN', async () => {
+  it('shows the device-secret PIN requirements and accepts a 4-digit PIN', async () => {
     const user = userEvent.setup();
     renderApp(makeVault({ secure: true }));
     await createToPasscode(user);
-    expect(screen.getByText(/6\+ digit PIN/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Passcode', { exact: true }), '482915');
-    await user.type(screen.getByLabelText('Confirm passcode'), '482915');
+    expect(screen.getByText(/Enter a 4-digit PIN/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('PIN', { exact: true }), '2580');
+    await user.type(screen.getByLabelText('Confirm PIN'), '2580');
     expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await screen.findByRole('heading', { name: 'Your wallet' });
@@ -110,20 +112,20 @@ describe('Onboarding: create', () => {
     const user = userEvent.setup();
     renderApp(makeVault({ secure: true }));
     await createToPasscode(user);
-    await user.type(screen.getByLabelText('Passcode', { exact: true }), '123456');
-    await user.type(screen.getByLabelText('Confirm passcode'), '123456');
+    await user.type(screen.getByLabelText('PIN', { exact: true }), '1234');
+    await user.type(screen.getByLabelText('Confirm PIN'), '1234');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/too easy to guess/);
   });
 
-  it('rejects a short passphrase and stays on the passcode step', async () => {
+  it('rejects a non-4-digit PIN and stays on the passcode step', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     await createToPasscode(user);
-    await user.type(screen.getByLabelText('Passcode', { exact: true }), 'short');
-    await user.type(screen.getByLabelText('Confirm passcode'), 'short');
+    await user.type(screen.getByLabelText('PIN', { exact: true }), '123');
+    await user.type(screen.getByLabelText('Confirm PIN'), '123');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/at least 12 characters/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/4-digit PIN/);
     expect(screen.getByRole('heading', { name: 'Set a passcode' })).toBeInTheDocument();
   });
 });
@@ -149,11 +151,12 @@ describe('Onboarding: import', () => {
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await screen.findByRole('heading', { name: 'Set a passcode' });
-    await user.type(screen.getByLabelText('Passcode', { exact: true }), PASS);
-    await user.type(screen.getByLabelText('Confirm passcode'), PASS);
+    await user.type(screen.getByLabelText('PIN', { exact: true }), PASS);
+    await user.type(screen.getByLabelText('Confirm PIN'), PASS);
     await user.click(screen.getByRole('button', { name: 'Import' }));
 
     await screen.findByRole('heading', { name: 'Your wallet' });
+    await user.click(screen.getByRole('button', { name: 'Receive' }));
     expect(screen.getByTestId('address-EVM')).toHaveTextContent(
       '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
     );

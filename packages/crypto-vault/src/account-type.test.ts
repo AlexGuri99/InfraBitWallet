@@ -23,7 +23,7 @@ import { InMemoryStorage } from './storage';
 import { MNEMONIC_12_HARDHAT } from './fixtures/mnemonics';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
-const PASS = 'account type passphrase 1';
+const PASS = '2580';
 
 const TON_NATIVE_MNEMONIC = [
   'hospital',
