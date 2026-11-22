@@ -30,7 +30,6 @@ type Screen =
   | 'loading'
   | 'welcome'
   | 'create-phrase'
-  | 'create-verify'
   | 'create-passcode'
   | 'import-phrase'
   | 'import-disambiguate'
@@ -45,7 +44,6 @@ const AUTO_LOCK_KEY = 'ozw.autoLockMs';
 
 const ONBOARDING_SECRET_SCREENS: Screen[] = [
   'create-phrase',
-  'create-verify',
   'create-passcode',
   'import-phrase',
   'import-disambiguate',
@@ -228,24 +226,12 @@ export function App() {
     case 'create-phrase':
       return (
         <CreatePhraseScreen
-          step={{ current: 1, total: 3 }}
+          step={{ current: 1, total: 2 }}
           onBack={() => {
             secretHolder.clear();
             setScreen('welcome');
           }}
           onDone={() => {
-            setScreen('create-verify');
-          }}
-        />
-      );
-    case 'create-verify':
-      return (
-        <VerifyScreen
-          step={{ current: 2, total: 3 }}
-          onCancel={() => {
-            setScreen('create-phrase');
-          }}
-          onVerified={() => {
             setScreen('create-passcode');
           }}
         />
@@ -255,9 +241,9 @@ export function App() {
         <PasscodeScreen
           manager={manager}
           title={t('passcode.title')}
-          step={{ current: 3, total: 3 }}
+          step={{ current: 2, total: 2 }}
           onBack={() => {
-            setScreen('create-verify');
+            setScreen('create-phrase');
           }}
           onSubmit={sealCreatedWallet}
           submitLabel={t('passcode.submit')}

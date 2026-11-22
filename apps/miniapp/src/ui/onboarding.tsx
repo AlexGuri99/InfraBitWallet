@@ -83,7 +83,7 @@ export function WelcomeScreen({
   onImport: () => void;
 }) {
   return (
-    <ScreenShell title={t('app.name')} step={{ current: 1, total: 3 }}>
+    <ScreenShell title={t('app.name')}>
       <h2 className="text-xl font-semibold">{t('welcome.title')}</h2>
       <p className="text-sm opacity-80">{t('app.tagline')}</p>
       <p className="text-sm">{t('welcome.body')}</p>
@@ -278,6 +278,7 @@ export function VerifyScreen({
       return;
     }
     setError(null);
+    secretHolder.clear();
     setDone(true);
     onVerified();
   };

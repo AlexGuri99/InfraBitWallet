@@ -394,3 +394,33 @@ onboarding fast while there are no real funds.
 
 **Tests:** `packages/crypto-vault/src/policy.test.ts`; UI tests use `2580` and assert `1234`/`0000`
 are rejected.
+
+---
+
+## Decision: Mandatory Create-time backup verification temporarily skipped
+
+**Status:** Accepted (2026-11-22), temporary dev-UX concession.
+
+**What changed**
+
+- The Create Wallet flow is now two steps: Recovery Phrase (reveal + "I've stored the seed
+  phrase" acknowledgement) → Set 4-digit PIN. The vault is sealed on the PIN step; the temporary
+  mnemonic stays in the module-scoped holder until then and is wiped on back/background/completion.
+- The 3-word `VerifyScreen` is no longer part of Create. It remains in use for **Settings → Test
+  your backup**, which re-authenticates, reveals the phrase into the holder, asks for three random
+  positions, and clears the holder afterward.
+
+**Why**
+
+Faster onboarding iteration while no real funds are at stake; the acknowledgement checkbox still
+forces the user to reveal and confirm they stored the phrase.
+
+**Risk / reversal**
+
+- A user can acknowledge the phrase without actually writing it down; there is no proof of backup
+  at creation.
+- Before mainnet, reconsider restoring mandatory backup verification (or an equivalent proof such
+  as re-entering random words) at creation. Tracked in `docs/UNVERIFIED.md` #22.
+
+**Tests:** component and Playwright create flows assert the 2-step flow ("Step 1 of 2" / "Step 2
+of 2"), and Settings → Test your backup is covered in both.

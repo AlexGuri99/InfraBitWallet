@@ -36,14 +36,6 @@ async function createToPasscode(user: ReturnType<typeof userEvent.setup>): Promi
   expect(next).toBeEnabled();
   await user.click(next);
 
-  await screen.findByRole('heading', { name: 'Check your backup' });
-  const inputs = screen.getAllByRole('textbox');
-  for (const input of inputs) {
-    const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
-    const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
-    await user.type(input, words[position] ?? '');
-  }
-  await user.click(screen.getByRole('button', { name: 'Verify' }));
   await screen.findByRole('heading', { name: 'Set a passcode' });
   return words;
 }
@@ -57,7 +49,6 @@ describe('Onboarding: create', () => {
     expect(screen.getByText(/We will never ask for your recovery phrase/)).toBeInTheDocument();
     expect(screen.getByText(/may clear local data/)).toBeInTheDocument();
     expect(screen.queryByText('Wallet type')).not.toBeInTheDocument();
-    expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
   });
 
   it('phrase is hidden until revealed and Next requires reveal + checkbox', async () => {
@@ -65,6 +56,7 @@ describe('Onboarding: create', () => {
     renderApp(makeVault());
     await user.click(await screen.findByRole('button', { name: 'Create a wallet' }));
     await screen.findByRole('heading', { name: 'Your recovery phrase' });
+    expect(screen.getByText(/Step 1 of 2/)).toBeInTheDocument();
     expect(screen.getByTestId('phrase-words').textContent).toBe('');
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Show recovery phrase' }));
@@ -74,7 +66,7 @@ describe('Onboarding: create', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  it('creates the wallet after verify + passcode and clears the phrase', async () => {
+  it('creates the wallet after phrase + passcode and clears the phrase', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     const words = await createToPasscode(user);

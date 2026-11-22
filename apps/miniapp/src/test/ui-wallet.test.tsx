@@ -67,6 +67,30 @@ describe('Stage C: unlock and settings', () => {
     expect(secretHolder.has()).toBe(false);
   });
 
+  it('settings "Test your backup" re-runs verification without showing the phrase', async () => {
+    const user = userEvent.setup();
+    renderApp(await seededVault());
+    await unlockUi(user);
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByRole('heading', { name: 'Settings' });
+
+    await user.type(screen.getByLabelText('Enter your passcode to continue'), PASS);
+    await user.click(screen.getByRole('button', { name: 'Test your backup' }));
+    await screen.findByRole('heading', { name: 'Check your backup' });
+    expect(screen.queryByText(MNEMONIC_12_HARDHAT)).not.toBeInTheDocument();
+
+    const words = MNEMONIC_12_HARDHAT.split(' ');
+    const inputs = screen.getAllByRole('textbox');
+    for (const input of inputs) {
+      const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
+      const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
+      await user.type(input, words[position] ?? '');
+    }
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
+    await screen.findByRole('heading', { name: 'Settings' });
+    expect(secretHolder.has()).toBe(false);
+  });
+
   it('a wrong passcode in settings does not open the phrase', async () => {
     const user = userEvent.setup();
     renderApp(await seededVault());

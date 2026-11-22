@@ -29,14 +29,6 @@ async function createToPasscode(page: Page): Promise<string[]> {
   await expect(next).toBeEnabled();
   await next.click();
 
-  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
-  const inputs = page.locator('input[id^="word-"]');
-  for (let i = 0; i < 3; i++) {
-    const id = await inputs.nth(i).getAttribute('id');
-    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
-    await inputs.nth(i).fill(words[position] ?? '');
-  }
-  await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
   return words;
 }
@@ -258,6 +250,25 @@ test.describe('onboarding and unlock', () => {
     await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(page.locator('body')).not.toContainText(words.join(' '));
+  });
+
+  test('settings Test your backup verifies the stored phrase', async ({ page }) => {
+    const words = await createToPasscode(page);
+    await finishCreate(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByLabel('Enter your passcode to continue').fill(PASS);
+    await page.getByRole('button', { name: 'Test your backup' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(words.join(' '));
+    const inputs = page.locator('input[id^="word-"]');
+    for (let i = 0; i < 3; i++) {
+      const id = await inputs.nth(i).getAttribute('id');
+      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+      await inputs.nth(i).fill(words[position] ?? '');
+    }
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   });
 
   test('phrase hides when the app is backgrounded', async ({ page }) => {

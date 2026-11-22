@@ -1,6 +1,6 @@
 # Stage C review packet
 
-Full source of the Stage C UI, adapters and tests, updated after the onboarding refactor, 4-digit PIN policy and Home redesign (2026-11-22). Test fixtures are public test phrases only.
+Full source of the Stage C UI, adapters and tests after the onboarding refactor, 4-digit PIN policy, Home redesign and the 2-step Create flow (2026-11-22). Test fixtures are public test phrases only.
 
 ## apps/miniapp/src/App.tsx
 
@@ -37,7 +37,6 @@ type Screen =
   | 'loading'
   | 'welcome'
   | 'create-phrase'
-  | 'create-verify'
   | 'create-passcode'
   | 'import-phrase'
   | 'import-disambiguate'
@@ -52,7 +51,6 @@ const AUTO_LOCK_KEY = 'ozw.autoLockMs';
 
 const ONBOARDING_SECRET_SCREENS: Screen[] = [
   'create-phrase',
-  'create-verify',
   'create-passcode',
   'import-phrase',
   'import-disambiguate',
@@ -235,24 +233,12 @@ export function App() {
     case 'create-phrase':
       return (
         <CreatePhraseScreen
-          step={{ current: 1, total: 3 }}
+          step={{ current: 1, total: 2 }}
           onBack={() => {
             secretHolder.clear();
             setScreen('welcome');
           }}
           onDone={() => {
-            setScreen('create-verify');
-          }}
-        />
-      );
-    case 'create-verify':
-      return (
-        <VerifyScreen
-          step={{ current: 2, total: 3 }}
-          onCancel={() => {
-            setScreen('create-phrase');
-          }}
-          onVerified={() => {
             setScreen('create-passcode');
           }}
         />
@@ -262,9 +248,9 @@ export function App() {
         <PasscodeScreen
           manager={manager}
           title={t('passcode.title')}
-          step={{ current: 3, total: 3 }}
+          step={{ current: 2, total: 2 }}
           onBack={() => {
-            setScreen('create-verify');
+            setScreen('create-phrase');
           }}
           onSubmit={sealCreatedWallet}
           submitLabel={t('passcode.submit')}
@@ -1269,7 +1255,7 @@ export function WelcomeScreen({
   onImport: () => void;
 }) {
   return (
-    <ScreenShell title={t('app.name')} step={{ current: 1, total: 3 }}>
+    <ScreenShell title={t('app.name')}>
       <h2 className="text-xl font-semibold">{t('welcome.title')}</h2>
       <p className="text-sm opacity-80">{t('app.tagline')}</p>
       <p className="text-sm">{t('welcome.body')}</p>
@@ -1464,6 +1450,7 @@ export function VerifyScreen({
       return;
     }
     setError(null);
+    secretHolder.clear();
     setDone(true);
     onVerified();
   };
@@ -3029,14 +3016,6 @@ async function createToPasscode(user: ReturnType<typeof userEvent.setup>): Promi
   expect(next).toBeEnabled();
   await user.click(next);
 
-  await screen.findByRole('heading', { name: 'Check your backup' });
-  const inputs = screen.getAllByRole('textbox');
-  for (const input of inputs) {
-    const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
-    const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
-    await user.type(input, words[position] ?? '');
-  }
-  await user.click(screen.getByRole('button', { name: 'Verify' }));
   await screen.findByRole('heading', { name: 'Set a passcode' });
   return words;
 }
@@ -3050,7 +3029,6 @@ describe('Onboarding: create', () => {
     expect(screen.getByText(/We will never ask for your recovery phrase/)).toBeInTheDocument();
     expect(screen.getByText(/may clear local data/)).toBeInTheDocument();
     expect(screen.queryByText('Wallet type')).not.toBeInTheDocument();
-    expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
   });
 
   it('phrase is hidden until revealed and Next requires reveal + checkbox', async () => {
@@ -3058,6 +3036,7 @@ describe('Onboarding: create', () => {
     renderApp(makeVault());
     await user.click(await screen.findByRole('button', { name: 'Create a wallet' }));
     await screen.findByRole('heading', { name: 'Your recovery phrase' });
+    expect(screen.getByText(/Step 1 of 2/)).toBeInTheDocument();
     expect(screen.getByTestId('phrase-words').textContent).toBe('');
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Show recovery phrase' }));
@@ -3067,7 +3046,7 @@ describe('Onboarding: create', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  it('creates the wallet after verify + passcode and clears the phrase', async () => {
+  it('creates the wallet after phrase + passcode and clears the phrase', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     const words = await createToPasscode(user);
@@ -3262,6 +3241,30 @@ describe('Stage C: unlock and settings', () => {
     await screen.findByRole('heading', { name: 'Settings' });
     expect(document.body.textContent).not.toContain(words.join(' '));
     expect(document.body.textContent.toLowerCase()).not.toContain('junk');
+    expect(secretHolder.has()).toBe(false);
+  });
+
+  it('settings "Test your backup" re-runs verification without showing the phrase', async () => {
+    const user = userEvent.setup();
+    renderApp(await seededVault());
+    await unlockUi(user);
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByRole('heading', { name: 'Settings' });
+
+    await user.type(screen.getByLabelText('Enter your passcode to continue'), PASS);
+    await user.click(screen.getByRole('button', { name: 'Test your backup' }));
+    await screen.findByRole('heading', { name: 'Check your backup' });
+    expect(screen.queryByText(MNEMONIC_12_HARDHAT)).not.toBeInTheDocument();
+
+    const words = MNEMONIC_12_HARDHAT.split(' ');
+    const inputs = screen.getAllByRole('textbox');
+    for (const input of inputs) {
+      const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
+      const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
+      await user.type(input, words[position] ?? '');
+    }
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
+    await screen.findByRole('heading', { name: 'Settings' });
     expect(secretHolder.has()).toBe(false);
   });
 
@@ -3587,14 +3590,6 @@ async function createToPasscode(page: Page): Promise<string[]> {
   await expect(next).toBeEnabled();
   await next.click();
 
-  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
-  const inputs = page.locator('input[id^="word-"]');
-  for (let i = 0; i < 3; i++) {
-    const id = await inputs.nth(i).getAttribute('id');
-    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
-    await inputs.nth(i).fill(words[position] ?? '');
-  }
-  await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
   return words;
 }
@@ -3816,6 +3811,25 @@ test.describe('onboarding and unlock', () => {
     await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(page.locator('body')).not.toContainText(words.join(' '));
+  });
+
+  test('settings Test your backup verifies the stored phrase', async ({ page }) => {
+    const words = await createToPasscode(page);
+    await finishCreate(page);
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByLabel('Enter your passcode to continue').fill(PASS);
+    await page.getByRole('button', { name: 'Test your backup' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(words.join(' '));
+    const inputs = page.locator('input[id^="word-"]');
+    for (let i = 0; i < 3; i++) {
+      const id = await inputs.nth(i).getAttribute('id');
+      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+      await inputs.nth(i).fill(words[position] ?? '');
+    }
+    await page.getByRole('button', { name: 'Verify' }).click();
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   });
 
   test('phrase hides when the app is backgrounded', async ({ page }) => {
