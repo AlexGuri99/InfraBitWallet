@@ -432,9 +432,12 @@ of 2"), and Settings → Test your backup is covered in both.
 **Status:** Accepted (2026-11-22).
 
 - `services/api/src/config.ts` reads `TON_DATA_PROVIDER` (`toncenter` | `tonapi`),
-  `TONCENTER_API_KEY` (sent as `X-API-Key`) and `TONAPI_API_KEY` (sent as
-  `Authorization: Bearer …`). Empty/whitespace values count as "not configured" and the public
-  endpoints are used with lower rate limits.
+  `TON_NETWORK` (`testnet` default | `mainnet`), `TONCENTER_TESTNET_API_KEY` and
+  `TONCENTER_API_KEY` (sent as `X-API-Key` for the matching network), and `TONAPI_API_KEY`
+  (sent as `Authorization: Bearer …`). Empty/whitespace values count as "not configured" and the
+  public endpoints are used with lower rate limits. Testnet uses
+  `https://testnet.toncenter.com`; mainnet is gated behind an explicit `TON_NETWORK=mainnet` and
+  the owner's approval.
 - Errors are generic (`INVALID_SERVER_ENV`) and never echo a key; the key is only ever placed in
   the outbound provider header, never in a URL or log.
 - Local values go in `services/api/.env.local` (gitignored); deployed values go in the Vercel

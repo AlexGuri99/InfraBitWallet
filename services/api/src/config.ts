@@ -6,19 +6,25 @@
  * or stringifies a key except into the outbound provider request header.
  *
  * Supported providers:
- * - toncenter: https://toncenter.com/api/v3 — sends the key in `X-API-Key`.
- * - tonapi:    https://tonapi.io — sends the key as `Authorization: Bearer …`.
+ * - toncenter: https://toncenter.com/api/v3 (mainnet) and https://testnet.toncenter.com/api/v3
+ *   (testnet, confirmed on toncenter.com). Key is sent as `X-API-Key`; the exact header name is
+ *   marked UNVERIFIED in docs/UNVERIFIED.md and must be confirmed at first live call.
+ * - tonapi:    https://tonapi.io — sends the key as `Authorization: Bearer …`. TonAPI testnet is
+ *   not documented for this integration.
  *
- * An empty or missing key is valid (public endpoints with lower rate limits); the caller decides
- * whether to require one.
+ * Network defaults to testnet: mainnet is gated behind an explicit TON_NETWORK=mainnet and the
+ * owner's sign-off (CLAUDE.md "stop and ask"). Missing/empty keys are valid (public rate limits).
  */
 import { z } from 'zod';
 
 export type TonDataProvider = 'toncenter' | 'tonapi';
+export type TonNetwork = 'mainnet' | 'testnet';
 
 export interface ServerConfig {
   provider: TonDataProvider;
+  network: TonNetwork;
   toncenterApiKey?: string | undefined;
+  toncenterTestnetApiKey?: string | undefined;
   tonapiApiKey?: string | undefined;
 }
 
@@ -33,7 +39,9 @@ const optionalKey = z.preprocess(
 
 const envSchema = z.object({
   TON_DATA_PROVIDER: z.enum(['toncenter', 'tonapi']).optional(),
+  TON_NETWORK: z.enum(['mainnet', 'testnet']).optional(),
   TONCENTER_API_KEY: optionalKey,
+  TONCENTER_TESTNET_API_KEY: optionalKey,
   TONAPI_API_KEY: optionalKey,
 });
 
@@ -46,7 +54,9 @@ export function loadServerConfig(
 ): ConfigResult {
   const parsed = envSchema.safeParse({
     TON_DATA_PROVIDER: env['TON_DATA_PROVIDER'],
+    TON_NETWORK: env['TON_NETWORK'],
     TONCENTER_API_KEY: env['TONCENTER_API_KEY'],
+    TONCENTER_TESTNET_API_KEY: env['TONCENTER_TESTNET_API_KEY'],
     TONAPI_API_KEY: env['TONAPI_API_KEY'],
   });
   if (!parsed.success) return { ok: false, error: 'INVALID_SERVER_ENV' };
@@ -54,24 +64,34 @@ export function loadServerConfig(
     ok: true,
     config: {
       provider: parsed.data.TON_DATA_PROVIDER ?? 'toncenter',
+      network: parsed.data.TON_NETWORK ?? 'testnet',
       toncenterApiKey: parsed.data.TONCENTER_API_KEY,
+      toncenterTestnetApiKey: parsed.data.TONCENTER_TESTNET_API_KEY,
       tonapiApiKey: parsed.data.TONAPI_API_KEY,
     },
   };
 }
 
+/** The TON Center key for the configured network, if any. */
+function toncenterKey(config: ServerConfig): string | undefined {
+  return config.network === 'testnet' ? config.toncenterTestnetApiKey : config.toncenterApiKey;
+}
+
 /** Outbound headers for the selected provider, or an empty object when no key is configured. */
 export function providerRequestHeaders(config: ServerConfig): Record<string, string> {
-  if (config.provider === 'toncenter' && config.toncenterApiKey) {
-    return { 'X-API-Key': config.toncenterApiKey };
+  if (config.provider === 'toncenter') {
+    const key = toncenterKey(config);
+    return key ? { 'X-API-Key': key } : {};
   }
-  if (config.provider === 'tonapi' && config.tonapiApiKey) {
+  // The provider is narrowed to 'tonapi' here.
+  if (config.tonapiApiKey) {
     return { Authorization: `Bearer ${config.tonapiApiKey}` };
   }
   return {};
 }
 
-/** Base URL for the selected provider (no key in the URL, ever). */
+/** Base URL for the selected provider and network (no key in the URL, ever). */
 export function providerBaseUrl(config: ServerConfig): string {
-  return config.provider === 'tonapi' ? 'https://tonapi.io' : 'https://toncenter.com';
+  if (config.provider === 'tonapi') return 'https://tonapi.io';
+  return config.network === 'testnet' ? 'https://testnet.toncenter.com' : 'https://toncenter.com';
 }
