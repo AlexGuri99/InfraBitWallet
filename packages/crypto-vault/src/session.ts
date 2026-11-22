@@ -55,6 +55,8 @@ export interface PublicAccountInfo {
     addressNonBounceable: string;
     /** Wallet V5R1 testnet-only, non-bounceable (0Q…). */
     addressTestnetNonBounceable: string;
+    /** Wallet V5R1 testnet-only, bounceable (kQ…). */
+    addressTestnetBounceable: string;
   };
   /** Absent for ton-native-only accounts. */
   tron?: { path: string; publicKeyHex: string; hexAddress: string; address: string } | undefined;
@@ -204,6 +206,7 @@ function publicInfoFor(
       addressBounceable: tonAddresses.bounceable,
       addressNonBounceable: tonAddresses.nonBounceable,
       addressTestnetNonBounceable: tonAddresses.testnetNonBounceable,
+      addressTestnetBounceable: tonAddresses.testnetBounceable,
     },
   };
   ton.privateKey.fill(0);

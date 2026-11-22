@@ -51,15 +51,108 @@ async function pastePhrase(page: Page, phrase: string): Promise<void> {
   }, phrase);
 }
 
+const PORTFOLIO = {
+  address: '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287',
+  network: 'testnet',
+  status: 'active',
+  balanceRaw: '1500000000',
+  balance: '1.5',
+  priceUsd: 1.5,
+  change24h: 2,
+  totalUsd: 2.25,
+  assets: [
+    {
+      id: 'ton',
+      symbol: 'TON',
+      name: 'Toncoin',
+      decimals: 9,
+      standard: 'native',
+      balanceRaw: '1500000000',
+      balance: '1.5',
+      usdValue: 2.25,
+    },
+    {
+      id: '-1:27b3b038792c090b59897fbd890c4f5bc8a63d9ffc716f5861968972f617908b',
+      symbol: 'USDT',
+      name: 'Tether USD',
+      decimals: 6,
+      standard: 'jetton',
+      balanceRaw: '2500000',
+      balance: '2.5',
+      usdValue: null,
+    },
+  ],
+  updatedAt: 0,
+  source: 'toncenter',
+};
+
+const ACTIVITY_ITEMS = [
+  {
+    id: 'e2e-tx',
+    direction: 'in',
+    standard: 'native',
+    symbol: 'TON',
+    decimals: 9,
+    amountRaw: '2000000000',
+    amount: '2',
+    counterparty: 'UQDevUQqAddWLfo_N8RNnUIOOaou9Pn3pALtHjucDjiSh3EY',
+    timestamp: 1_700_000_000,
+    feeRaw: '1000000',
+    fee: '0.001',
+    status: 'ok',
+    hash: 'AAAA',
+    comment: 'hello [link removed]',
+    isScam: false,
+  },
+];
+
+/** Mock the same-origin read proxy so tests never hit a live provider. */
+async function mockTonApi(
+  page: Page,
+  options: { activity?: unknown[]; failPortfolioOnce?: boolean } = {},
+): Promise<void> {
+  let portfolioCalls = 0;
+  await page.route('**/api/ton/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/portfolio')) {
+      portfolioCalls += 1;
+      if (options.failPortfolioOnce === true && portfolioCalls === 1) {
+        await route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: '{"error":"upstream_unavailable"}',
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(PORTFOLIO),
+      });
+      return;
+    }
+    if (path.endsWith('/activity')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: options.activity ?? [] }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, body: '{}' });
+  });
+}
+
 test.describe('onboarding and unlock', () => {
   test('create, verify, passcode, lock/unlock, survive reload', async ({ page }) => {
+    await mockTonApi(page);
     const words = await createToPasscode(page);
     await finishCreate(page);
 
     await page.getByRole('button', { name: 'Receive' }).click();
     await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
     await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
-    await expect(page.getByTestId('address-TON')).toHaveText(/^UQ/);
+    await expect(page.getByTestId('address-TON')).toHaveText(/^0Q/);
     await page.getByRole('button', { name: 'Close' }).click();
 
     const dump = await page.evaluate(() => ({
@@ -86,6 +179,7 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('IndexedDB holds only the sealed envelope after create', async ({ page }) => {
+    await mockTonApi(page);
     const words = await createToPasscode(page);
     await finishCreate(page);
 
@@ -130,6 +224,7 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('import: 12-word grid via smart paste, then passcode', async ({ page }) => {
+    await mockTonApi(page);
     await page.goto('/');
     await page.getByRole('button', { name: 'Import a wallet' }).click();
     await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
@@ -154,13 +249,15 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('home dashboard: hero, tabs, actions and asset list', async ({ page }) => {
+    await mockTonApi(page);
     await createToPasscode(page);
     await finishCreate(page);
 
     await expect(page.getByText('Main Wallet')).toBeVisible();
     await expect(page.getByText('Testnet')).toBeVisible();
-    await expect(page.getByTestId('hero-balance')).toHaveText('$0.00');
+    await expect(page.getByTestId('hero-balance')).toHaveText('$2.25');
     await expect(page.getByTestId('asset-TON')).toContainText('Toncoin');
+    await expect(page.getByTestId('asset-TON')).toContainText('1.5 TON');
     await expect(page.getByTestId('asset-USDT')).toContainText('TON · Jetton');
     await expect(page.getByTestId('asset-TRX')).toContainText('TRC-20');
     await expect(page.getByTestId('asset-ETH')).toContainText('ERC-20');
@@ -179,6 +276,7 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('ton-native import shows only TON assets and address', async ({ page }) => {
+    await mockTonApi(page);
     const tonPhrase = [
       'hospital',
       'stove',
@@ -233,12 +331,37 @@ test.describe('onboarding and unlock', () => {
     await expect(page.getByTestId('asset-ETH')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Receive' }).click();
-    await expect(page.getByTestId('address-TON')).toHaveText(/^UQ/);
+    await expect(page.getByTestId('address-TON')).toHaveText(/^0Q/);
     await expect(page.getByTestId('address-TRON')).toHaveCount(0);
     await expect(page.getByTestId('address-EVM')).toHaveCount(0);
   });
 
+  test('activity tab lists transfers and opens the detail view', async ({ page }) => {
+    await mockTonApi(page, { activity: ACTIVITY_ITEMS });
+    await createToPasscode(page);
+    await finishCreate(page);
+    await page.getByRole('tab', { name: 'Activity' }).click();
+    const row = page.getByTestId('activity-e2e-tx');
+    await expect(row).toContainText('+2 TON');
+    await row.click();
+    const dialog = page.getByRole('dialog', { name: 'Transaction' });
+    await expect(dialog).toContainText('hello [link removed]');
+    await expect(dialog.locator('a')).toHaveAttribute('href', /testnet\.tonviewer\.com/);
+  });
+
+  test('portfolio failure shows Offline with Retry, never a false $0.00', async ({ page }) => {
+    await mockTonApi(page, { failPortfolioOnce: true });
+    await createToPasscode(page);
+    await finishCreate(page);
+    await expect(page.getByRole('alert')).toContainText('Offline');
+    await expect(page.getByTestId('hero-balance')).toHaveText('—');
+    await expect(page.getByText('$0.00')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByTestId('hero-balance')).toHaveText('$2.25');
+  });
+
   test('settings reveal requires re-auth and clears the phrase on leaving', async ({ page }) => {
+    await mockTonApi(page);
     const words = await createToPasscode(page);
     await finishCreate(page);
     await page.getByRole('button', { name: 'Settings' }).click();
@@ -253,6 +376,7 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('settings Test your backup verifies the stored phrase', async ({ page }) => {
+    await mockTonApi(page);
     const words = await createToPasscode(page);
     await finishCreate(page);
     await page.getByRole('button', { name: 'Settings' }).click();

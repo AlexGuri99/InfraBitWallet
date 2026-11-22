@@ -51,7 +51,7 @@ describe('server config: TON provider keys', () => {
     expect(providerRequestHeaders(result.config)).toEqual({
       Authorization: 'Bearer tonapi-key',
     });
-    expect(providerBaseUrl(result.config)).toBe('https://tonapi.io');
+    expect(providerBaseUrl(result.config)).toBe('https://testnet.tonapi.io');
   });
 
   it('ignores the key of the other provider', () => {

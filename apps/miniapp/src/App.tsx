@@ -23,7 +23,8 @@ import { t } from './i18n';
 import { CreatePhraseScreen, PhraseScreen, VerifyScreen, WelcomeScreen } from './ui/onboarding';
 import { DisambiguateScreen, ImportPhraseScreen } from './ui/import';
 import { PasscodeScreen } from './ui/passcode';
-import { HomeScreen, SettingsScreen, UnlockScreen } from './ui/wallet';
+import { SettingsScreen, UnlockScreen } from './ui/wallet';
+import { HomeScreen } from './ui/home';
 import { Notice, ScreenShell } from './ui/common';
 
 type Screen =

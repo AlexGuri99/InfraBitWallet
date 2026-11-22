@@ -162,6 +162,18 @@ approval. Cadence: one commit per task.
 
 ---
 
+### P2a: TON Testnet read layer (2026-11-22)
+
+| Area                                                                                 | Status | Evidence                                               |
+| ------------------------------------------------------------------------------------ | ------ | ------------------------------------------------------ |
+| TON types + BigInt formatting, testnet address selection, comment neutralization     | DONE   | `packages/chain-ton/src/*`, `index.test.ts` (16 tests) |
+| Same-origin `/api/ton/portfolio` + `/api/ton/activity` proxies with keys server-side | DONE   | `apps/miniapp/api/ton/*`, `services/api/src/ton/*`     |
+| TON Center v3 primary + TonAPI fallback, caching, validation, clean errors           | DONE   | `service.test.ts` (mocked upstream)                    |
+| Home live balances/jettons/skeleton/offline retry, testnet 0Q address + inline QR    | DONE   | `ui/home.tsx`, `ui-home.test.tsx`, e2e                 |
+| Activity list + sanitized detail modal + tonviewer link                              | DONE   | `ui/home.tsx`, component + e2e                         |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started

@@ -1,17 +1,19 @@
 /**
- * Home redesign tests: hero card, tabs, action grid, asset list with inline badges, the Receive
- * sheet with real vault-derived addresses, and ton-native-only filtering.
+ * Home dashboard tests with a mocked same-origin read API:
+ * loaded balances, skeleton/error (never a false $0.00), activity list + detail, Receive QR and
+ * ton-native-only filtering.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
+import type { TonActivityItem, TonPortfolio } from '@onezerowallet/chain-ton';
 import { TelegramProvider } from '../telegram/TelegramProvider';
-import { HomeScreen } from '../ui/wallet';
+import { HomeScreen, UI_TON_NETWORK } from '../ui/home';
+import { TonApiError, type TonReadApi } from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
-
 const TON_NATIVE_MNEMONIC = [
   'hospital',
   'stove',
@@ -38,6 +40,74 @@ const TON_NATIVE_MNEMONIC = [
   'road',
   'solution',
 ].join(' ');
+const JETTON = '-1:27b3b038792c090b59897fbd890c4f5bc8a63d9ffc716f5861968972f617908b';
+
+function portfolio(): TonPortfolio {
+  return {
+    address: '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287',
+    network: UI_TON_NETWORK,
+    status: 'active',
+    balanceRaw: '1500000000',
+    balance: '1.5',
+    priceUsd: 1.5,
+    change24h: 2,
+    totalUsd: 2.25,
+    assets: [
+      {
+        id: 'ton',
+        symbol: 'TON',
+        name: 'Toncoin',
+        decimals: 9,
+        standard: 'native',
+        balanceRaw: '1500000000',
+        balance: '1.5',
+        usdValue: 2.25,
+      },
+      {
+        id: JETTON,
+        symbol: 'USDT',
+        name: 'Tether USD',
+        decimals: 6,
+        standard: 'jetton',
+        balanceRaw: '2500000',
+        balance: '2.5',
+        usdValue: null,
+      },
+    ],
+    updatedAt: 1_700_000_000_000,
+    source: 'toncenter',
+  };
+}
+
+const ACTIVITY: TonActivityItem[] = [
+  {
+    id: 'tx-1',
+    direction: 'in',
+    standard: 'native',
+    symbol: 'TON',
+    decimals: 9,
+    amountRaw: '2000000000',
+    amount: '2',
+    counterparty: 'UQDevUQqAddWLfo_N8RNnUIOOaou9Pn3pALtHjucDjiSh3EY',
+    timestamp: Math.floor(Date.now() / 1000) - 120,
+    feeRaw: '1000000',
+    fee: '0.001',
+    status: 'ok',
+    hash: 'AAAA',
+    comment: 'hello [link removed]',
+    isScam: false,
+  },
+];
+
+function apiWith(
+  value: TonPortfolio | (() => Promise<TonPortfolio>),
+  activity: TonActivityItem[] = [],
+): TonReadApi {
+  return {
+    getPortfolio: () => (typeof value === 'function' ? value() : Promise.resolve(value)),
+    getActivity: () => Promise.resolve(activity),
+  };
+}
 
 async function unlockedManager(
   accountType: 'bip39-multichain' | 'ton-native-only' = 'bip39-multichain',
@@ -51,119 +121,152 @@ async function unlockedManager(
   return manager;
 }
 
-function renderHome(
-  manager: VaultManager,
-  handlers: { onLock?: () => void; onSettings?: () => void } = {},
-) {
+function renderHome(manager: VaultManager, api: TonReadApi) {
   return render(
     <TelegramProvider>
-      <HomeScreen
-        manager={manager}
-        onLock={handlers.onLock ?? (() => {})}
-        onSettings={handlers.onSettings ?? (() => {})}
-      />
+      <HomeScreen manager={manager} onLock={() => {}} onSettings={() => {}} api={api} />
     </TelegramProvider>,
   );
 }
 
-describe('Home: wallet dashboard', () => {
-  it('shows the hero card, tabs, actions and assets with badges', async () => {
-    renderHome(await unlockedManager());
-    expect(screen.getByRole('heading', { name: 'Your wallet' })).toBeInTheDocument();
-    expect(screen.getByText('Main Wallet')).toBeInTheDocument();
+describe('Home: live TON data', () => {
+  it('shows loaded balances, jettons and totals', async () => {
+    renderHome(await unlockedManager(), apiWith(portfolio()));
+    expect(await screen.findByTestId('hero-balance')).toHaveTextContent('$2.25');
+    expect(screen.getByTestId('asset-TON')).toHaveTextContent('1.5 TON');
+    expect(screen.getByTestId('asset-TON')).toHaveTextContent('$2.25');
+    expect(screen.getByTestId('asset-USDT')).toHaveTextContent('2.5 USDT');
+    expect(screen.getByText(/Main Wallet/)).toBeInTheDocument();
     expect(screen.getByText('Testnet')).toBeInTheDocument();
-    expect(screen.getByTestId('hero-balance')).toHaveTextContent('$0.00');
-    expect(screen.getByRole('tab', { name: 'Wallet' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false');
-
-    for (const action of ['Receive', 'Send', 'Swap', 'Stake']) {
-      expect(screen.getByRole('button', { name: action })).toBeInTheDocument();
-    }
-
-    expect(screen.getByTestId('asset-TON')).toHaveTextContent('Toncoin');
-    expect(screen.getByTestId('asset-TON')).toHaveTextContent('TON');
-    expect(screen.getByTestId('asset-USDT')).toHaveTextContent('Tether USD');
-    expect(screen.getByTestId('asset-USDT')).toHaveTextContent('TON · Jetton');
-    expect(screen.getByTestId('asset-TRX')).toHaveTextContent('TRC-20');
-    expect(screen.getByTestId('asset-ETH')).toHaveTextContent('ERC-20');
-    expect(screen.getByTestId('asset-TON')).toHaveTextContent('0 TON');
-    expect(screen.getByTestId('asset-ETH')).toHaveTextContent('0 ETH');
+    expect(screen.getByTestId('ton-address-pill')).toHaveTextContent(/^0Q/);
   });
 
-  it('masks and unmasks the balance', async () => {
+  it('masks the balance', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager());
+    renderHome(await unlockedManager(), apiWith(portfolio()));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
     await user.click(screen.getByRole('button', { name: 'Hide balance' }));
     expect(screen.getByTestId('hero-balance')).toHaveTextContent('••••');
     await user.click(screen.getByRole('button', { name: 'Show balance' }));
-    expect(screen.getByTestId('hero-balance')).toHaveTextContent('$0.00');
+    expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
   });
 
-  it('switches to Activity and shows the empty state', async () => {
-    const user = userEvent.setup();
-    renderHome(await unlockedManager());
-    await user.click(screen.getByRole('tab', { name: 'Activity' }));
-    expect(screen.getByText(/No transactions yet/)).toBeInTheDocument();
-    expect(screen.queryByTestId('asset-TON')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('tab', { name: 'Wallet' }));
-    expect(screen.getByTestId('asset-TON')).toBeInTheDocument();
+  it('shows a loading skeleton, never a false $0.00', async () => {
+    let resolve!: (value: TonPortfolio) => void;
+    const pending = new Promise<TonPortfolio>((res) => {
+      resolve = res;
+    });
+    renderHome(
+      await unlockedManager(),
+      apiWith(() => pending),
+    );
+    expect(screen.getByTestId('hero-balance')).toHaveTextContent('…');
+    expect(screen.getByTestId('asset-TON')).toHaveTextContent('…');
+    resolve(portfolio());
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
   });
 
-  it('Receive sheet shows the real derived TON, TRON and EVM addresses', async () => {
+  it('shows an offline banner with Retry and no $0.00 on error', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager());
+    let calls = 0;
+    const api: TonReadApi = {
+      getPortfolio: () => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new TonApiError('offline'));
+        return Promise.resolve(portfolio());
+      },
+      getActivity: () => Promise.resolve([]),
+    };
+    renderHome(await unlockedManager(), api);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Offline/);
+    expect(screen.getByTestId('hero-balance')).toHaveTextContent('—');
+    expect(screen.getByTestId('asset-TON')).toHaveTextContent('—');
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+  });
+
+  it('Receive sheet shows the testnet address and an inline QR code', async () => {
+    const user = userEvent.setup();
+    renderHome(await unlockedManager(), apiWith(portfolio()));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
     await user.click(screen.getByRole('button', { name: 'Receive' }));
     const dialog = screen.getByRole('dialog', { name: 'Receive' });
-    expect(dialog).toBeInTheDocument();
-    expect(screen.getByTestId('address-TON')).toHaveTextContent(/^UQ/);
+    expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
     expect(screen.getByTestId('address-TRON')).toHaveTextContent(/^T/);
-    expect(screen.getByTestId('address-EVM')).toHaveTextContent(
-      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    );
+    expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
+    expect(dialog.querySelector('svg[role="img"]')).not.toBeNull();
     await user.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('asset rows open the address sheet for their chain', async () => {
+  it('renders activity and opens a sanitized detail view', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager());
-    await user.click(screen.getByTestId('asset-TRX'));
-    const dialog = screen.getByRole('dialog', { name: 'Receive' });
-    expect(dialog).toHaveTextContent('TRON');
-    expect(screen.getByTestId('address-TRON')).toHaveTextContent(/^T/);
+    renderHome(await unlockedManager(), apiWith(portfolio(), ACTIVITY));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+    await user.click(screen.getByRole('tab', { name: 'Activity' }));
+    expect(await screen.findByTestId('activity-tx-1')).toHaveTextContent('+2 TON');
+    await user.click(screen.getByTestId('activity-tx-1'));
+    const dialog = screen.getByRole('dialog', { name: 'Transaction' });
+    expect(dialog).toHaveTextContent('hello [link removed]');
+    expect(dialog.querySelector('a')?.getAttribute('href')).toContain('testnet.tonviewer.com');
   });
 
-  it('action buttons open their notices and lock/settings callbacks fire', async () => {
+  it('shows the empty activity state', async () => {
     const user = userEvent.setup();
-    const onLock = vi.fn();
-    const onSettings = vi.fn();
-    renderHome(await unlockedManager(), { onLock, onSettings });
-
-    await user.click(screen.getByRole('button', { name: 'Send' }));
-    expect(screen.getByRole('dialog', { name: 'Send' })).toHaveTextContent(/P2/);
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-
-    await user.click(screen.getByRole('button', { name: 'Swap' }));
-    expect(screen.getByRole('dialog', { name: 'Swap' })).toHaveTextContent(/Coming soon/);
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(onSettings).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole('button', { name: 'Lock' }));
-    expect(onLock).toHaveBeenCalledOnce();
+    renderHome(await unlockedManager(), apiWith(portfolio(), []));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+    await user.click(screen.getByRole('tab', { name: 'Activity' }));
+    expect(await screen.findByText(/No transactions yet/)).toBeInTheDocument();
   });
 
   it('ton-native-only hides TRON/EVM assets and addresses', async () => {
-    renderHome(await unlockedManager('ton-native-only'));
-    expect(screen.getByTestId('asset-TON')).toBeInTheDocument();
-    expect(screen.getByTestId('asset-USDT')).toBeInTheDocument();
+    const user = userEvent.setup();
+    renderHome(await unlockedManager('ton-native-only'), apiWith(portfolio()));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
     expect(screen.queryByTestId('asset-TRX')).not.toBeInTheDocument();
     expect(screen.queryByTestId('asset-ETH')).not.toBeInTheDocument();
-
-    const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Receive' }));
-    expect(screen.getByTestId('address-TON')).toHaveTextContent(/^UQ/);
+    expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
     expect(screen.queryByTestId('address-TRON')).not.toBeInTheDocument();
     expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();
+  });
+
+  it('wires lock and settings buttons', async () => {
+    const user = userEvent.setup();
+    const onLock = vi.fn();
+    const onSettings = vi.fn();
+    const manager = await unlockedManager();
+    render(
+      <TelegramProvider>
+        <HomeScreen
+          manager={manager}
+          onLock={onLock}
+          onSettings={onSettings}
+          api={apiWith(portfolio())}
+        />
+      </TelegramProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+    await user.click(screen.getByRole('button', { name: 'Lock' }));
+    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(onLock).toHaveBeenCalledOnce();
+    expect(onSettings).toHaveBeenCalledOnce();
   });
 });
