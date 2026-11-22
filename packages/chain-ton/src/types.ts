@@ -63,6 +63,8 @@ export interface TonActivityItem {
   hash: string;
   /** Comment after URL neutralization; null when absent. */
   comment: string | null;
+  /** True when this message is a bounce/refund (incoming bounced or outbound bounce body). */
+  isBounce?: boolean | undefined;
   /** True when the provider or our filters consider this a scam/dust item. */
   isScam: boolean;
 }
@@ -70,6 +72,20 @@ export interface TonActivityItem {
 export interface TonReadProvider {
   getPortfolio(address: string, network: TonNetwork): Promise<TonPortfolio>;
   getActivity(address: string, network: TonNetwork, limit: number): Promise<TonActivityItem[]>;
+}
+
+/**
+ * Wallet V5R1 network global ids. They are XORed into the wallet id, so the SAME public key
+ * produces DIFFERENT StateInit hashes (and therefore different addresses) on testnet/mainnet.
+ * Signing/deployment (P2b) must use the same id that derived the displayed address.
+ */
+export const TON_NETWORK_GLOBAL_ID = {
+  mainnet: -239,
+  testnet: -3,
+} as const;
+
+export function tonNetworkGlobalId(network: 'mainnet' | 'testnet'): number {
+  return TON_NETWORK_GLOBAL_ID[network];
 }
 
 export interface TonAddressFormsLike {

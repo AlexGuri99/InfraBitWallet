@@ -73,6 +73,10 @@ function textBody(comment: string): string {
   return beginCell().storeUint(0, 32).storeStringTail(comment).endCell().toBoc().toString('base64');
 }
 
+function bounceBody(): string {
+  return beginCell().storeUint(0xffffffff, 32).endCell().toBoc().toString('base64');
+}
+
 function jettonInBody(amount: bigint): string {
   return beginCell()
     .storeUint(0x178d4519, 32)
@@ -132,6 +136,21 @@ function transactions(): unknown {
           value: '0',
           message_content: { body: textBody('https://spam') },
         },
+      },
+      {
+        ...base,
+        hash: 'hash-bounce',
+        lt: '5',
+        in_msg: null,
+        out_msgs: [
+          {
+            source: ADDRESS,
+            destination: OTHER,
+            value: '49933333',
+            created_at: 1_700_000_002,
+            message_content: { body: bounceBody() },
+          },
+        ],
       },
       {
         ...base,

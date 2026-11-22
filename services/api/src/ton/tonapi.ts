@@ -40,6 +40,7 @@ export interface TonApiEventTransfer {
   decimals: number | null;
   standard: 'native' | 'jetton';
   isScam: boolean;
+  isBounce: boolean;
 }
 
 export interface TonApiEvent {
@@ -176,6 +177,7 @@ export class TonApiClient {
             decimals: 9,
             standard: 'native',
             isScam: sender ? sender['is_scam'] === true : false,
+            isBounce: transfer['bounced'] === true,
           });
         } else if (type === 'JettonTransfer') {
           const transfer = record(action['JettonTransfer']);
@@ -196,6 +198,7 @@ export class TonApiClient {
             decimals: jetton ? (num(jetton['decimals']) ?? 9) : 9,
             standard: 'jetton',
             isScam: sender ? sender['is_scam'] === true : false,
+            isBounce: transfer['bounced'] === true,
           });
         }
       }

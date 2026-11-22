@@ -25,9 +25,15 @@ interface DecodedBody {
   comment: string | null;
   jettonAmountRaw: string | null;
   destination: string | null;
+  isBounce: boolean;
 }
 
-const EMPTY_BODY: DecodedBody = { comment: null, jettonAmountRaw: null, destination: null };
+const EMPTY_BODY: DecodedBody = {
+  comment: null,
+  jettonAmountRaw: null,
+  destination: null,
+  isBounce: false,
+};
 
 function decodeBody(body: string | null): DecodedBody {
   if (!body) return EMPTY_BODY;
@@ -41,18 +47,27 @@ function decodeBody(body: string | null): DecodedBody {
     if (op === 0) {
       return { ...EMPTY_BODY, comment: slice.loadStringTail() };
     }
+    if (op === 0xffffffff) {
+      // A bounced message body starts with ~0^32; this is an automatic refund, not a user send.
+      return { ...EMPTY_BODY, isBounce: true };
+    }
     if (op === 0x0f8a7ea5) {
       // jetton transfer: query_id, amount, destination, response, ...
       slice.loadUintBig(64);
       const amount = slice.loadCoins();
       const destination = slice.loadAddress().toRawString();
-      return { comment: null, jettonAmountRaw: amount.toString(), destination };
+      return { comment: null, jettonAmountRaw: amount.toString(), destination, isBounce: false };
     }
     if (op === 0x178d4519) {
       // jetton internal_transfer: query_id, amount, from, response, ...
       slice.loadUintBig(64);
       const amount = slice.loadCoins();
-      return { comment: null, jettonAmountRaw: amount.toString(), destination: null };
+      return {
+        comment: null,
+        jettonAmountRaw: amount.toString(),
+        destination: null,
+        isBounce: false,
+      };
     }
     return EMPTY_BODY;
   } catch {
@@ -138,6 +153,7 @@ export function mapTonCenterActivity(
           hash: tx.hash,
           comment: neutralizeComment(body.comment),
           isScam: false,
+          isBounce: inMsg.bounced || body.isBounce,
         });
       } else if (body.jettonAmountRaw !== null) {
         const master = inMsg.source ? walletToMaster.get(inMsg.source.toLowerCase()) : undefined;
@@ -180,6 +196,7 @@ export function mapTonCenterActivity(
           hash: tx.hash,
           comment: neutralizeComment(body.comment),
           isScam: false,
+          isBounce: body.isBounce,
         });
       } else if (body.jettonAmountRaw !== null && body.destination !== null) {
         const master = walletToMaster.get(outMsg.source?.toLowerCase() ?? '');
@@ -226,6 +243,7 @@ export function mapTonApiActivity(events: TonApiEvent[]): TonActivityItem[] {
         hash: event.hash,
         comment: neutralizeComment(transfer.comment),
         isScam: transfer.isScam,
+        isBounce: transfer.isBounce,
       });
     });
   }

@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatDecimal,
+  formatDecimalShort,
   parseDecimal,
   formatUsd,
   formatChange,
@@ -15,6 +16,8 @@ import {
   tonAddressForNetwork,
   isTestnetUserFriendlyAddress,
   isProbablyTonAddress,
+  TON_NETWORK_GLOBAL_ID,
+  tonNetworkGlobalId,
   type TonActivityItem,
 } from './index.js';
 
@@ -60,6 +63,21 @@ describe('BigInt decimal formatting', () => {
     ['9007199254740993', 9, '9007199.254740993'],
   ])('%s with %i decimals -> %s', (raw, decimals, expected) => {
     expect(formatDecimal(raw, decimals)).toBe(expected);
+  });
+
+  it('formats compact hero amounts with at most 4 decimals (truncated)', () => {
+    expect(formatDecimalShort('3999999979', 9, 4)).toBe('3.9999');
+    expect(formatDecimalShort('1500000000', 9, 4)).toBe('1.5');
+    expect(formatDecimalShort('49933333', 9, 4)).toBe('0.0499');
+    expect(formatDecimalShort('1', 9, 4)).toBe('0');
+    expect(formatDecimalShort('-1500000000', 9, 4)).toBe('-1.5');
+    expect(formatDecimalShort('1234567890', 9, 9)).toBe('1.23456789');
+  });
+
+  it('pins the V5R1 network global ids (testnet address hash differs from mainnet)', () => {
+    expect(TON_NETWORK_GLOBAL_ID).toEqual({ mainnet: -239, testnet: -3 });
+    expect(tonNetworkGlobalId('testnet')).toBe(-3);
+    expect(tonNetworkGlobalId('mainnet')).toBe(-239);
   });
 
   it('parses decimal strings exactly and rejects over-precision', () => {
@@ -128,5 +146,19 @@ describe('comment neutralization and spam filtering', () => {
     const out = filterActivity(items);
     expect(out.map((entry) => entry.id)).toEqual(['keep']);
     expect(out[0]?.comment).toBe('pay [link removed]');
+  });
+
+  it('keeps bounced/refund items but preserves the flag', () => {
+    const out = filterActivity([
+      item({
+        id: 'bounce',
+        direction: 'out',
+        amountRaw: '49933333',
+        amount: '0.049933333',
+        isBounce: true,
+      }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.isBounce).toBe(true);
   });
 });

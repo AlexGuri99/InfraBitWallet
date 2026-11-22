@@ -141,6 +141,87 @@ describe('Home: live TON data', () => {
     expect(screen.getByTestId('ton-address-pill')).toHaveTextContent(/^0Q/);
   });
 
+  it('queries the exact testnet address it displays (same 256-bit hash)', async () => {
+    const user = userEvent.setup();
+    const requested: string[] = [];
+    const api: TonReadApi = {
+      getPortfolio: (address) => {
+        requested.push(address);
+        return Promise.resolve(portfolio());
+      },
+      getActivity: (address) => {
+        requested.push(address);
+        return Promise.resolve([]);
+      },
+    };
+    renderHome(await unlockedManager(), api);
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Receive' }));
+    const displayed = screen.getByTestId('address-TON').textContent;
+    expect(displayed).toMatch(/^0Q/);
+
+    const hashOf = (address: string): string => {
+      const binary = atob(address.replace(/-/g, '+').replace(/_/g, '/'));
+      return Array.from(binary.slice(2, 34))
+        .map((char) => char.charCodeAt(0).toString(16).padStart(2, '0'))
+        .join('');
+    };
+    expect(requested.length).toBeGreaterThan(0);
+    for (const address of requested) {
+      expect(address).toBe(displayed);
+      expect(hashOf(address)).toBe(hashOf(displayed));
+      // The mainnet raw hash (0:…) must never be queried in testnet mode.
+      expect(address).not.toMatch(/^0:/);
+    }
+  });
+
+  it('formats the hero TON amount to at most four decimals', async () => {
+    const p = portfolio();
+    p.balanceRaw = '3999999979';
+    p.balance = '3.999999979';
+    const native = p.assets[0];
+    if (!native) throw new Error('missing native asset');
+    p.totalUsd = 6;
+    p.assets = [
+      { ...native, balanceRaw: '3999999979', balance: '3.999999979', usdValue: 6 },
+      ...p.assets.slice(1),
+    ];
+    renderHome(await unlockedManager(), apiWith(p));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$6.00');
+    });
+    expect(screen.getByText(/3\.9999 TON ·/)).toBeInTheDocument();
+    expect(screen.getByTestId('asset-TON')).toHaveTextContent('3.999999979 TON');
+  });
+
+  it('labels bounced refunds instead of presenting them as a send', async () => {
+    const user = userEvent.setup();
+    const baseItem = ACTIVITY[0];
+    if (!baseItem) throw new Error('missing activity fixture');
+    const bounced: TonActivityItem[] = [
+      {
+        ...baseItem,
+        id: 'bounce-1',
+        direction: 'out',
+        amountRaw: '49933333',
+        amount: '0.049933333',
+        isBounce: true,
+      },
+    ];
+    renderHome(await unlockedManager(), apiWith(portfolio(), bounced));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+    await user.click(screen.getByRole('tab', { name: 'Activity' }));
+    const row = await screen.findByTestId('activity-bounce-1');
+    expect(row).toHaveTextContent('Bounced');
+    await user.click(row);
+    expect(screen.getByRole('dialog', { name: 'Transaction' })).toHaveTextContent('Bounced refund');
+  });
+
   it('masks the balance', async () => {
     const user = userEvent.setup();
     renderHome(await unlockedManager(), apiWith(portfolio()));

@@ -42,6 +42,22 @@ export function parseDecimal(value: string, decimals: number): bigint | null {
   return BigInt(whole + fraction.padEnd(decimals, '0'));
 }
 
+/**
+ * Compact display amount: at most `maxFractionDigits` decimals (truncated, not rounded) with
+ * trailing zeros trimmed. Full precision stays available via formatDecimal for detail views.
+ */
+export function formatDecimalShort(raw: string, decimals: number, maxFractionDigits = 4): string {
+  if (!/^-?\d+$/.test(raw)) return '0';
+  if (decimals <= 0 || maxFractionDigits >= decimals) return formatDecimal(raw, decimals);
+  const factor = 10n ** BigInt(decimals - maxFractionDigits);
+  const value = BigInt(raw);
+  const negative = value < 0n;
+  const magnitude = negative ? -value : value;
+  const truncated = (magnitude / factor) * factor;
+  const text = formatDecimal(`${negative ? '-' : ''}${truncated.toString()}`, decimals);
+  return text;
+}
+
 /** "$1,234.56"; null/NaN renders as "$0.00" without implying a loaded balance on its own. */
 export function formatUsd(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return '$0.00';

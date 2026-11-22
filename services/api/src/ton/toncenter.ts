@@ -37,6 +37,8 @@ export interface TonCenterMessage {
   valueRaw: string;
   createdAt: number;
   body: string | null;
+  /** TON Center v3 bounced flag (true for a message returned to its sender). */
+  bounced: boolean;
 }
 
 export interface TonCenterTransaction {
@@ -87,6 +89,7 @@ function parseMessage(value: unknown): TonCenterMessage | null {
     valueRaw: asString(msg['value']) ?? '0',
     createdAt: asNumber(msg['created_at']) ?? 0,
     body: content ? asString(content['body']) : null,
+    bounced: msg['bounced'] === true,
   };
 }
 
