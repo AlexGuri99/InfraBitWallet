@@ -424,3 +424,26 @@ forces the user to reveal and confirm they stored the phrase.
 
 **Tests:** component and Playwright create flows assert the 2-step flow ("Step 1 of 2" / "Step 2
 of 2"), and Settings → Test your backup is covered in both.
+
+---
+
+## Decision: TON provider API keys are server-side only
+
+**Status:** Accepted (2026-11-22).
+
+- `services/api/src/config.ts` reads `TON_DATA_PROVIDER` (`toncenter` | `tonapi`),
+  `TONCENTER_API_KEY` (sent as `X-API-Key`) and `TONAPI_API_KEY` (sent as
+  `Authorization: Bearer …`). Empty/whitespace values count as "not configured" and the public
+  endpoints are used with lower rate limits.
+- Errors are generic (`INVALID_SERVER_ENV`) and never echo a key; the key is only ever placed in
+  the outbound provider header, never in a URL or log.
+- Local values go in `services/api/.env.local` (gitignored); deployed values go in the Vercel
+  project's Environment Variables for the API service.
+- The Mini App must call our API, not a key-bearing provider endpoint. **No key may appear in
+  `apps/miniapp`, in any `VITE_*` variable, in `docs/`, in tests or in chat.** Public provider
+  endpoints without a key are acceptable for early development.
+
+Template: `services/api/.env.example`. Tests: `services/api/src/config.test.ts`.
+
+**Not done yet:** the API service is not deployed as a serverless function and there is no proxy
+route that consumes these keys; that lands with the P2 TON read path.
