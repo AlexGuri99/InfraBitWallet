@@ -3,12 +3,20 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "scripts": {
+    "build": "pnpm --filter @onezerowallet/chain-ton build && tsc -p tsconfig.build.json",
     "dev": "vite dev",
-    "build": "tsc --noEmit",
     "lint": "eslint src/",
-    "type-check": "tsc --noEmit",
-    "test": "vitest run"
+    "type-check": "pnpm --filter @onezerowallet/chain-ton build && tsc --noEmit",
+    "test": "pnpm --filter @onezerowallet/chain-ton build && vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

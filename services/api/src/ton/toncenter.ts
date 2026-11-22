@@ -9,7 +9,7 @@
  * The API key is sent only in the X-API-Key header (header name tracked in UNVERIFIED.md #23).
  */
 import type { TonAccountStatus } from '@onezerowallet/chain-ton';
-import { ProviderError, fetchJson, type FetchLike } from './http';
+import { ProviderError, fetchJson, type FetchLike } from './http.js';
 
 export interface TonCenterOptions {
   baseUrl: string;

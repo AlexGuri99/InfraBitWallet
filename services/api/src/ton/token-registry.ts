@@ -5,7 +5,7 @@
  */
 import type { TonAssetBalance } from '@onezerowallet/chain-ton';
 import { formatDecimal } from '@onezerowallet/chain-ton';
-import type { TonApiJettonMeta } from './tonapi';
+import type { TonApiJettonMeta } from './tonapi.js';
 
 export const NATIVE_TON = {
   id: 'ton',

@@ -4,10 +4,13 @@
  * Same-origin serverless proxy. API keys stay server-side; the Mini App only talks to `/api/*`
  * (CSP connect-src stays 'self'). Errors are clean and never include upstream bodies or keys.
  */
-import { loadServerConfig } from '../../../../services/api/src/config';
-import { getTonPortfolio } from '../../../../services/api/src/ton/service';
-import { normalizeTonAddress, readTonNetwork } from '../../../../services/api/src/ton/validation';
-import { ProviderError } from '../../../../services/api/src/ton/http';
+import {
+  getTonPortfolio,
+  loadServerConfig,
+  normalizeTonAddress,
+  ProviderError,
+  readTonNetwork,
+} from '@onezerowallet/api';
 
 interface ApiRequest {
   method?: string | undefined;

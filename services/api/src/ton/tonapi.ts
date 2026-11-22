@@ -10,7 +10,7 @@
  * The key (when configured) is sent only as Authorization: Bearer.
  */
 import type { TonAccountStatus } from '@onezerowallet/chain-ton';
-import { ProviderError, fetchJson, type FetchLike } from './http';
+import { ProviderError, fetchJson, type FetchLike } from './http.js';
 
 export interface TonApiOptions {
   baseUrl: string;

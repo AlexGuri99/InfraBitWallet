@@ -6,14 +6,14 @@
  * provider headers. Errors are ProviderError (no upstream body, never a key).
  */
 import { type TonActivityItem, type TonNetwork, type TonPortfolio } from '@onezerowallet/chain-ton';
-import type { ServerConfig } from '../config';
-import { providerBaseUrl } from '../config';
-import { cached, TTL } from './cache';
-import { ProviderError, type FetchLike } from './http';
-import { buildPortfolio, mapTonApiActivity, mapTonCenterActivity } from './normalize';
-import { TonApiClient, type TonApiJettonMeta, type TonApiPrice } from './tonapi';
-import { TonCenterClient } from './toncenter';
-import { NATIVE_TON, nativeAsset } from './token-registry';
+import type { ServerConfig } from '../config.js';
+import { providerBaseUrl } from '../config.js';
+import { cached, TTL } from './cache.js';
+import { ProviderError, type FetchLike } from './http.js';
+import { buildPortfolio, mapTonApiActivity, mapTonCenterActivity } from './normalize.js';
+import { TonApiClient, type TonApiJettonMeta, type TonApiPrice } from './tonapi.js';
+import { TonCenterClient } from './toncenter.js';
+import { NATIVE_TON, nativeAsset } from './token-registry.js';
 
 export interface TonReadOptions {
   config: ServerConfig;

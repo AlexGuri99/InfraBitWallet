@@ -203,6 +203,9 @@ importers:
 
   apps/miniapp:
     dependencies:
+      '@onezerowallet/api':
+        specifier: workspace:*
+        version: link:../../services/api
       '@onezerowallet/chain-ton':
         specifier: workspace:*
         version: link:../../packages/chain-ton

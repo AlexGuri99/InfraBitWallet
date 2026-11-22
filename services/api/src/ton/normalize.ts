@@ -17,9 +17,9 @@ import {
   type TonNetwork,
   type TonPortfolio,
 } from '@onezerowallet/chain-ton';
-import type { TonApiEvent, TonApiJettonMeta, TonApiPrice } from './tonapi';
-import type { TonCenterMessage, TonCenterTransaction, TonCenterTransactions } from './toncenter';
-import { NATIVE_TON, jettonAsset, nativeAsset } from './token-registry';
+import type { TonApiEvent, TonApiJettonMeta, TonApiPrice } from './tonapi.js';
+import type { TonCenterMessage, TonCenterTransaction, TonCenterTransactions } from './toncenter.js';
+import { NATIVE_TON, jettonAsset, nativeAsset } from './token-registry.js';
 
 interface DecodedBody {
   comment: string | null;
