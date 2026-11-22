@@ -11,6 +11,7 @@ export {
   generateMnemonicPhrase,
   validateMnemonicPhrase,
   normalizeMnemonic,
+  isBip39Word,
   generateTonNativeMnemonicPhrase,
   validateTonMnemonicPhrase,
 } from './mnemonic';

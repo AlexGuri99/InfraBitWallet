@@ -1,6 +1,6 @@
 # Stage C review packet
 
-Full source of the Stage C UI, adapters and tests. No secret is included: fixtures are public test phrases and the code only handles secrets through the vault API.
+Full source of the Stage C UI, adapters and tests, updated after the onboarding UX refactor (2026-11-22). Test fixtures are public test phrases only.
 
 ## apps/miniapp/src/App.tsx
 
@@ -11,32 +11,37 @@ Full source of the Stage C UI, adapters and tests. No secret is included: fixtur
  * The UI only calls the vault API. It never reads keys, keeps no secret in React state, and
  * clears the module-level phrase holder whenever a flow ends, the wallet locks, or the app is
  * backgrounded.
+ *
+ * Create order: phrase -> verify -> passcode (the vault is sealed last, after the user has
+ * proven the backup). Import order: phrase (type auto-detected) -> passcode.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { setInactivityTimeout } from '@onezerowallet/crypto-vault';
-import type { AccountType } from '@onezerowallet/crypto-vault';
+import {
+  generateMnemonicPhrase,
+  setInactivityTimeout,
+  type AccountType,
+} from '@onezerowallet/crypto-vault';
 import { useTelegram } from './telegram';
 import { installTelegramLifecycleHooks } from './adapters/telegram-lifecycle';
 import { useVault } from './vault/context';
 import { secretHolder } from './vault/secret-holder';
+import { detectAccountType } from './vault/detect';
 import { t } from './i18n';
-import {
-  ImportScreen,
-  PasscodeSetupScreen,
-  PhraseScreen,
-  VerifyScreen,
-  WelcomeScreen,
-} from './ui/onboarding';
+import { CreatePhraseScreen, PhraseScreen, VerifyScreen, WelcomeScreen } from './ui/onboarding';
+import { DisambiguateScreen, ImportPhraseScreen } from './ui/import';
+import { PasscodeScreen } from './ui/passcode';
 import { HomeScreen, SettingsScreen, UnlockScreen } from './ui/wallet';
 import { Notice, ScreenShell } from './ui/common';
 
 type Screen =
   | 'loading'
   | 'welcome'
-  | 'passcode-create'
-  | 'import'
-  | 'phrase'
-  | 'verify'
+  | 'create-phrase'
+  | 'create-verify'
+  | 'create-passcode'
+  | 'import-phrase'
+  | 'import-disambiguate'
+  | 'import-passcode'
   | 'unlock'
   | 'home'
   | 'settings'
@@ -44,6 +49,15 @@ type Screen =
   | 'settings-verify';
 
 const AUTO_LOCK_KEY = 'ozw.autoLockMs';
+
+const ONBOARDING_SECRET_SCREENS: Screen[] = [
+  'create-phrase',
+  'create-verify',
+  'create-passcode',
+  'import-phrase',
+  'import-disambiguate',
+  'import-passcode',
+];
 
 function LoadingScreen() {
   return (
@@ -58,6 +72,7 @@ export function App() {
   const { webApp } = useTelegram();
   const [screen, setScreen] = useState<Screen>('loading');
   const [storageError, setStorageError] = useState(false);
+  const [importAccountType, setImportAccountType] = useState<AccountType>('bip39-multichain');
 
   useEffect(() => {
     try {
@@ -78,7 +93,29 @@ export function App() {
     })();
   }, [manager]);
 
-  // Telegram backgrounding locks immediately (visibility is handled inside the vault session).
+  // Clear a temporary phrase when backgrounded on a secret screen.
+  useEffect(() => {
+    const wipe = (): void => {
+      if (screen === 'settings-phrase' || screen === 'settings-verify') {
+        secretHolder.clear();
+        setScreen('settings');
+        return;
+      }
+      if (ONBOARDING_SECRET_SCREENS.includes(screen)) {
+        secretHolder.clear();
+        setScreen('welcome');
+      }
+    };
+    const onHidden = (): void => {
+      if (document.hidden) wipe();
+    };
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, [screen]);
+
+  // Telegram backgrounding locks immediately.
   useEffect(() => {
     return installTelegramLifecycleHooks(webApp ?? undefined, {
       onDeactivated: () => {
@@ -110,19 +147,67 @@ export function App() {
     setScreen('unlock');
   }, [manager]);
 
-  const createWallet = async (
-    passcode: string,
-    accountType: AccountType,
-  ): Promise<string | null> => {
-    const created = await manager.createWallet(passcode, undefined, { accountType });
+  const startCreate = useCallback(() => {
+    if (!secretHolder.has()) secretHolder.set(generateMnemonicPhrase(24));
+    setScreen('create-phrase');
+  }, []);
+
+  const sealCreatedWallet = async (passcode: string): Promise<string | null> => {
+    const phrase = secretHolder.get();
+    if (!phrase) return t('settings.error');
+    const created = await manager.createWallet(passcode, phrase, {
+      accountType: 'bip39-multichain',
+    });
     if (!created.ok) {
       return created.error === 'weak_passcode'
         ? (created.message ?? t('passcode.weak'))
         : t('settings.error');
     }
-    if (!created.mnemonic) return t('settings.error');
-    secretHolder.set(created.mnemonic);
-    setScreen('phrase');
+    secretHolder.clear();
+    const unlocked = await manager.unlock(passcode);
+    if (!unlocked.success) {
+      setScreen('unlock');
+      return null;
+    }
+    setScreen('home');
+    return null;
+  };
+
+  const importPhraseNext = async (
+    words: string[],
+    forceTonNative: boolean,
+  ): Promise<string | null> => {
+    const phrase = words.join(' ');
+    const detected = await detectAccountType(phrase, { forceTonNative });
+    if (detected.kind === 'invalid') return detected.message;
+    secretHolder.set(phrase);
+    if (detected.kind === 'ambiguous') {
+      setScreen('import-disambiguate');
+      return null;
+    }
+    setImportAccountType(detected.accountType);
+    setScreen('import-passcode');
+    return null;
+  };
+
+  const sealImportedWallet = async (passcode: string): Promise<string | null> => {
+    const phrase = secretHolder.get();
+    if (!phrase) return t('settings.error');
+    const imported = await manager.importWallet(phrase, passcode, {
+      accountType: importAccountType,
+    });
+    secretHolder.clear();
+    if (!imported.ok) {
+      return imported.error === 'invalid_mnemonic'
+        ? t('import.sequenceError')
+        : t('settings.error');
+    }
+    const unlocked = await manager.unlock(passcode);
+    if (!unlocked.success) {
+      setScreen('unlock');
+      return null;
+    }
+    setScreen('home');
     return null;
   };
 
@@ -140,59 +225,88 @@ export function App() {
     case 'welcome':
       return (
         <WelcomeScreen
-          onCreate={() => {
-            setScreen('passcode-create');
-          }}
+          onCreate={startCreate}
           onImport={() => {
-            setScreen('import');
+            secretHolder.clear();
+            setScreen('import-phrase');
           }}
         />
       );
-    case 'passcode-create':
+    case 'create-phrase':
       return (
-        <PasscodeSetupScreen
-          manager={manager}
-          title={t('passcode.title')}
-          onBack={() => {
-            setScreen('welcome');
-          }}
-          onSubmit={createWallet}
-          submitLabel={t('passcode.submit')}
-        />
-      );
-    case 'import':
-      return (
-        <ImportScreen
-          manager={manager}
-          onBack={() => {
-            setScreen('welcome');
-          }}
-          onImported={() => {
-            setScreen('home');
-          }}
-        />
-      );
-    case 'phrase':
-      return (
-        <PhraseScreen
+        <CreatePhraseScreen
+          step={{ current: 1, total: 3 }}
           onBack={() => {
             secretHolder.clear();
             setScreen('welcome');
           }}
           onDone={() => {
-            setScreen('verify');
+            setScreen('create-verify');
           }}
         />
       );
-    case 'verify':
+    case 'create-verify':
       return (
         <VerifyScreen
+          step={{ current: 2, total: 3 }}
           onCancel={() => {
-            setScreen('phrase');
+            setScreen('create-phrase');
           }}
           onVerified={() => {
-            setScreen('unlock');
+            setScreen('create-passcode');
           }}
+        />
+      );
+    case 'create-passcode':
+      return (
+        <PasscodeScreen
+          manager={manager}
+          title={t('passcode.title')}
+          step={{ current: 3, total: 3 }}
+          onBack={() => {
+            setScreen('create-verify');
+          }}
+          onSubmit={sealCreatedWallet}
+          submitLabel={t('passcode.submit')}
+        />
+      );
+    case 'import-phrase':
+      return (
+        <ImportPhraseScreen
+          step={{ current: 1, total: 2 }}
+          onBack={() => {
+            secretHolder.clear();
+            setScreen('welcome');
+          }}
+          onNext={importPhraseNext}
+        />
+      );
+    case 'import-disambiguate':
+      return (
+        <DisambiguateScreen
+          step={{ current: 1, total: 2 }}
+          onBack={() => {
+            secretHolder.clear();
+            setScreen('import-phrase');
+          }}
+          onChoose={(accountType) => {
+            setImportAccountType(accountType);
+            setScreen('import-passcode');
+          }}
+        />
+      );
+    case 'import-passcode':
+      return (
+        <PasscodeScreen
+          manager={manager}
+          title={t('import.step.passcode')}
+          step={{ current: 2, total: 2 }}
+          onBack={() => {
+            secretHolder.clear();
+            setScreen('import-phrase');
+          }}
+          onSubmit={sealImportedWallet}
+          submitLabel={t('import.submit')}
         />
       );
     case 'unlock':
@@ -242,7 +356,6 @@ export function App() {
     case 'settings-phrase':
       return (
         <PhraseScreen
-          settingsMode
           onBack={() => {
             secretHolder.clear();
             setScreen('settings');
@@ -271,30 +384,6 @@ export function App() {
 }
 ```
 
-## apps/miniapp/src/main.tsx
-
-```typescript
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import { App } from './App';
-import { TelegramProvider } from './telegram/TelegramProvider';
-import { VaultProvider } from './vault/context';
-import './index.css';
-
-const root = document.getElementById('root');
-if (!root) throw new Error('Root element not found');
-
-createRoot(root).render(
-  <StrictMode>
-    <TelegramProvider>
-      <VaultProvider>
-        <App />
-      </VaultProvider>
-    </TelegramProvider>
-  </StrictMode>,
-);
-```
-
 ## apps/miniapp/src/i18n.ts
 
 ```typescript
@@ -320,7 +409,18 @@ const en = {
   'onboarding.risk.points':
     'You are the only person who can access these funds. A lost recovery phrase cannot be restored. Local data can be cleared.',
   'onboarding.continue': 'I understand, continue',
+  'step.of': 'Step {current} of {total}',
   'passcode.title': 'Set a passcode',
+  'passcode.requirements.device':
+    'Enter a 6+ digit PIN (avoid simple patterns like 123456) or an 8+ character password.',
+  'passcode.requirements.noDevice': 'Minimum 12 characters. Common passwords are not allowed.',
+  'passcode.requirements.offline':
+    'No device secret is available here, so the vault can be attacked offline if its data is copied.',
+  'passcode.show': 'Show',
+  'passcode.hide': 'Hide',
+  'passcode.met': 'Requirements met',
+  'passcode.notMet': 'Requirements not met',
+  'passcode.lengthLabel': 'characters',
   'passcode.label': 'Passcode',
   'passcode.confirm': 'Confirm passcode',
   'passcode.mismatch': 'The passcodes do not match',
@@ -338,6 +438,8 @@ const en = {
   'phrase.warning':
     'Write these words on paper, in order, and keep them offline. Anyone who sees them can steal your funds. Do not take screenshots.',
   'phrase.reveal': 'Show recovery phrase',
+  'phrase.checkbox': "I've stored the seed phrase in a secure place.",
+  'phrase.next': 'Next',
   'phrase.revealAgain': 'Show again',
   'phrase.hide': 'Hide phrase',
   'phrase.done': 'I wrote it down',
@@ -350,6 +452,21 @@ const en = {
   'verify.retry': 'One or more words are incorrect. Check the positions and try again.',
   'verify.success': 'Backup verified.',
   'import.title': 'Import a wallet',
+  'import.step.phrase': 'Enter recovery phrase',
+  'import.step.passcode': 'Set a passcode',
+  'import.words24': '24 words',
+  'import.words12': '12 words',
+  'import.continue': 'Continue',
+  'import.pasteHint': 'Tip: paste the whole phrase into any box to fill all words.',
+  'import.advanced': 'Advanced',
+  'import.forceTon': 'Force TON-native format (TON-only wallets)',
+  'import.invalidWord': 'Not a word from the BIP-39 list',
+  'import.sequenceError': 'The phrase is not valid with the selected format.',
+  'import.disambiguate.title': 'Which wallet is this phrase from?',
+  'import.disambiguate.body':
+    'This phrase is valid in both formats and they derive different keys. Choose where it was created.',
+  'import.disambiguate.standard': 'Standard multichain wallet',
+  'import.disambiguate.ton': 'TON-only wallet',
   'import.phrase': 'Recovery phrase',
   'import.phraseHelp': 'Words separated by spaces. Never type it anywhere else.',
   'import.submit': 'Import',
@@ -401,6 +518,7 @@ const en = {
   'settings.requiresPasscode': 'Enter your passcode to continue',
   'settings.error': 'Something went wrong',
   'common.cancel': 'Cancel',
+  'common.done': 'Done',
   'common.working': 'Working…',
   'error.storage': 'Secure storage is unavailable, so the wallet cannot start on this device.',
 } as const;
@@ -497,6 +615,74 @@ export const secretHolder = {
     return phrase !== null;
   },
 };
+```
+
+## apps/miniapp/src/vault/detect.ts
+
+```typescript
+/**
+ * Account-type detection for imports.
+ *
+ * 12-word phrases are always BIP-39. 24-word phrases are checked against both schemes: the same
+ * words can be valid in both and then derive different keys (~1 in 256 BIP-39 phrases also pass
+ * the TON seed check), so that case needs an explicit user choice.
+ *
+ * Validators are injectable so the ambiguous case can be tested deterministically.
+ */
+import {
+  validateMnemonicPhrase,
+  validateTonMnemonicPhrase,
+  type AccountType,
+} from '@onezerowallet/crypto-vault';
+
+export type PhraseDetection =
+  | { kind: 'resolved'; accountType: AccountType }
+  | { kind: 'ambiguous' }
+  | { kind: 'invalid'; message: string };
+
+export interface DetectOptions {
+  /** User explicitly forced the TON-native reading. */
+  forceTonNative?: boolean;
+  validateBip39?: (phrase: string) => boolean;
+  validateTon?: (phrase: string) => Promise<boolean> | boolean;
+}
+
+export function phraseWordCount(phrase: string): number {
+  return phrase.trim() === '' ? 0 : phrase.trim().split(/\s+/).length;
+}
+
+export async function detectAccountType(
+  phrase: string,
+  options: DetectOptions = {},
+): Promise<PhraseDetection> {
+  const validation = validateMnemonicPhrase(phrase);
+  const bip39Valid = options.validateBip39 ? options.validateBip39(phrase) : validation.valid;
+  const words = phraseWordCount(phrase);
+  const tonValid =
+    words === 24
+      ? await (options.validateTon
+          ? options.validateTon(phrase)
+          : validateTonMnemonicPhrase(phrase))
+      : false;
+
+  if (options.forceTonNative) {
+    return tonValid
+      ? { kind: 'resolved', accountType: 'ton-native-only' }
+      : { kind: 'invalid', message: 'The phrase is not a valid TON-native mnemonic.' };
+  }
+
+  if (words !== 12 && words !== 24) {
+    return { kind: 'invalid', message: 'Enter 12 or 24 words.' };
+  }
+  if (bip39Valid && tonValid) return { kind: 'ambiguous' };
+  if (bip39Valid) return { kind: 'resolved', accountType: 'bip39-multichain' };
+  if (tonValid) return { kind: 'resolved', accountType: 'ton-native-only' };
+  // Position-only errors; they never echo the words.
+  return {
+    kind: 'invalid',
+    message: validation.errors[0] ?? 'The phrase is not a valid mnemonic.',
+  };
+}
 ```
 
 ## apps/miniapp/src/adapters/biometry.ts
@@ -798,19 +984,33 @@ import type {
 } from 'react';
 import { useTelegram } from '../telegram';
 
+export function StepIndicator({ current, total }: { current: number; total: number }) {
+  return (
+    <span className="text-xs opacity-70" aria-label={`Step ${String(current)} of ${String(total)}`}>
+      Step {current} of {total}
+    </span>
+  );
+}
+
+/**
+ * Mobile: full-bleed with Telegram safe areas. Desktop: a centred elevated card.
+ * The card surface uses the Telegram section colour so the app still looks native.
+ */
 export function ScreenShell({
   title,
   children,
   onBack,
+  step,
 }: {
   title: string;
   children: ReactNode;
-  onBack?: () => void;
+  onBack?: (() => void) | undefined;
+  step?: { current: number; total: number } | undefined;
 }) {
   const { theme } = useTelegram();
   return (
     <div
-      className="min-h-screen flex flex-col"
+      className="min-h-screen w-full flex justify-center"
       style={{
         backgroundColor: theme?.backgroundColor ?? 'var(--tg-theme-bg-color, #fff)',
         color: theme?.textColor ?? 'var(--tg-theme-text-color, #000)',
@@ -820,27 +1020,33 @@ export function ScreenShell({
         paddingRight: 'env(safe-area-inset-right)',
       }}
     >
-      <header
-        className="px-4 py-3 flex items-center gap-3"
+      <div
+        className="w-full max-w-md flex flex-col min-h-screen sm:min-h-0 sm:my-8 sm:rounded-2xl sm:shadow-xl sm:border sm:border-black/10 overflow-hidden"
         style={{
-          backgroundColor: theme?.headerBgColor ?? 'var(--tg-theme-header-bg-color, #f0f0f0)',
+          backgroundColor: theme?.sectionBgColor ?? 'var(--tg-theme-section-bg-color, #fff)',
         }}
       >
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-            aria-label="Back"
-          >
-            ←
-          </button>
-        ) : null}
-        <h1 className="text-lg font-semibold">{title}</h1>
-      </header>
-      <main className="flex-1 px-4 py-6 flex flex-col gap-4 max-w-md w-full mx-auto">
-        {children}
-      </main>
+        <header
+          className="px-4 py-3 flex items-center gap-3"
+          style={{
+            backgroundColor: theme?.headerBgColor ?? 'var(--tg-theme-header-bg-color, #f0f0f0)',
+          }}
+        >
+          {onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-sm underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+              aria-label="Back"
+            >
+              ←
+            </button>
+          ) : null}
+          <h1 className="text-lg font-semibold flex-1">{title}</h1>
+          {step ? <StepIndicator current={step.current} total={step.total} /> : null}
+        </header>
+        <main className="flex-1 px-4 py-6 flex flex-col gap-4 w-full">{children}</main>
+      </div>
     </div>
   );
 }
@@ -958,17 +1164,66 @@ export function Notice({
 
 ```typescript
 /**
- * Onboarding screens: welcome/risk, passcode, reveal phrase, verify backup, import.
+ * Welcome, create-phrase, reveal-phrase and backup-verification screens.
  *
- * Secrets rule: passcodes and phrases are read from uncontrolled inputs / the module holder at
- * submit time only. The phrase is written into the DOM imperatively after an explicit tap and
- * cleared when hidden, navigated away, or the flow ends. No secret enters React state.
+ * Secrets rule is unchanged: the phrase lives only in the module-scoped holder. It is written
+ * into the DOM imperatively after an explicit tap (two numbered columns of pills) and removed
+ * when hidden or unmounted. No word or passcode is ever React state.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AccountType, VaultManager } from '@onezerowallet/crypto-vault';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { t } from '../i18n';
 import { secretHolder } from '../vault/secret-holder';
-import { Button, ErrorText, Field, Notice, PhraseInput, ScreenShell } from './common';
+import { Button, ErrorText, Field, Notice, ScreenShell } from './common';
+
+type Step = { current: number; total: number };
+
+function createWordItem(index: number, word: string): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-2';
+  const badge = document.createElement('span');
+  badge.textContent = String(index + 1);
+  badge.className =
+    'h-6 w-6 shrink-0 rounded-full bg-black/10 dark:bg-white/20 text-xs flex items-center justify-center';
+  const pill = document.createElement('span');
+  pill.textContent = word;
+  pill.dataset['role'] = 'word';
+  pill.dataset['wordIndex'] = String(index);
+  pill.className = 'flex-1 rounded-full bg-black/5 dark:bg-white/10 px-3 py-1 font-mono text-sm';
+  row.append(badge, pill);
+  return row;
+}
+
+function renderPhrase(left: HTMLDivElement | null, right: HTMLDivElement | null): void {
+  const words = secretHolder.words();
+  if (left) left.replaceChildren();
+  if (right) right.replaceChildren();
+  if (words.length === 0) return;
+  const half = Math.ceil(words.length / 2);
+  words.forEach((word, index) => {
+    const item = createWordItem(index, word);
+    const target = index < half ? left : right;
+    target?.append(item);
+  });
+}
+
+export function PhraseGrid({
+  leftRef,
+  rightRef,
+}: {
+  leftRef: RefObject<HTMLDivElement | null>;
+  rightRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      data-testid="phrase-words"
+      aria-label="Recovery phrase words"
+      className="grid grid-cols-2 gap-2 min-h-6"
+    >
+      <div ref={leftRef} className="flex flex-col gap-2" />
+      <div ref={rightRef} className="flex flex-col gap-2" />
+    </div>
+  );
+}
 
 function pickPositions(count: number, take: number): number[] {
   const positions = Array.from({ length: count }, (_, i) => i);
@@ -993,7 +1248,7 @@ export function WelcomeScreen({
   onImport: () => void;
 }) {
   return (
-    <ScreenShell title={t('app.name')}>
+    <ScreenShell title={t('app.name')} step={{ current: 1, total: 3 }}>
       <h2 className="text-xl font-semibold">{t('welcome.title')}</h2>
       <p className="text-sm opacity-80">{t('app.tagline')}</p>
       <p className="text-sm">{t('welcome.body')}</p>
@@ -1008,261 +1263,33 @@ export function WelcomeScreen({
   );
 }
 
-export function PasscodeSetupScreen({
-  manager,
-  title,
+/** Create, step 1: show the generated phrase and require a backup acknowledgement. */
+export function CreatePhraseScreen({
   onBack,
-  onSubmit,
-  submitLabel,
+  onDone,
+  step,
 }: {
-  manager: VaultManager;
-  title: string;
   onBack: () => void;
-  onSubmit: (passcode: string, accountType: AccountType) => Promise<string | null>;
-  submitLabel: string;
+  onDone: () => void;
+  step: Step;
 }) {
-  const passRef = useRef<HTMLInputElement>(null);
-  const confirmRef = useRef<HTMLInputElement>(null);
-  const [accountType, setAccountType] = useState<AccountType>('bip39-multichain');
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [checked, setChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const hasPhrase = secretHolder.has();
 
-  const submit = async (): Promise<void> => {
-    if (busy) return;
-    const passcode = passRef.current?.value ?? '';
-    const confirm = confirmRef.current?.value ?? '';
-    if (passcode !== confirm) {
-      setError(t('passcode.mismatch'));
-      return;
-    }
-    const policy = manager.evaluatePasscode(passcode);
-    if (!policy.ok) {
-      setError(policy.error ?? t('passcode.weak'));
-      return;
-    }
-    setError(null);
-    setBusy(true);
-    try {
-      const failure = await onSubmit(passcode, accountType);
-      if (failure) setError(failure);
-    } finally {
-      setBusy(false);
-      if (passRef.current) passRef.current.value = '';
-      if (confirmRef.current) confirmRef.current.value = '';
-    }
-  };
-
-  return (
-    <ScreenShell title={title} onBack={onBack}>
-      <Notice tone={manager.usesDeviceSecret ? 'info' : 'warning'}>
-        {manager.usesDeviceSecret ? t('passcode.deviceSecret') : t('passcode.noDeviceSecret')}
-      </Notice>
-
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium mb-1">{t('accountType.label')}</legend>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="accountType"
-            value="bip39-multichain"
-            checked={accountType === 'bip39-multichain'}
-            onChange={() => {
-              setAccountType('bip39-multichain');
-            }}
-            className="mt-1"
-          />
-          <span>{t('accountType.bip39')}</span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="accountType"
-            value="ton-native-only"
-            checked={accountType === 'ton-native-only'}
-            onChange={() => {
-              setAccountType('ton-native-only');
-            }}
-            className="mt-1"
-          />
-          <span>
-            {t('accountType.tonNative')}
-            <span className="block text-xs opacity-70">{t('accountType.tonNative.help')}</span>
-          </span>
-        </label>
-      </fieldset>
-
-      <Field
-        id="passcode"
-        ref={passRef}
-        label={t('passcode.label')}
-        type="password"
-        autoComplete="new-password"
-        autoFocus
-        inputMode="text"
-      />
-      <Field
-        id="passcode-confirm"
-        ref={confirmRef}
-        label={t('passcode.confirm')}
-        type="password"
-        autoComplete="new-password"
-      />
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Button onClick={() => void submit()} disabled={busy}>
-        {busy ? t('common.working') : submitLabel}
-      </Button>
-    </ScreenShell>
-  );
-}
-
-export function ImportScreen({
-  manager,
-  onBack,
-  onImported,
-}: {
-  manager: VaultManager;
-  onBack: () => void;
-  onImported: () => void;
-}) {
-  const phraseRef = useRef<HTMLTextAreaElement>(null);
-  const passRef = useRef<HTMLInputElement>(null);
-  const confirmRef = useRef<HTMLInputElement>(null);
-  const [accountType, setAccountType] = useState<AccountType>('bip39-multichain');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (): Promise<void> => {
-    if (busy) return;
-    const phrase = phraseRef.current?.value ?? '';
-    const passcode = passRef.current?.value ?? '';
-    const confirm = confirmRef.current?.value ?? '';
-    if (passcode !== confirm) {
-      setError(t('passcode.mismatch'));
-      return;
-    }
-    const policy = manager.evaluatePasscode(passcode);
-    if (!policy.ok) {
-      setError(policy.error ?? t('passcode.weak'));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const imported = await manager.importWallet(phrase, passcode, { accountType });
-      if (phraseRef.current) phraseRef.current.value = '';
-      if (!imported.ok) {
-        setError(imported.error === 'invalid_mnemonic' ? t('import.invalid') : t('settings.error'));
-        return;
-      }
-      const unlocked = await manager.unlock(passcode);
-      if (!unlocked.success) {
+  useEffect(() => {
+    if (revealed) {
+      if (!secretHolder.has()) {
         setError(t('settings.error'));
         return;
       }
-      onImported();
-    } finally {
-      setBusy(false);
-      if (passRef.current) passRef.current.value = '';
-      if (confirmRef.current) confirmRef.current.value = '';
+      renderPhrase(leftRef.current, rightRef.current);
+    } else {
+      renderPhrase(null, null);
     }
-  };
-
-  return (
-    <ScreenShell title={t('import.title')} onBack={onBack}>
-      <PhraseInput
-        id="import-phrase"
-        ref={phraseRef}
-        label={t('import.phrase')}
-        hint={t('import.phraseHelp')}
-        autoFocus
-      />
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium mb-1">{t('accountType.label')}</legend>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="importAccountType"
-            value="bip39-multichain"
-            checked={accountType === 'bip39-multichain'}
-            onChange={() => {
-              setAccountType('bip39-multichain');
-            }}
-            className="mt-1"
-          />
-          <span>{t('accountType.bip39')}</span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="importAccountType"
-            value="ton-native-only"
-            checked={accountType === 'ton-native-only'}
-            onChange={() => {
-              setAccountType('ton-native-only');
-            }}
-            className="mt-1"
-          />
-          <span>{t('accountType.tonNative')}</span>
-        </label>
-      </fieldset>
-      <Field
-        id="import-passcode"
-        ref={passRef}
-        label={t('passcode.label')}
-        type="password"
-        autoComplete="new-password"
-      />
-      <Field
-        id="import-passcode-confirm"
-        ref={confirmRef}
-        label={t('passcode.confirm')}
-        type="password"
-        autoComplete="new-password"
-      />
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Button onClick={() => void submit()} disabled={busy}>
-        {busy ? t('common.working') : t('import.submit')}
-      </Button>
-    </ScreenShell>
-  );
-}
-
-export function PhraseScreen({
-  onDone,
-  onBack,
-  settingsMode = false,
-}: {
-  onDone: () => void;
-  onBack: () => void;
-  settingsMode?: boolean;
-}) {
-  const [revealed, setRevealed] = useState(false);
-  const [empty, setEmpty] = useState(false);
-  const wordsRef = useRef<HTMLDivElement>(null);
-  const wordCount = secretHolder.words().length;
-
-  useEffect(() => {
-    const node = wordsRef.current;
-    if (!node) return;
-    if (!revealed) {
-      node.textContent = '';
-      return;
-    }
-    const words = secretHolder.words();
-    if (words.length === 0) {
-      setEmpty(true);
-      return;
-    }
-    node.replaceChildren(
-      ...words.map((word, index) => {
-        const item = document.createElement('span');
-        item.textContent = `${String(index + 1)}. ${word}`;
-        item.className =
-          'rounded bg-black/5 dark:bg-white/10 px-2 py-1 font-mono text-sm inline-block';
-        item.dataset['wordIndex'] = String(index);
-        return item;
-      }),
-    );
   }, [revealed]);
 
   useEffect(() => {
@@ -1270,27 +1297,102 @@ export function PhraseScreen({
       if (document.hidden && revealed) setRevealed(false);
     };
     document.addEventListener('visibilitychange', onVisibility);
-    const node = wordsRef.current;
+    const left = leftRef.current;
+    const right = rightRef.current;
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
-      if (node) node.textContent = '';
+      if (left) left.replaceChildren();
+      if (right) right.replaceChildren();
     };
   }, [revealed]);
 
   return (
-    <ScreenShell title={t('phrase.title')} onBack={onBack}>
-      <Notice tone="warning">
-        {settingsMode ? t('phrase.settings.warning') : t('phrase.warning')}
-      </Notice>
-      <p className="text-sm" aria-live="polite">
-        {revealed ? '' : t('phrase.reveal')}
-      </p>
-      <div
-        ref={wordsRef}
-        data-testid="phrase-words"
-        aria-label="Recovery phrase words"
-        className="flex flex-wrap gap-2 min-h-6"
-      />
+    <ScreenShell title={t('phrase.title')} onBack={onBack} step={step}>
+      <Notice tone="warning">{t('phrase.warning')}</Notice>
+      <PhraseGrid leftRef={leftRef} rightRef={rightRef} />
+      {error ? <ErrorText>{error}</ErrorText> : null}
+      {revealed ? (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setRevealed(false);
+          }}
+        >
+          {t('phrase.hide')}
+        </Button>
+      ) : (
+        <Button
+          onClick={() => {
+            setRevealed(true);
+          }}
+        >
+          {hasPhrase ? t('phrase.reveal') : t('phrase.revealAgain')}
+        </Button>
+      )}
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={!revealed}
+          onChange={(event) => {
+            setChecked(event.target.checked);
+          }}
+          className="mt-1"
+        />
+        <span>{t('phrase.checkbox')}</span>
+      </label>
+      <Button onClick={onDone} disabled={!revealed || !checked || !hasPhrase}>
+        {t('phrase.next')}
+      </Button>
+    </ScreenShell>
+  );
+}
+
+/** Settings-mode reveal (re-authenticated) with the same two-column layout. */
+export function PhraseScreen({
+  onBack,
+  onDone,
+  step,
+}: {
+  onBack: () => void;
+  onDone: () => void;
+  step?: Step;
+}) {
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [empty, setEmpty] = useState(false);
+
+  useEffect(() => {
+    if (revealed) {
+      if (!secretHolder.has()) {
+        setEmpty(true);
+        return;
+      }
+      renderPhrase(leftRef.current, rightRef.current);
+    } else {
+      renderPhrase(null, null);
+    }
+  }, [revealed]);
+
+  useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.hidden && revealed) setRevealed(false);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    const left = leftRef.current;
+    const right = rightRef.current;
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (left) left.replaceChildren();
+      if (right) right.replaceChildren();
+    };
+  }, [revealed]);
+
+  return (
+    <ScreenShell title={t('phrase.title')} onBack={onBack} step={step}>
+      <Notice tone="warning">{t('phrase.settings.warning')}</Notice>
+      <PhraseGrid leftRef={leftRef} rightRef={rightRef} />
       {empty ? <ErrorText>{t('settings.error')}</ErrorText> : null}
       {revealed ? (
         <Button
@@ -1307,12 +1409,10 @@ export function PhraseScreen({
             setRevealed(true);
           }}
         >
-          {wordCount > 0 ? t('phrase.reveal') : t('phrase.revealAgain')}
+          {t('phrase.reveal')}
         </Button>
       )}
-      <Button onClick={onDone} disabled={wordCount === 0}>
-        {settingsMode ? t('verify.submit') : t('phrase.done')}
-      </Button>
+      <Button onClick={onDone}>{t('common.done')}</Button>
     </ScreenShell>
   );
 }
@@ -1320,9 +1420,11 @@ export function PhraseScreen({
 export function VerifyScreen({
   onVerified,
   onCancel,
+  step,
 }: {
   onVerified: () => void;
   onCancel: () => void;
+  step?: Step;
 }) {
   const words = secretHolder.words();
   const positions = useMemo(() => pickPositions(words.length, 3), [words.length]);
@@ -1341,7 +1443,6 @@ export function VerifyScreen({
       return;
     }
     setError(null);
-    secretHolder.clear();
     setDone(true);
     onVerified();
   };
@@ -1349,7 +1450,7 @@ export function VerifyScreen({
   if (done) return null;
 
   return (
-    <ScreenShell title={t('verify.title')} onBack={onCancel}>
+    <ScreenShell title={t('verify.title')} onBack={onCancel} step={step}>
       <p className="text-sm">{t('verify.body')}</p>
       {positions.map((position, index) => (
         <Field
@@ -1359,13 +1460,431 @@ export function VerifyScreen({
           autoComplete="off"
           autoCapitalize="none"
           spellCheck={false}
-          ref={(el) => {
-            inputs.current[index] = el;
+          ref={(element) => {
+            inputs.current[index] = element;
           }}
         />
       ))}
       {error ? <ErrorText>{error}</ErrorText> : null}
       <Button onClick={submit}>{t('verify.submit')}</Button>
+    </ScreenShell>
+  );
+}
+```
+
+## apps/miniapp/src/ui/import.tsx
+
+```typescript
+/**
+ * Import, step 1: the recovery phrase as 12/24 numbered, uncontrolled word boxes.
+ *
+ * Word values live in the DOM/refs only. React state holds the box count, invalid box indexes
+ * and the advanced toggle — never a word. Smart paste fills the boxes from the clipboard event.
+ */
+import { useEffect, useRef, useState, type ClipboardEvent } from 'react';
+import { isBip39Word } from '@onezerowallet/crypto-vault';
+import { t } from '../i18n';
+import { Button, ErrorText, Notice, ScreenShell } from './common';
+
+function splitWords(text: string): string[] {
+  return text
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+}
+
+export function ImportPhraseScreen({
+  onBack,
+  onNext,
+  step,
+}: {
+  onBack: () => void;
+  /** Receives the assembled words and the advanced flag; returns an error message or null. */
+  onNext: (words: string[], forceTonNative: boolean) => Promise<string | null>;
+  step?: { current: number; total: number };
+}) {
+  const [count, setCount] = useState<24 | 12>(24);
+  const [invalid, setInvalid] = useState<Set<number>>(new Set());
+  const [forceTonNative, setForceTonNative] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputs = useRef<Array<HTMLInputElement | null>>([]);
+  const pending = useRef<string[] | null>(null);
+
+  const focus = (index: number): void => {
+    const target = inputs.current[Math.max(0, Math.min(index, count - 1))];
+    target?.focus();
+    target?.select();
+  };
+
+  const markWord = (index: number, value: string): void => {
+    setInvalid((prev) => {
+      const next = new Set(prev);
+      if (value.trim() !== '' && !isBip39Word(value)) next.add(index);
+      else next.delete(index);
+      return next;
+    });
+  };
+
+  const applyPending = (): void => {
+    const words = pending.current;
+    if (!words) return;
+    pending.current = null;
+    words.forEach((word, index) => {
+      const input = inputs.current[index];
+      if (input) input.value = word;
+    });
+    const next = new Set<number>();
+    words.forEach((word, index) => {
+      if (!isBip39Word(word)) next.add(index);
+    });
+    setInvalid(next);
+    focus(Math.min(words.length, count - 1));
+  };
+
+  // A paste that changes the word count re-renders first; fill once the boxes exist.
+  useEffect(() => {
+    if (pending.current) {
+      const words = pending.current;
+      pending.current = null;
+      words.forEach((word, index) => {
+        const input = inputs.current[index];
+        if (input) input.value = word;
+      });
+      const next = new Set<number>();
+      words.forEach((word, index) => {
+        if (!isBip39Word(word)) next.add(index);
+      });
+      setInvalid(next);
+    }
+  }, [count]);
+
+  const collect = (): string[] =>
+    Array.from({ length: count }, (_, index) => (inputs.current[index]?.value ?? '').trim());
+
+  const handlePaste = (event: ClipboardEvent<HTMLInputElement>): void => {
+    const words = splitWords(event.clipboardData.getData('text/plain'));
+    if (words.length >= 2) {
+      event.preventDefault();
+      const nextCount: 12 | 24 = words.length === 12 ? 12 : words.length === 24 ? 24 : count;
+      pending.current = words.slice(0, nextCount);
+      if (nextCount !== count) setCount(nextCount);
+      else applyPending();
+    }
+  };
+
+  const submit = async (): Promise<void> => {
+    if (busy) return;
+    const words = collect();
+    const empty = words.findIndex((w) => w === '');
+    if (empty !== -1) {
+      setError(`${t('import.step.phrase')}: ${String(empty + 1)}`);
+      return;
+    }
+    const bad = new Set<number>();
+    words.forEach((word, index) => {
+      if (!isBip39Word(word)) bad.add(index);
+    });
+    if (bad.size > 0) {
+      setInvalid(bad);
+      setError(t('import.invalidWord'));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const failure = await onNext(words, forceTonNative);
+      if (failure) setError(failure);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const columns: Array<[number, number]> = [
+    [0, count / 2 - 1],
+    [count / 2, count - 1],
+  ];
+
+  return (
+    <ScreenShell title={t('import.title')} onBack={onBack} step={step}>
+      <div role="group" aria-label="Recovery phrase length" className="flex gap-2">
+        {([24, 12] as const).map((option) => (
+          <Button
+            key={option}
+            variant={count === option ? 'primary' : 'secondary'}
+            aria-pressed={count === option}
+            className="w-auto px-3 min-h-9 text-sm"
+            onClick={() => {
+              setCount(option);
+              setInvalid(new Set());
+              setError(null);
+              pending.current = null;
+            }}
+          >
+            {option === 24 ? t('import.words24') : t('import.words12')}
+          </Button>
+        ))}
+      </div>
+      <p className="text-xs opacity-70">{t('import.pasteHint')}</p>
+
+      <div className="grid grid-cols-2 gap-2">
+        {columns.map(([start, end], columnIndex) => (
+          <div key={columnIndex} className="flex flex-col gap-2">
+            {Array.from({ length: end - start + 1 }, (_, offset) => {
+              const index = start + offset;
+              return (
+                <div key={index} className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="h-6 w-6 shrink-0 rounded-full bg-black/10 dark:bg-white/20 text-xs flex items-center justify-center"
+                  >
+                    {index + 1}
+                  </span>
+                  <input
+                    ref={(element) => {
+                      inputs.current[index] = element;
+                    }}
+                    id={`import-word-${String(index)}`}
+                    aria-label={`Word ${String(index + 1)}`}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    className={`w-full min-h-9 rounded-lg border px-2 py-1 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                      invalid.has(index) ? 'border-red-500' : 'border-gray-400/60'
+                    } bg-transparent`}
+                    onBlur={(event) => {
+                      markWord(index, event.target.value);
+                    }}
+                    onPaste={handlePaste}
+                    onKeyDown={(event) => {
+                      if (event.key === ' ' || event.key === 'Enter' || event.key === 'Tab') {
+                        if (index === count - 1 && event.key === 'Enter') {
+                          event.preventDefault();
+                          void submit();
+                          return;
+                        }
+                        event.preventDefault();
+                        focus(index + 1);
+                      } else if (
+                        event.key === 'Backspace' &&
+                        event.currentTarget.value === '' &&
+                        index > 0
+                      ) {
+                        event.preventDefault();
+                        focus(index - 1);
+                      }
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      <details className="text-sm">
+        <summary className="cursor-pointer opacity-70">{t('import.advanced')}</summary>
+        <label className="mt-2 flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={forceTonNative}
+            onChange={(event) => {
+              setForceTonNative(event.target.checked);
+            }}
+            className="mt-1"
+          />
+          <span>{t('import.forceTon')}</span>
+        </label>
+      </details>
+
+      {error ? <ErrorText>{error}</ErrorText> : null}
+      <Notice tone="warning">{t('welcome.never.ask')}</Notice>
+      <Button
+        onClick={() => {
+          void submit();
+        }}
+        disabled={busy}
+      >
+        {busy ? t('common.working') : t('import.continue')}
+      </Button>
+    </ScreenShell>
+  );
+}
+
+export function DisambiguateScreen({
+  onBack,
+  onChoose,
+  step,
+}: {
+  onBack: () => void;
+  onChoose: (accountType: 'bip39-multichain' | 'ton-native-only') => void;
+  step?: { current: number; total: number };
+}) {
+  return (
+    <ScreenShell title={t('import.disambiguate.title')} onBack={onBack} step={step}>
+      <p className="text-sm">{t('import.disambiguate.body')}</p>
+      <Button
+        onClick={() => {
+          onChoose('bip39-multichain');
+        }}
+      >
+        {t('import.disambiguate.standard')}
+      </Button>
+      <Button
+        variant="secondary"
+        onClick={() => {
+          onChoose('ton-native-only');
+        }}
+      >
+        {t('import.disambiguate.ton')}
+      </Button>
+    </ScreenShell>
+  );
+}
+```
+
+## apps/miniapp/src/ui/passcode.tsx
+
+```typescript
+/**
+ * Dedicated passcode screen shared by Create (step 3) and Import (step 2).
+ *
+ * The passcode is read from uncontrolled inputs only; React state holds metadata about the
+ * policy (length, ok, error), never the value. Visibility toggling changes input types without
+ * re-rendering from a value prop.
+ */
+import { useRef, useState } from 'react';
+import type { VaultManager } from '@onezerowallet/crypto-vault';
+import { t } from '../i18n';
+import { Button, ErrorText, Field, Notice, ScreenShell } from './common';
+
+interface PasscodeMeta {
+  length: number;
+  ok: boolean;
+  error: string | null;
+}
+
+export function PasscodeScreen({
+  manager,
+  title,
+  onBack,
+  onSubmit,
+  submitLabel,
+  step,
+}: {
+  manager: VaultManager;
+  title: string;
+  onBack: () => void;
+  /** Returns an error message, or null on success. */
+  onSubmit: (passcode: string) => Promise<string | null>;
+  submitLabel: string;
+  step?: { current: number; total: number };
+}) {
+  const passRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
+  const [visible, setVisible] = useState(false);
+  const [meta, setMeta] = useState<PasscodeMeta>({ length: 0, ok: false, error: null });
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const update = (value: string): void => {
+    if (value === '') {
+      setMeta({ length: 0, ok: false, error: null });
+      return;
+    }
+    const policy = manager.evaluatePasscode(value);
+    setMeta({ length: value.length, ok: policy.ok, error: policy.error ?? null });
+  };
+
+  const submit = async (): Promise<void> => {
+    if (busy) return;
+    const passcode = passRef.current?.value ?? '';
+    const confirm = confirmRef.current?.value ?? '';
+    if (passcode !== confirm) {
+      setError(t('passcode.mismatch'));
+      return;
+    }
+    const policy = manager.evaluatePasscode(passcode);
+    if (!policy.ok) {
+      setError(policy.error ?? t('passcode.weak'));
+      return;
+    }
+    setError(null);
+    setBusy(true);
+    try {
+      const failure = await onSubmit(passcode);
+      if (failure) setError(failure);
+    } finally {
+      setBusy(false);
+      if (passRef.current) passRef.current.value = '';
+      if (confirmRef.current) confirmRef.current.value = '';
+      setMeta({ length: 0, ok: false, error: null });
+    }
+  };
+
+  const type = visible ? 'text' : 'password';
+
+  return (
+    <ScreenShell title={title} onBack={onBack} step={step}>
+      <Notice tone={manager.usesDeviceSecret ? 'info' : 'warning'}>
+        {manager.usesDeviceSecret
+          ? t('passcode.requirements.device')
+          : t('passcode.requirements.noDevice')}
+      </Notice>
+      {manager.usesDeviceSecret ? null : (
+        <p className="text-xs opacity-70">{t('passcode.requirements.offline')}</p>
+      )}
+
+      <Field
+        id="passcode"
+        ref={passRef}
+        label={t('passcode.label')}
+        type={type}
+        autoComplete="new-password"
+        autoFocus
+        onChange={(event) => {
+          update(event.target.value);
+        }}
+      />
+      <Field
+        id="passcode-confirm"
+        ref={confirmRef}
+        label={t('passcode.confirm')}
+        type={type}
+        autoComplete="new-password"
+      />
+      <Button
+        variant="secondary"
+        onClick={() => {
+          setVisible((v) => !v);
+        }}
+        aria-pressed={visible}
+        className="w-auto self-start px-3 min-h-9 text-sm"
+      >
+        {visible ? t('passcode.hide') : t('passcode.show')}
+      </Button>
+      <p
+        role="status"
+        aria-live="polite"
+        className={`text-sm ${meta.ok ? 'text-green-600 dark:text-green-400' : 'opacity-70'}`}
+      >
+        {meta.length === 0
+          ? ''
+          : `${String(meta.length)} ${t('passcode.lengthLabel')} — ${
+              meta.ok ? t('passcode.met') : (meta.error ?? t('passcode.notMet'))
+            }`}
+      </p>
+      {error ? <ErrorText>{error}</ErrorText> : null}
+      <Button
+        onClick={() => {
+          void submit();
+        }}
+        disabled={busy}
+      >
+        {busy ? t('common.working') : submitLabel}
+      </Button>
     </ScreenShell>
   );
 }
@@ -1960,136 +2479,200 @@ export function renderApp(vault: VaultUi): ReturnType<typeof render> {
 
 ```typescript
 /**
- * Stage C component tests: welcome, create, reveal phrase, backup verification, import.
- *
- * The most important assertion is negative: after leaving the phrase screen, none of the words
- * appear in the DOM or in localStorage/sessionStorage.
+ * Onboarding component tests: Create (phrase -> verify -> passcode), Import (12/24 grid with
+ * smart paste -> passcode) and the security invariant that no phrase survives the flow.
  */
 import { describe, it, expect } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { makeVault, renderApp } from './ui-helpers';
 import { secretHolder } from '../vault/secret-holder';
 
 const PASS = 'test passphrase one';
-const MNEMONIC_12_HARDHAT = 'test test test test test test test test test test test junk';
+const MNEMONIC_12 = 'test test test test test test test test test test test junk';
 
-async function createWalletFlow(): Promise<{ words: string[] }> {
-  const user = userEvent.setup();
-  const vault = makeVault();
-  renderApp(vault);
+function phraseWords(): string[] {
+  return Array.from(screen.getByTestId('phrase-words').querySelectorAll('[data-role="word"]')).map(
+    (el) => el.textContent,
+  );
+}
 
+async function createToPasscode(user: ReturnType<typeof userEvent.setup>): Promise<string[]> {
   await user.click(await screen.findByRole('button', { name: 'Create a wallet' }));
-  await user.type(screen.getByLabelText('Passcode'), PASS);
-  await user.type(screen.getByLabelText('Confirm passcode'), PASS);
-  await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-  // Phrase screen: hidden until an explicit tap, never auto-shown.
   await screen.findByRole('heading', { name: 'Your recovery phrase' });
-  const phraseNode = screen.getByTestId('phrase-words');
-  expect(phraseNode.textContent).toBe('');
+  expect(screen.getByTestId('phrase-words').textContent).toBe('');
 
   await user.click(screen.getByRole('button', { name: 'Show recovery phrase' }));
   await waitFor(() => {
-    expect(phraseNode.textContent).not.toBe('');
+    expect(phraseWords().length).toBeGreaterThan(0);
   });
-  const words = Array.from(phraseNode.querySelectorAll('span')).map((el) =>
-    el.textContent.replace(/^\d+\.\s*/, ''),
-  );
+  const words = phraseWords();
   expect(words).toHaveLength(24);
 
-  await user.click(screen.getByRole('button', { name: 'I wrote it down' }));
+  const checkbox = screen.getByLabelText("I've stored the seed phrase in a secure place.");
+  const next = screen.getByRole('button', { name: 'Next' });
+  expect(next).toBeDisabled();
+  await user.click(checkbox);
+  expect(next).toBeEnabled();
+  await user.click(next);
+
   await screen.findByRole('heading', { name: 'Check your backup' });
-  return { words };
+  const inputs = screen.getAllByRole('textbox');
+  for (const input of inputs) {
+    const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
+    const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
+    await user.type(input, words[position] ?? '');
+  }
+  await user.click(screen.getByRole('button', { name: 'Verify' }));
+  await screen.findByRole('heading', { name: 'Set a passcode' });
+  return words;
 }
 
-describe('Stage C: onboarding', () => {
-  it('shows the risk disclosure and anti-phishing notice', async () => {
+describe('Onboarding: create', () => {
+  it('warns about local data, never asks for the phrase, and has no wallet-type selector', async () => {
     renderApp(makeVault());
     expect(await screen.findByText('Your keys, your coins')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('OneZeroWallet');
     expect(screen.getByText(/self-custodial/)).toBeInTheDocument();
     expect(screen.getByText(/We will never ask for your recovery phrase/)).toBeInTheDocument();
-    expect(screen.getByText(/Telegram or your device may clear local data/)).toBeInTheDocument();
+    expect(screen.getByText(/may clear local data/)).toBeInTheDocument();
+    expect(screen.queryByText('Wallet type')).not.toBeInTheDocument();
+    expect(screen.getByText(/Step 1 of 3/)).toBeInTheDocument();
   });
 
-  it('rejects a short passphrase when no device secret is available', async () => {
+  it('phrase is hidden until revealed and Next requires reveal + checkbox', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     await user.click(await screen.findByRole('button', { name: 'Create a wallet' }));
-    await user.type(screen.getByLabelText('Passcode'), 'short');
-    await user.type(screen.getByLabelText('Confirm passcode'), 'short');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/at least 12 characters/);
+    await screen.findByRole('heading', { name: 'Your recovery phrase' });
+    expect(screen.getByTestId('phrase-words').textContent).toBe('');
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Show recovery phrase' }));
+    await waitFor(() => {
+      expect(phraseWords()).toHaveLength(24);
+    });
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  it('creates a wallet, verifies the backup and clears the phrase', async () => {
+  it('creates the wallet after verify + passcode and clears the phrase', async () => {
     const user = userEvent.setup();
-    const { words } = await createWalletFlow();
+    renderApp(makeVault());
+    const words = await createToPasscode(user);
 
-    const inputs = screen.getAllByRole('textbox');
-    const positions = inputs.map((input) => {
-      const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
-      const match = /(\d+)/.exec(label);
-      return Number.parseInt(match?.[1] ?? '0', 10) - 1;
-    });
-    expect(positions).toHaveLength(3);
+    expect(screen.getByText(/Minimum 12 characters/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Passcode', { exact: true }), PASS);
+    await user.type(screen.getByLabelText('Confirm passcode'), PASS);
+    expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    // Wrong answers fail with positions only (never echo words).
-    for (const input of inputs) await user.type(input, 'wrongword');
-    await user.click(screen.getByRole('button', { name: 'Verify' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/incorrect/);
-
-    // Correct answers unlock the flow.
-    for (const [index, position] of positions.entries()) {
-      const input = inputs[index];
-      if (input) {
-        await user.clear(input);
-        await user.type(input, words[position] ?? '');
-      }
-    }
-    await user.click(screen.getByRole('button', { name: 'Verify' }));
-    await screen.findByRole('heading', { name: 'Welcome back' });
-
-    // Secret gone from the DOM and from web storage.
+    await screen.findByRole('heading', { name: 'Your wallet' });
+    expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
     expect(screen.queryByTestId('phrase-words')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(words.join(' '));
     expect(secretHolder.has()).toBe(false);
-    const storageDump = `${JSON.stringify(localStorage)}\n${JSON.stringify(sessionStorage)}`;
-    expect(storageDump).not.toContain(words[0] ?? 'never');
+    const dump = `${JSON.stringify(localStorage)}\n${JSON.stringify(sessionStorage)}`;
+    expect(dump).not.toContain(words[0] ?? 'never');
   });
 
-  it('imports a wallet and shows addresses', async () => {
+  it('shows the device-secret PIN/password requirements and accepts a 6-digit PIN', async () => {
+    const user = userEvent.setup();
+    renderApp(makeVault({ secure: true }));
+    await createToPasscode(user);
+    expect(screen.getByText(/6\+ digit PIN/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Passcode', { exact: true }), '482915');
+    await user.type(screen.getByLabelText('Confirm passcode'), '482915');
+    expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('heading', { name: 'Your wallet' });
+  });
+
+  it('rejects a trivial PIN when a device secret exists', async () => {
+    const user = userEvent.setup();
+    renderApp(makeVault({ secure: true }));
+    await createToPasscode(user);
+    await user.type(screen.getByLabelText('Passcode', { exact: true }), '123456');
+    await user.type(screen.getByLabelText('Confirm passcode'), '123456');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/too easy to guess/);
+  });
+
+  it('rejects a short passphrase and stays on the passcode step', async () => {
+    const user = userEvent.setup();
+    renderApp(makeVault());
+    await createToPasscode(user);
+    await user.type(screen.getByLabelText('Passcode', { exact: true }), 'short');
+    await user.type(screen.getByLabelText('Confirm passcode'), 'short');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/at least 12 characters/);
+    expect(screen.getByRole('heading', { name: 'Set a passcode' })).toBeInTheDocument();
+  });
+});
+
+describe('Onboarding: import', () => {
+  it('shows 24 boxes by default, switches to 12, fills from a paste, and imports', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
-    await user.type(screen.getByLabelText('Recovery phrase'), MNEMONIC_12_HARDHAT);
-    await user.type(screen.getByLabelText('Passcode'), PASS);
+    await screen.findByRole('heading', { name: 'Import a wallet' });
+    expect(screen.getAllByLabelText(/^Word \d+$/)).toHaveLength(24);
+
+    await user.click(screen.getByRole('button', { name: '12 words' }));
+    expect(screen.getAllByLabelText(/^Word \d+$/)).toHaveLength(12);
+
+    fireEvent.paste(screen.getByLabelText('Word 1'), {
+      clipboardData: { getData: () => MNEMONIC_12 },
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Word 12').value).toBe('junk');
+    });
+    expect(screen.getByLabelText<HTMLInputElement>('Word 1').value).toBe('test');
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('heading', { name: 'Set a passcode' });
+    await user.type(screen.getByLabelText('Passcode', { exact: true }), PASS);
     await user.type(screen.getByLabelText('Confirm passcode'), PASS);
     await user.click(screen.getByRole('button', { name: 'Import' }));
 
     await screen.findByRole('heading', { name: 'Your wallet' });
-    const evm = screen.getByTestId('address-EVM');
-    expect(evm).toHaveTextContent('0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266');
-    expect(screen.getByTestId('address-TRON')).toHaveTextContent(/^T/);
-    expect(screen.getByTestId('address-Receive TON')).toHaveTextContent(/^UQ/);
-    // The typed phrase must not linger in storage or the DOM.
-    expect(document.body.textContent).not.toContain('junk');
+    expect(screen.getByTestId('address-EVM')).toHaveTextContent(
+      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+    );
+    expect(secretHolder.has()).toBe(false);
   });
 
-  it('never renders the phrase before the explicit reveal tap', async () => {
+  it('auto-switches from 24 to 12 when a 12-word phrase is pasted', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
-    await user.click(await screen.findByRole('button', { name: 'Create a wallet' }));
-    await user.type(screen.getByLabelText('Passcode'), PASS);
-    await user.type(screen.getByLabelText('Confirm passcode'), PASS);
+    await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
+    fireEvent.paste(screen.getByLabelText('Word 1'), {
+      clipboardData: { getData: () => MNEMONIC_12 },
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Word 12').value).toBe('junk');
+    });
+    expect(screen.getByRole('button', { name: '12 words' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getAllByLabelText(/^Word \d+$/)).toHaveLength(12);
+  });
+
+  it('rejects an invalid phrase without echoing words', async () => {
+    const user = userEvent.setup();
+    renderApp(makeVault());
+    await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
+    await user.click(screen.getByRole('button', { name: '12 words' }));
+    fireEvent.paste(screen.getByLabelText('Word 1'), {
+      clipboardData: {
+        getData: () =>
+          'zzsecretzz abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      },
+    });
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('heading', { name: 'Your recovery phrase' });
-    const words = secretHolder.words();
-    const phraseNode = screen.getByTestId('phrase-words');
-    for (const word of [words[0], words[5], words[23]]) {
-      if (word) expect(phraseNode.textContent).not.toContain(word);
-    }
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).not.toContain('zzsecretzz');
+    expect(screen.getByLabelText('Word 1', { exact: true }).className).toContain('border-red-500');
+    expect(screen.getByRole('heading', { name: 'Import a wallet' })).toBeInTheDocument();
   });
 });
 ```
@@ -2210,53 +2793,149 @@ describe('Stage C: unlock and settings', () => {
 });
 ```
 
+## apps/miniapp/src/test/detect.test.ts
+
+```typescript
+/**
+ * Account-type detection: 12 -> BIP-39, 24 -> one of the two, or explicit disambiguation when
+ * both validators accept the phrase (the ~1/256 collision). Validators are injected so the
+ * ambiguous path is deterministic.
+ */
+import { describe, it, expect } from 'vitest';
+import { detectAccountType } from '../vault/detect';
+
+const WORDS_12 = 'a b c d e f g h i j k l';
+const WORDS_24 = Array.from({ length: 24 }, (_, i) => `w${String(i)}`).join(' ');
+
+describe('account-type detection', () => {
+  it('12 words are always BIP-39', async () => {
+    expect(
+      await detectAccountType(WORDS_12, { validateBip39: () => true, validateTon: () => true }),
+    ).toEqual({ kind: 'resolved', accountType: 'bip39-multichain' });
+    expect(
+      await detectAccountType(WORDS_12, { validateBip39: () => false, validateTon: () => true }),
+    ).toMatchObject({ kind: 'invalid' });
+  });
+
+  it('24 words valid as both require disambiguation', async () => {
+    expect(
+      await detectAccountType(WORDS_24, { validateBip39: () => true, validateTon: () => true }),
+    ).toEqual({ kind: 'ambiguous' });
+  });
+
+  it('24 words valid only as BIP-39 resolve silently', async () => {
+    expect(
+      await detectAccountType(WORDS_24, { validateBip39: () => true, validateTon: () => false }),
+    ).toEqual({ kind: 'resolved', accountType: 'bip39-multichain' });
+  });
+
+  it('24 words valid only as TON-native resolve silently', async () => {
+    expect(
+      await detectAccountType(WORDS_24, { validateBip39: () => false, validateTon: () => true }),
+    ).toEqual({ kind: 'resolved', accountType: 'ton-native-only' });
+  });
+
+  it('forcing TON-native requires the TON check to pass', async () => {
+    expect(
+      await detectAccountType(WORDS_24, {
+        forceTonNative: true,
+        validateBip39: () => true,
+        validateTon: () => true,
+      }),
+    ).toEqual({ kind: 'resolved', accountType: 'ton-native-only' });
+    expect(
+      await detectAccountType(WORDS_24, {
+        forceTonNative: true,
+        validateBip39: () => true,
+        validateTon: () => false,
+      }),
+    ).toMatchObject({ kind: 'invalid' });
+  });
+
+  it('neither valid -> invalid with a position-only message', async () => {
+    const result = await detectAccountType(WORDS_24, {
+      validateBip39: () => false,
+      validateTon: () => false,
+    });
+    expect(result.kind).toBe('invalid');
+    if (result.kind === 'invalid') expect(result.message.length).toBeGreaterThan(0);
+  });
+});
+```
+
 ## apps/miniapp/src/test/e2e/onboarding.spec.ts
 
 ```typescript
 /**
- * Stage C E2E: create a wallet, verify the backup, lock/unlock, reject a wrong passcode and
- * reload into a persisted vault. Runs against the production build with no Telegram client, so
- * no device secret exists and the passphrase policy requires 12+ characters.
+ * E2E for the refactored onboarding flows.
  *
- * Every test gets a fresh browser context, so IndexedDB starts empty.
+ * Create: phrase (reveal + checkbox) -> 3-word verification -> passcode -> Home.
+ * Import: 12/24 numbered grid (smart paste) -> passcode -> Home.
+ * Runs against the production build with no Telegram client, so no device secret exists and the
+ * passphrase policy requires 12+ characters. Each test gets a fresh browser context (empty IDB).
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const PASS = 'e2e passphrase one';
 
-test.describe('onboarding and unlock', () => {
-  test('create, verify backup, lock and unlock, survive reload', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
+function wordLocator(page: Page) {
+  return page.locator('[data-role="word"]');
+}
 
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
+async function createToPasscode(page: Page): Promise<string[]> {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create a wallet' }).click();
+  await expect(page.getByRole('heading', { name: 'Your recovery phrase' })).toBeVisible();
+  await expect(page.getByTestId('phrase-words')).toHaveText('');
+  await page.getByRole('button', { name: 'Show recovery phrase' }).click();
+  await expect(wordLocator(page)).toHaveCount(24);
+  const words = await wordLocator(page).allTextContents();
 
-    await expect(page.getByRole('heading', { name: 'Your recovery phrase' })).toBeVisible();
-    await expect(page.getByTestId('phrase-words')).toHaveText('');
-    await page.getByRole('button', { name: 'Show recovery phrase' }).click();
+  const next = page.getByRole('button', { name: 'Next' });
+  await expect(next).toBeDisabled();
+  await page.getByLabel("I've stored the seed phrase in a secure place.").check();
+  await expect(next).toBeEnabled();
+  await next.click();
 
-    const words = (await page.getByTestId('phrase-words').locator('span').allTextContents()).map(
-      (text) => text.replace(/^\d+\.\s*/, ''),
+  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+  const inputs = page.locator('input[id^="word-"]');
+  for (let i = 0; i < 3; i++) {
+    const id = await inputs.nth(i).getAttribute('id');
+    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+    await inputs.nth(i).fill(words[position] ?? '');
+  }
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
+  return words;
+}
+
+async function finishCreate(page: Page): Promise<void> {
+  await page.getByLabel('Passcode', { exact: true }).fill(PASS);
+  await page.getByLabel('Confirm passcode').fill(PASS);
+  await expect(page.getByRole('status')).toHaveText(/Requirements met/);
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+}
+
+async function pastePhrase(page: Page, phrase: string): Promise<void> {
+  await page.getByLabel('Word 1', { exact: true }).evaluate((element, text) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    element.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
     );
-    expect(words).toHaveLength(24);
-    await page.getByRole('button', { name: 'I wrote it down' }).click();
+  }, phrase);
+}
 
-    await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
-    const inputs = page.locator('input[id^="word-"]');
-    const count = await inputs.count();
-    expect(count).toBe(3);
-    for (let i = 0; i < count; i++) {
-      const id = await inputs.nth(i).getAttribute('id');
-      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
-      await inputs.nth(i).fill(words[position] ?? '');
-    }
-    await page.getByRole('button', { name: 'Verify' }).click();
+test.describe('onboarding and unlock', () => {
+  test('create, verify, passcode, lock/unlock, survive reload', async ({ page }) => {
+    const words = await createToPasscode(page);
+    await finishCreate(page);
 
-    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    expect(await page.getByTestId('address-EVM').textContent()).toMatch(/^0x/);
+    expect(await page.getByTestId('address-TRON').textContent()).toMatch(/^T/);
+    expect(await page.getByTestId('address-Receive TON').textContent()).toMatch(/^UQ/);
 
-    // The phrase must not survive in web storage or the visible DOM.
     const dump = await page.evaluate(() => ({
       local: JSON.stringify(localStorage),
       session: JSON.stringify(sessionStorage),
@@ -2266,33 +2945,23 @@ test.describe('onboarding and unlock', () => {
     expect(dump.session).not.toContain(words[0] ?? 'never');
     expect(dump.text).not.toContain(words.join(' '));
 
-    // Wrong passcode is rejected; then the right one opens the wallet.
+    await page.getByRole('button', { name: 'Lock' }).click();
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Passcode', { exact: true }).fill('wrong passphrase');
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('alert')).toHaveText(/Wrong passcode|Too many attempts/);
 
-    // The wrong attempt opened a short backoff window; let it elapse before reloading.
     await page.waitForTimeout(3500);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Passcode', { exact: true }).fill(PASS);
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
-    await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
-    await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
-    await expect(page.getByTestId('address-Receive TON')).toHaveText(/^UQ/);
   });
 
-  test('IndexedDB holds only the sealed envelope, never the phrase', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-    const words = (await page.getByTestId('phrase-words').locator('span').allTextContents()).map(
-      (text) => text.replace(/^\d+\.\s*/, ''),
-    );
+  test('IndexedDB holds only the sealed envelope after create', async ({ page }) => {
+    const words = await createToPasscode(page);
+    await finishCreate(page);
 
     const dump = await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -2330,18 +2999,27 @@ test.describe('onboarding and unlock', () => {
 
     expect(dump.keys.sort()).toEqual(['vault_seal']);
     expect(dump.values).not.toContain(words.join(' '));
-    for (const word of words) expect(dump.values.toLowerCase()).not.toContain(word.toLowerCase());
+    expect(dump.values).toContain('passcodeWrappedKey');
+    expect(dump.values).toContain('accountType');
   });
 
-  test('imports a wallet phrase', async ({ page }) => {
+  test('import: 12-word grid via smart paste, then passcode', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Import a wallet' }).click();
-    await page
-      .getByLabel('Recovery phrase')
-      .fill('test test test test test test test test test test test junk');
+    await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
+    await page.getByRole('button', { name: '12 words' }).click();
+    await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(12);
+
+    await pastePhrase(page, 'test test test test test test test test test test test junk');
+    await expect(page.getByLabel('Word 12', { exact: true })).toHaveValue('junk');
+    await expect(page.getByLabel('Word 1', { exact: true })).toHaveValue('test');
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
     await page.getByLabel('Passcode', { exact: true }).fill(PASS);
     await page.getByLabel('Confirm passcode').fill(PASS);
     await page.getByRole('button', { name: 'Import' }).click();
+
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
     await expect(page.getByTestId('address-EVM')).toHaveText(
       '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -2349,52 +3027,32 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('settings reveal requires re-auth and clears the phrase on leaving', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-    const words = (await page.getByTestId('phrase-words').locator('span').allTextContents()).map(
-      (text) => text.replace(/^\d+\.\s*/, ''),
-    );
-    await page.getByRole('button', { name: 'I wrote it down' }).click();
-    const inputs = page.locator('input[id^="word-"]');
-    for (let i = 0; i < 3; i++) {
-      const id = await inputs.nth(i).getAttribute('id');
-      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
-      await inputs.nth(i).fill(words[position] ?? '');
-    }
-    await page.getByRole('button', { name: 'Verify' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByRole('button', { name: 'Unlock' }).click();
+    const words = await createToPasscode(page);
+    await finishCreate(page);
     await page.getByRole('button', { name: 'Settings' }).click();
 
     await page.getByLabel('Enter your passcode to continue').fill(PASS);
     await page.getByRole('button', { name: 'Reveal recovery phrase' }).click();
     await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-    await expect(page.getByTestId('phrase-words')).not.toHaveText('');
+    await expect(wordLocator(page)).toHaveCount(24);
     await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(page.locator('body')).not.toContainText(words.join(' '));
   });
 
-  test('the phrase screen is empty until the explicit reveal tap', async ({ page }) => {
+  test('phrase hides when the app is backgrounded', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByTestId('phrase-words')).toHaveText('');
-
-    // Backgrounding hides an already revealed phrase.
     await page.getByRole('button', { name: 'Show recovery phrase' }).click();
     await expect(page.getByTestId('phrase-words')).not.toHaveText('');
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { value: true, configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await expect(page.getByTestId('phrase-words')).toHaveText('');
+    // The app wipes the temporary phrase and returns to the welcome screen.
+    await expect(page.getByRole('heading', { name: 'Your keys, your coins' })).toBeVisible();
+    await expect(page.getByTestId('phrase-words')).toHaveCount(0);
   });
 });
 ```
@@ -2445,11 +3103,9 @@ test.describe('accessibility', () => {
 
   test('form errors are announced and inputs are labelled', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await expect(page.getByLabel('Passcode', { exact: true })).toBeVisible();
-    await expect(page.getByLabel('Confirm passcode')).toBeVisible();
-    await page.getByLabel('Passcode', { exact: true }).fill('short');
-    await page.getByLabel('Confirm passcode').fill('short');
+    await page.getByRole('button', { name: 'Import a wallet' }).click();
+    await expect(page.getByLabel('Word 1', { exact: true })).toBeVisible();
+    await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('alert')).toBeVisible();
   });

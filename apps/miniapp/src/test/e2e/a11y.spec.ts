@@ -41,11 +41,9 @@ test.describe('accessibility', () => {
 
   test('form errors are announced and inputs are labelled', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await expect(page.getByLabel('Passcode', { exact: true })).toBeVisible();
-    await expect(page.getByLabel('Confirm passcode')).toBeVisible();
-    await page.getByLabel('Passcode', { exact: true }).fill('short');
-    await page.getByLabel('Confirm passcode').fill('short');
+    await page.getByRole('button', { name: 'Import a wallet' }).click();
+    await expect(page.getByLabel('Word 1', { exact: true })).toBeVisible();
+    await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('alert')).toBeVisible();
   });

@@ -4,32 +4,37 @@
  * The UI only calls the vault API. It never reads keys, keeps no secret in React state, and
  * clears the module-level phrase holder whenever a flow ends, the wallet locks, or the app is
  * backgrounded.
+ *
+ * Create order: phrase -> verify -> passcode (the vault is sealed last, after the user has
+ * proven the backup). Import order: phrase (type auto-detected) -> passcode.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { setInactivityTimeout } from '@onezerowallet/crypto-vault';
-import type { AccountType } from '@onezerowallet/crypto-vault';
+import {
+  generateMnemonicPhrase,
+  setInactivityTimeout,
+  type AccountType,
+} from '@onezerowallet/crypto-vault';
 import { useTelegram } from './telegram';
 import { installTelegramLifecycleHooks } from './adapters/telegram-lifecycle';
 import { useVault } from './vault/context';
 import { secretHolder } from './vault/secret-holder';
+import { detectAccountType } from './vault/detect';
 import { t } from './i18n';
-import {
-  ImportScreen,
-  PasscodeSetupScreen,
-  PhraseScreen,
-  VerifyScreen,
-  WelcomeScreen,
-} from './ui/onboarding';
+import { CreatePhraseScreen, PhraseScreen, VerifyScreen, WelcomeScreen } from './ui/onboarding';
+import { DisambiguateScreen, ImportPhraseScreen } from './ui/import';
+import { PasscodeScreen } from './ui/passcode';
 import { HomeScreen, SettingsScreen, UnlockScreen } from './ui/wallet';
 import { Notice, ScreenShell } from './ui/common';
 
 type Screen =
   | 'loading'
   | 'welcome'
-  | 'passcode-create'
-  | 'import'
-  | 'phrase'
-  | 'verify'
+  | 'create-phrase'
+  | 'create-verify'
+  | 'create-passcode'
+  | 'import-phrase'
+  | 'import-disambiguate'
+  | 'import-passcode'
   | 'unlock'
   | 'home'
   | 'settings'
@@ -37,6 +42,15 @@ type Screen =
   | 'settings-verify';
 
 const AUTO_LOCK_KEY = 'ozw.autoLockMs';
+
+const ONBOARDING_SECRET_SCREENS: Screen[] = [
+  'create-phrase',
+  'create-verify',
+  'create-passcode',
+  'import-phrase',
+  'import-disambiguate',
+  'import-passcode',
+];
 
 function LoadingScreen() {
   return (
@@ -51,6 +65,7 @@ export function App() {
   const { webApp } = useTelegram();
   const [screen, setScreen] = useState<Screen>('loading');
   const [storageError, setStorageError] = useState(false);
+  const [importAccountType, setImportAccountType] = useState<AccountType>('bip39-multichain');
 
   useEffect(() => {
     try {
@@ -71,7 +86,29 @@ export function App() {
     })();
   }, [manager]);
 
-  // Telegram backgrounding locks immediately (visibility is handled inside the vault session).
+  // Clear a temporary phrase when backgrounded on a secret screen.
+  useEffect(() => {
+    const wipe = (): void => {
+      if (screen === 'settings-phrase' || screen === 'settings-verify') {
+        secretHolder.clear();
+        setScreen('settings');
+        return;
+      }
+      if (ONBOARDING_SECRET_SCREENS.includes(screen)) {
+        secretHolder.clear();
+        setScreen('welcome');
+      }
+    };
+    const onHidden = (): void => {
+      if (document.hidden) wipe();
+    };
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, [screen]);
+
+  // Telegram backgrounding locks immediately.
   useEffect(() => {
     return installTelegramLifecycleHooks(webApp ?? undefined, {
       onDeactivated: () => {
@@ -103,19 +140,67 @@ export function App() {
     setScreen('unlock');
   }, [manager]);
 
-  const createWallet = async (
-    passcode: string,
-    accountType: AccountType,
-  ): Promise<string | null> => {
-    const created = await manager.createWallet(passcode, undefined, { accountType });
+  const startCreate = useCallback(() => {
+    if (!secretHolder.has()) secretHolder.set(generateMnemonicPhrase(24));
+    setScreen('create-phrase');
+  }, []);
+
+  const sealCreatedWallet = async (passcode: string): Promise<string | null> => {
+    const phrase = secretHolder.get();
+    if (!phrase) return t('settings.error');
+    const created = await manager.createWallet(passcode, phrase, {
+      accountType: 'bip39-multichain',
+    });
     if (!created.ok) {
       return created.error === 'weak_passcode'
         ? (created.message ?? t('passcode.weak'))
         : t('settings.error');
     }
-    if (!created.mnemonic) return t('settings.error');
-    secretHolder.set(created.mnemonic);
-    setScreen('phrase');
+    secretHolder.clear();
+    const unlocked = await manager.unlock(passcode);
+    if (!unlocked.success) {
+      setScreen('unlock');
+      return null;
+    }
+    setScreen('home');
+    return null;
+  };
+
+  const importPhraseNext = async (
+    words: string[],
+    forceTonNative: boolean,
+  ): Promise<string | null> => {
+    const phrase = words.join(' ');
+    const detected = await detectAccountType(phrase, { forceTonNative });
+    if (detected.kind === 'invalid') return detected.message;
+    secretHolder.set(phrase);
+    if (detected.kind === 'ambiguous') {
+      setScreen('import-disambiguate');
+      return null;
+    }
+    setImportAccountType(detected.accountType);
+    setScreen('import-passcode');
+    return null;
+  };
+
+  const sealImportedWallet = async (passcode: string): Promise<string | null> => {
+    const phrase = secretHolder.get();
+    if (!phrase) return t('settings.error');
+    const imported = await manager.importWallet(phrase, passcode, {
+      accountType: importAccountType,
+    });
+    secretHolder.clear();
+    if (!imported.ok) {
+      return imported.error === 'invalid_mnemonic'
+        ? t('import.sequenceError')
+        : t('settings.error');
+    }
+    const unlocked = await manager.unlock(passcode);
+    if (!unlocked.success) {
+      setScreen('unlock');
+      return null;
+    }
+    setScreen('home');
     return null;
   };
 
@@ -133,59 +218,88 @@ export function App() {
     case 'welcome':
       return (
         <WelcomeScreen
-          onCreate={() => {
-            setScreen('passcode-create');
-          }}
+          onCreate={startCreate}
           onImport={() => {
-            setScreen('import');
+            secretHolder.clear();
+            setScreen('import-phrase');
           }}
         />
       );
-    case 'passcode-create':
+    case 'create-phrase':
       return (
-        <PasscodeSetupScreen
-          manager={manager}
-          title={t('passcode.title')}
-          onBack={() => {
-            setScreen('welcome');
-          }}
-          onSubmit={createWallet}
-          submitLabel={t('passcode.submit')}
-        />
-      );
-    case 'import':
-      return (
-        <ImportScreen
-          manager={manager}
-          onBack={() => {
-            setScreen('welcome');
-          }}
-          onImported={() => {
-            setScreen('home');
-          }}
-        />
-      );
-    case 'phrase':
-      return (
-        <PhraseScreen
+        <CreatePhraseScreen
+          step={{ current: 1, total: 3 }}
           onBack={() => {
             secretHolder.clear();
             setScreen('welcome');
           }}
           onDone={() => {
-            setScreen('verify');
+            setScreen('create-verify');
           }}
         />
       );
-    case 'verify':
+    case 'create-verify':
       return (
         <VerifyScreen
+          step={{ current: 2, total: 3 }}
           onCancel={() => {
-            setScreen('phrase');
+            setScreen('create-phrase');
           }}
           onVerified={() => {
-            setScreen('unlock');
+            setScreen('create-passcode');
           }}
+        />
+      );
+    case 'create-passcode':
+      return (
+        <PasscodeScreen
+          manager={manager}
+          title={t('passcode.title')}
+          step={{ current: 3, total: 3 }}
+          onBack={() => {
+            setScreen('create-verify');
+          }}
+          onSubmit={sealCreatedWallet}
+          submitLabel={t('passcode.submit')}
+        />
+      );
+    case 'import-phrase':
+      return (
+        <ImportPhraseScreen
+          step={{ current: 1, total: 2 }}
+          onBack={() => {
+            secretHolder.clear();
+            setScreen('welcome');
+          }}
+          onNext={importPhraseNext}
+        />
+      );
+    case 'import-disambiguate':
+      return (
+        <DisambiguateScreen
+          step={{ current: 1, total: 2 }}
+          onBack={() => {
+            secretHolder.clear();
+            setScreen('import-phrase');
+          }}
+          onChoose={(accountType) => {
+            setImportAccountType(accountType);
+            setScreen('import-passcode');
+          }}
+        />
+      );
+    case 'import-passcode':
+      return (
+        <PasscodeScreen
+          manager={manager}
+          title={t('import.step.passcode')}
+          step={{ current: 2, total: 2 }}
+          onBack={() => {
+            secretHolder.clear();
+            setScreen('import-phrase');
+          }}
+          onSubmit={sealImportedWallet}
+          submitLabel={t('import.submit')}
         />
       );
     case 'unlock':
@@ -235,7 +349,6 @@ export function App() {
     case 'settings-phrase':
       return (
         <PhraseScreen
-          settingsMode
           onBack={() => {
             secretHolder.clear();
             setScreen('settings');

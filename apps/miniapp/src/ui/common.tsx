@@ -11,19 +11,33 @@ import type {
 } from 'react';
 import { useTelegram } from '../telegram';
 
+export function StepIndicator({ current, total }: { current: number; total: number }) {
+  return (
+    <span className="text-xs opacity-70" aria-label={`Step ${String(current)} of ${String(total)}`}>
+      Step {current} of {total}
+    </span>
+  );
+}
+
+/**
+ * Mobile: full-bleed with Telegram safe areas. Desktop: a centred elevated card.
+ * The card surface uses the Telegram section colour so the app still looks native.
+ */
 export function ScreenShell({
   title,
   children,
   onBack,
+  step,
 }: {
   title: string;
   children: ReactNode;
-  onBack?: () => void;
+  onBack?: (() => void) | undefined;
+  step?: { current: number; total: number } | undefined;
 }) {
   const { theme } = useTelegram();
   return (
     <div
-      className="min-h-screen flex flex-col"
+      className="min-h-screen w-full flex justify-center"
       style={{
         backgroundColor: theme?.backgroundColor ?? 'var(--tg-theme-bg-color, #fff)',
         color: theme?.textColor ?? 'var(--tg-theme-text-color, #000)',
@@ -33,27 +47,33 @@ export function ScreenShell({
         paddingRight: 'env(safe-area-inset-right)',
       }}
     >
-      <header
-        className="px-4 py-3 flex items-center gap-3"
+      <div
+        className="w-full max-w-md flex flex-col min-h-screen sm:min-h-0 sm:my-8 sm:rounded-2xl sm:shadow-xl sm:border sm:border-black/10 overflow-hidden"
         style={{
-          backgroundColor: theme?.headerBgColor ?? 'var(--tg-theme-header-bg-color, #f0f0f0)',
+          backgroundColor: theme?.sectionBgColor ?? 'var(--tg-theme-section-bg-color, #fff)',
         }}
       >
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="text-sm underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-            aria-label="Back"
-          >
-            ←
-          </button>
-        ) : null}
-        <h1 className="text-lg font-semibold">{title}</h1>
-      </header>
-      <main className="flex-1 px-4 py-6 flex flex-col gap-4 max-w-md w-full mx-auto">
-        {children}
-      </main>
+        <header
+          className="px-4 py-3 flex items-center gap-3"
+          style={{
+            backgroundColor: theme?.headerBgColor ?? 'var(--tg-theme-header-bg-color, #f0f0f0)',
+          }}
+        >
+          {onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              className="text-sm underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+              aria-label="Back"
+            >
+              ←
+            </button>
+          ) : null}
+          <h1 className="text-lg font-semibold flex-1">{title}</h1>
+          {step ? <StepIndicator current={step.current} total={step.total} /> : null}
+        </header>
+        <main className="flex-1 px-4 py-6 flex flex-col gap-4 w-full">{children}</main>
+      </div>
     </div>
   );
 }

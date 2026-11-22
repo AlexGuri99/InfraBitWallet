@@ -62,6 +62,13 @@ export function normalizeMnemonic(phrase: string): string {
   return phrase.trim().replace(/\s+/g, ' ').normalize('NFKD').toLowerCase();
 }
 
+const WORDLIST_SET = new Set(WORDLIST);
+
+/** True when a (normalized, lowercase) word is in the BIP-39 English wordlist. No secret data. */
+export function isBip39Word(word: string): boolean {
+  return WORDLIST_SET.has(word.trim().toLowerCase());
+}
+
 /**
  * Validate a BIP-39 mnemonic phrase.
  *
@@ -91,7 +98,7 @@ export function validateMnemonicPhrase(phrase: string): MnemonicValidation {
     );
   }
 
-  const wordlistSet = new Set(WORDLIST);
+  const wordlistSet = WORDLIST_SET;
   // Report POSITIONS only. Never echo a user-typed word: the phrase is the master secret and a
   // validation error must not end up in logs, analytics or crash reports.
   const unknownPositions: number[] = [];

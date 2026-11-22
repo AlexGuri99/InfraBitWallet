@@ -25,6 +25,7 @@ import {
   resetBackoff,
   getBackoffCount,
   isWipeThresholdReached,
+  isBip39Word,
 } from './index';
 import * as publicApi from './index';
 import { mnemonicToSeed } from './mnemonic';
@@ -71,6 +72,7 @@ describe('A3: public API surface', () => {
     'getBackoffCount',
     'getSession',
     'isBackoffActive',
+    'isBip39Word',
     'isValidDeviceSecretHex',
     'isValidEvmAddress',
     'isValidTronAddress',
@@ -170,6 +172,13 @@ describe('Mnemonic', () => {
     const result = validateMnemonicPhrase(phrase);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('Checksum'))).toBe(true);
+  });
+
+  it('isBip39Word checks the English wordlist without revealing anything', () => {
+    expect(isBip39Word('abandon')).toBe(true);
+    expect(isBip39Word(' ABANDON ')).toBe(true);
+    expect(isBip39Word('zznotaword')).toBe(false);
+    expect(isBip39Word('')).toBe(false);
   });
 
   it('normalizes phrases (whitespace, case)', () => {

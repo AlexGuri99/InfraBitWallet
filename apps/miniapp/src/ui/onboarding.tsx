@@ -1,15 +1,64 @@
 /**
- * Onboarding screens: welcome/risk, passcode, reveal phrase, verify backup, import.
+ * Welcome, create-phrase, reveal-phrase and backup-verification screens.
  *
- * Secrets rule: passcodes and phrases are read from uncontrolled inputs / the module holder at
- * submit time only. The phrase is written into the DOM imperatively after an explicit tap and
- * cleared when hidden, navigated away, or the flow ends. No secret enters React state.
+ * Secrets rule is unchanged: the phrase lives only in the module-scoped holder. It is written
+ * into the DOM imperatively after an explicit tap (two numbered columns of pills) and removed
+ * when hidden or unmounted. No word or passcode is ever React state.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AccountType, VaultManager } from '@onezerowallet/crypto-vault';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { t } from '../i18n';
 import { secretHolder } from '../vault/secret-holder';
-import { Button, ErrorText, Field, Notice, PhraseInput, ScreenShell } from './common';
+import { Button, ErrorText, Field, Notice, ScreenShell } from './common';
+
+type Step = { current: number; total: number };
+
+function createWordItem(index: number, word: string): HTMLDivElement {
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-2';
+  const badge = document.createElement('span');
+  badge.textContent = String(index + 1);
+  badge.className =
+    'h-6 w-6 shrink-0 rounded-full bg-black/10 dark:bg-white/20 text-xs flex items-center justify-center';
+  const pill = document.createElement('span');
+  pill.textContent = word;
+  pill.dataset['role'] = 'word';
+  pill.dataset['wordIndex'] = String(index);
+  pill.className = 'flex-1 rounded-full bg-black/5 dark:bg-white/10 px-3 py-1 font-mono text-sm';
+  row.append(badge, pill);
+  return row;
+}
+
+function renderPhrase(left: HTMLDivElement | null, right: HTMLDivElement | null): void {
+  const words = secretHolder.words();
+  if (left) left.replaceChildren();
+  if (right) right.replaceChildren();
+  if (words.length === 0) return;
+  const half = Math.ceil(words.length / 2);
+  words.forEach((word, index) => {
+    const item = createWordItem(index, word);
+    const target = index < half ? left : right;
+    target?.append(item);
+  });
+}
+
+export function PhraseGrid({
+  leftRef,
+  rightRef,
+}: {
+  leftRef: RefObject<HTMLDivElement | null>;
+  rightRef: RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <div
+      data-testid="phrase-words"
+      aria-label="Recovery phrase words"
+      className="grid grid-cols-2 gap-2 min-h-6"
+    >
+      <div ref={leftRef} className="flex flex-col gap-2" />
+      <div ref={rightRef} className="flex flex-col gap-2" />
+    </div>
+  );
+}
 
 function pickPositions(count: number, take: number): number[] {
   const positions = Array.from({ length: count }, (_, i) => i);
@@ -34,7 +83,7 @@ export function WelcomeScreen({
   onImport: () => void;
 }) {
   return (
-    <ScreenShell title={t('app.name')}>
+    <ScreenShell title={t('app.name')} step={{ current: 1, total: 3 }}>
       <h2 className="text-xl font-semibold">{t('welcome.title')}</h2>
       <p className="text-sm opacity-80">{t('app.tagline')}</p>
       <p className="text-sm">{t('welcome.body')}</p>
@@ -49,261 +98,33 @@ export function WelcomeScreen({
   );
 }
 
-export function PasscodeSetupScreen({
-  manager,
-  title,
+/** Create, step 1: show the generated phrase and require a backup acknowledgement. */
+export function CreatePhraseScreen({
   onBack,
-  onSubmit,
-  submitLabel,
+  onDone,
+  step,
 }: {
-  manager: VaultManager;
-  title: string;
   onBack: () => void;
-  onSubmit: (passcode: string, accountType: AccountType) => Promise<string | null>;
-  submitLabel: string;
+  onDone: () => void;
+  step: Step;
 }) {
-  const passRef = useRef<HTMLInputElement>(null);
-  const confirmRef = useRef<HTMLInputElement>(null);
-  const [accountType, setAccountType] = useState<AccountType>('bip39-multichain');
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [checked, setChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const hasPhrase = secretHolder.has();
 
-  const submit = async (): Promise<void> => {
-    if (busy) return;
-    const passcode = passRef.current?.value ?? '';
-    const confirm = confirmRef.current?.value ?? '';
-    if (passcode !== confirm) {
-      setError(t('passcode.mismatch'));
-      return;
-    }
-    const policy = manager.evaluatePasscode(passcode);
-    if (!policy.ok) {
-      setError(policy.error ?? t('passcode.weak'));
-      return;
-    }
-    setError(null);
-    setBusy(true);
-    try {
-      const failure = await onSubmit(passcode, accountType);
-      if (failure) setError(failure);
-    } finally {
-      setBusy(false);
-      if (passRef.current) passRef.current.value = '';
-      if (confirmRef.current) confirmRef.current.value = '';
-    }
-  };
-
-  return (
-    <ScreenShell title={title} onBack={onBack}>
-      <Notice tone={manager.usesDeviceSecret ? 'info' : 'warning'}>
-        {manager.usesDeviceSecret ? t('passcode.deviceSecret') : t('passcode.noDeviceSecret')}
-      </Notice>
-
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium mb-1">{t('accountType.label')}</legend>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="accountType"
-            value="bip39-multichain"
-            checked={accountType === 'bip39-multichain'}
-            onChange={() => {
-              setAccountType('bip39-multichain');
-            }}
-            className="mt-1"
-          />
-          <span>{t('accountType.bip39')}</span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="accountType"
-            value="ton-native-only"
-            checked={accountType === 'ton-native-only'}
-            onChange={() => {
-              setAccountType('ton-native-only');
-            }}
-            className="mt-1"
-          />
-          <span>
-            {t('accountType.tonNative')}
-            <span className="block text-xs opacity-70">{t('accountType.tonNative.help')}</span>
-          </span>
-        </label>
-      </fieldset>
-
-      <Field
-        id="passcode"
-        ref={passRef}
-        label={t('passcode.label')}
-        type="password"
-        autoComplete="new-password"
-        autoFocus
-        inputMode="text"
-      />
-      <Field
-        id="passcode-confirm"
-        ref={confirmRef}
-        label={t('passcode.confirm')}
-        type="password"
-        autoComplete="new-password"
-      />
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Button onClick={() => void submit()} disabled={busy}>
-        {busy ? t('common.working') : submitLabel}
-      </Button>
-    </ScreenShell>
-  );
-}
-
-export function ImportScreen({
-  manager,
-  onBack,
-  onImported,
-}: {
-  manager: VaultManager;
-  onBack: () => void;
-  onImported: () => void;
-}) {
-  const phraseRef = useRef<HTMLTextAreaElement>(null);
-  const passRef = useRef<HTMLInputElement>(null);
-  const confirmRef = useRef<HTMLInputElement>(null);
-  const [accountType, setAccountType] = useState<AccountType>('bip39-multichain');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (): Promise<void> => {
-    if (busy) return;
-    const phrase = phraseRef.current?.value ?? '';
-    const passcode = passRef.current?.value ?? '';
-    const confirm = confirmRef.current?.value ?? '';
-    if (passcode !== confirm) {
-      setError(t('passcode.mismatch'));
-      return;
-    }
-    const policy = manager.evaluatePasscode(passcode);
-    if (!policy.ok) {
-      setError(policy.error ?? t('passcode.weak'));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const imported = await manager.importWallet(phrase, passcode, { accountType });
-      if (phraseRef.current) phraseRef.current.value = '';
-      if (!imported.ok) {
-        setError(imported.error === 'invalid_mnemonic' ? t('import.invalid') : t('settings.error'));
-        return;
-      }
-      const unlocked = await manager.unlock(passcode);
-      if (!unlocked.success) {
+  useEffect(() => {
+    if (revealed) {
+      if (!secretHolder.has()) {
         setError(t('settings.error'));
         return;
       }
-      onImported();
-    } finally {
-      setBusy(false);
-      if (passRef.current) passRef.current.value = '';
-      if (confirmRef.current) confirmRef.current.value = '';
+      renderPhrase(leftRef.current, rightRef.current);
+    } else {
+      renderPhrase(null, null);
     }
-  };
-
-  return (
-    <ScreenShell title={t('import.title')} onBack={onBack}>
-      <PhraseInput
-        id="import-phrase"
-        ref={phraseRef}
-        label={t('import.phrase')}
-        hint={t('import.phraseHelp')}
-        autoFocus
-      />
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium mb-1">{t('accountType.label')}</legend>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="importAccountType"
-            value="bip39-multichain"
-            checked={accountType === 'bip39-multichain'}
-            onChange={() => {
-              setAccountType('bip39-multichain');
-            }}
-            className="mt-1"
-          />
-          <span>{t('accountType.bip39')}</span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="radio"
-            name="importAccountType"
-            value="ton-native-only"
-            checked={accountType === 'ton-native-only'}
-            onChange={() => {
-              setAccountType('ton-native-only');
-            }}
-            className="mt-1"
-          />
-          <span>{t('accountType.tonNative')}</span>
-        </label>
-      </fieldset>
-      <Field
-        id="import-passcode"
-        ref={passRef}
-        label={t('passcode.label')}
-        type="password"
-        autoComplete="new-password"
-      />
-      <Field
-        id="import-passcode-confirm"
-        ref={confirmRef}
-        label={t('passcode.confirm')}
-        type="password"
-        autoComplete="new-password"
-      />
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Button onClick={() => void submit()} disabled={busy}>
-        {busy ? t('common.working') : t('import.submit')}
-      </Button>
-    </ScreenShell>
-  );
-}
-
-export function PhraseScreen({
-  onDone,
-  onBack,
-  settingsMode = false,
-}: {
-  onDone: () => void;
-  onBack: () => void;
-  settingsMode?: boolean;
-}) {
-  const [revealed, setRevealed] = useState(false);
-  const [empty, setEmpty] = useState(false);
-  const wordsRef = useRef<HTMLDivElement>(null);
-  const wordCount = secretHolder.words().length;
-
-  useEffect(() => {
-    const node = wordsRef.current;
-    if (!node) return;
-    if (!revealed) {
-      node.textContent = '';
-      return;
-    }
-    const words = secretHolder.words();
-    if (words.length === 0) {
-      setEmpty(true);
-      return;
-    }
-    node.replaceChildren(
-      ...words.map((word, index) => {
-        const item = document.createElement('span');
-        item.textContent = `${String(index + 1)}. ${word}`;
-        item.className =
-          'rounded bg-black/5 dark:bg-white/10 px-2 py-1 font-mono text-sm inline-block';
-        item.dataset['wordIndex'] = String(index);
-        return item;
-      }),
-    );
   }, [revealed]);
 
   useEffect(() => {
@@ -311,27 +132,102 @@ export function PhraseScreen({
       if (document.hidden && revealed) setRevealed(false);
     };
     document.addEventListener('visibilitychange', onVisibility);
-    const node = wordsRef.current;
+    const left = leftRef.current;
+    const right = rightRef.current;
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
-      if (node) node.textContent = '';
+      if (left) left.replaceChildren();
+      if (right) right.replaceChildren();
     };
   }, [revealed]);
 
   return (
-    <ScreenShell title={t('phrase.title')} onBack={onBack}>
-      <Notice tone="warning">
-        {settingsMode ? t('phrase.settings.warning') : t('phrase.warning')}
-      </Notice>
-      <p className="text-sm" aria-live="polite">
-        {revealed ? '' : t('phrase.reveal')}
-      </p>
-      <div
-        ref={wordsRef}
-        data-testid="phrase-words"
-        aria-label="Recovery phrase words"
-        className="flex flex-wrap gap-2 min-h-6"
-      />
+    <ScreenShell title={t('phrase.title')} onBack={onBack} step={step}>
+      <Notice tone="warning">{t('phrase.warning')}</Notice>
+      <PhraseGrid leftRef={leftRef} rightRef={rightRef} />
+      {error ? <ErrorText>{error}</ErrorText> : null}
+      {revealed ? (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setRevealed(false);
+          }}
+        >
+          {t('phrase.hide')}
+        </Button>
+      ) : (
+        <Button
+          onClick={() => {
+            setRevealed(true);
+          }}
+        >
+          {hasPhrase ? t('phrase.reveal') : t('phrase.revealAgain')}
+        </Button>
+      )}
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={!revealed}
+          onChange={(event) => {
+            setChecked(event.target.checked);
+          }}
+          className="mt-1"
+        />
+        <span>{t('phrase.checkbox')}</span>
+      </label>
+      <Button onClick={onDone} disabled={!revealed || !checked || !hasPhrase}>
+        {t('phrase.next')}
+      </Button>
+    </ScreenShell>
+  );
+}
+
+/** Settings-mode reveal (re-authenticated) with the same two-column layout. */
+export function PhraseScreen({
+  onBack,
+  onDone,
+  step,
+}: {
+  onBack: () => void;
+  onDone: () => void;
+  step?: Step;
+}) {
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const [revealed, setRevealed] = useState(false);
+  const [empty, setEmpty] = useState(false);
+
+  useEffect(() => {
+    if (revealed) {
+      if (!secretHolder.has()) {
+        setEmpty(true);
+        return;
+      }
+      renderPhrase(leftRef.current, rightRef.current);
+    } else {
+      renderPhrase(null, null);
+    }
+  }, [revealed]);
+
+  useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.hidden && revealed) setRevealed(false);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    const left = leftRef.current;
+    const right = rightRef.current;
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (left) left.replaceChildren();
+      if (right) right.replaceChildren();
+    };
+  }, [revealed]);
+
+  return (
+    <ScreenShell title={t('phrase.title')} onBack={onBack} step={step}>
+      <Notice tone="warning">{t('phrase.settings.warning')}</Notice>
+      <PhraseGrid leftRef={leftRef} rightRef={rightRef} />
       {empty ? <ErrorText>{t('settings.error')}</ErrorText> : null}
       {revealed ? (
         <Button
@@ -348,12 +244,10 @@ export function PhraseScreen({
             setRevealed(true);
           }}
         >
-          {wordCount > 0 ? t('phrase.reveal') : t('phrase.revealAgain')}
+          {t('phrase.reveal')}
         </Button>
       )}
-      <Button onClick={onDone} disabled={wordCount === 0}>
-        {settingsMode ? t('verify.submit') : t('phrase.done')}
-      </Button>
+      <Button onClick={onDone}>{t('common.done')}</Button>
     </ScreenShell>
   );
 }
@@ -361,9 +255,11 @@ export function PhraseScreen({
 export function VerifyScreen({
   onVerified,
   onCancel,
+  step,
 }: {
   onVerified: () => void;
   onCancel: () => void;
+  step?: Step;
 }) {
   const words = secretHolder.words();
   const positions = useMemo(() => pickPositions(words.length, 3), [words.length]);
@@ -382,7 +278,6 @@ export function VerifyScreen({
       return;
     }
     setError(null);
-    secretHolder.clear();
     setDone(true);
     onVerified();
   };
@@ -390,7 +285,7 @@ export function VerifyScreen({
   if (done) return null;
 
   return (
-    <ScreenShell title={t('verify.title')} onBack={onCancel}>
+    <ScreenShell title={t('verify.title')} onBack={onCancel} step={step}>
       <p className="text-sm">{t('verify.body')}</p>
       {positions.map((position, index) => (
         <Field
@@ -400,8 +295,8 @@ export function VerifyScreen({
           autoComplete="off"
           autoCapitalize="none"
           spellCheck={false}
-          ref={(el) => {
-            inputs.current[index] = el;
+          ref={(element) => {
+            inputs.current[index] = element;
           }}
         />
       ))}

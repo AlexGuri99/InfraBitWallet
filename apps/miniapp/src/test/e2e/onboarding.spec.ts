@@ -1,47 +1,73 @@
 /**
- * Stage C E2E: create a wallet, verify the backup, lock/unlock, reject a wrong passcode and
- * reload into a persisted vault. Runs against the production build with no Telegram client, so
- * no device secret exists and the passphrase policy requires 12+ characters.
+ * E2E for the refactored onboarding flows.
  *
- * Every test gets a fresh browser context, so IndexedDB starts empty.
+ * Create: phrase (reveal + checkbox) -> 3-word verification -> passcode -> Home.
+ * Import: 12/24 numbered grid (smart paste) -> passcode -> Home.
+ * Runs against the production build with no Telegram client, so no device secret exists and the
+ * passphrase policy requires 12+ characters. Each test gets a fresh browser context (empty IDB).
  */
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const PASS = 'e2e passphrase one';
 
-test.describe('onboarding and unlock', () => {
-  test('create, verify backup, lock and unlock, survive reload', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
+function wordLocator(page: Page) {
+  return page.locator('[data-role="word"]');
+}
 
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
+async function createToPasscode(page: Page): Promise<string[]> {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create a wallet' }).click();
+  await expect(page.getByRole('heading', { name: 'Your recovery phrase' })).toBeVisible();
+  await expect(page.getByTestId('phrase-words')).toHaveText('');
+  await page.getByRole('button', { name: 'Show recovery phrase' }).click();
+  await expect(wordLocator(page)).toHaveCount(24);
+  const words = await wordLocator(page).allTextContents();
 
-    await expect(page.getByRole('heading', { name: 'Your recovery phrase' })).toBeVisible();
-    await expect(page.getByTestId('phrase-words')).toHaveText('');
-    await page.getByRole('button', { name: 'Show recovery phrase' }).click();
+  const next = page.getByRole('button', { name: 'Next' });
+  await expect(next).toBeDisabled();
+  await page.getByLabel("I've stored the seed phrase in a secure place.").check();
+  await expect(next).toBeEnabled();
+  await next.click();
 
-    const words = (await page.getByTestId('phrase-words').locator('span').allTextContents()).map(
-      (text) => text.replace(/^\d+\.\s*/, ''),
+  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+  const inputs = page.locator('input[id^="word-"]');
+  for (let i = 0; i < 3; i++) {
+    const id = await inputs.nth(i).getAttribute('id');
+    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+    await inputs.nth(i).fill(words[position] ?? '');
+  }
+  await page.getByRole('button', { name: 'Verify' }).click();
+  await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
+  return words;
+}
+
+async function finishCreate(page: Page): Promise<void> {
+  await page.getByLabel('Passcode', { exact: true }).fill(PASS);
+  await page.getByLabel('Confirm passcode').fill(PASS);
+  await expect(page.getByRole('status')).toHaveText(/Requirements met/);
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+}
+
+async function pastePhrase(page: Page, phrase: string): Promise<void> {
+  await page.getByLabel('Word 1', { exact: true }).evaluate((element, text) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    element.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
     );
-    expect(words).toHaveLength(24);
-    await page.getByRole('button', { name: 'I wrote it down' }).click();
+  }, phrase);
+}
 
-    await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
-    const inputs = page.locator('input[id^="word-"]');
-    const count = await inputs.count();
-    expect(count).toBe(3);
-    for (let i = 0; i < count; i++) {
-      const id = await inputs.nth(i).getAttribute('id');
-      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
-      await inputs.nth(i).fill(words[position] ?? '');
-    }
-    await page.getByRole('button', { name: 'Verify' }).click();
+test.describe('onboarding and unlock', () => {
+  test('create, verify, passcode, lock/unlock, survive reload', async ({ page }) => {
+    const words = await createToPasscode(page);
+    await finishCreate(page);
 
-    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    expect(await page.getByTestId('address-EVM').textContent()).toMatch(/^0x/);
+    expect(await page.getByTestId('address-TRON').textContent()).toMatch(/^T/);
+    expect(await page.getByTestId('address-Receive TON').textContent()).toMatch(/^UQ/);
 
-    // The phrase must not survive in web storage or the visible DOM.
     const dump = await page.evaluate(() => ({
       local: JSON.stringify(localStorage),
       session: JSON.stringify(sessionStorage),
@@ -51,33 +77,23 @@ test.describe('onboarding and unlock', () => {
     expect(dump.session).not.toContain(words[0] ?? 'never');
     expect(dump.text).not.toContain(words.join(' '));
 
-    // Wrong passcode is rejected; then the right one opens the wallet.
+    await page.getByRole('button', { name: 'Lock' }).click();
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Passcode', { exact: true }).fill('wrong passphrase');
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('alert')).toHaveText(/Wrong passcode|Too many attempts/);
 
-    // The wrong attempt opened a short backoff window; let it elapse before reloading.
     await page.waitForTimeout(3500);
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('Passcode', { exact: true }).fill(PASS);
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
-    await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
-    await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
-    await expect(page.getByTestId('address-Receive TON')).toHaveText(/^UQ/);
   });
 
-  test('IndexedDB holds only the sealed envelope, never the phrase', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-    const words = (await page.getByTestId('phrase-words').locator('span').allTextContents()).map(
-      (text) => text.replace(/^\d+\.\s*/, ''),
-    );
+  test('IndexedDB holds only the sealed envelope after create', async ({ page }) => {
+    const words = await createToPasscode(page);
+    await finishCreate(page);
 
     const dump = await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -114,21 +130,28 @@ test.describe('onboarding and unlock', () => {
     });
 
     expect(dump.keys.sort()).toEqual(['vault_seal']);
-    // The stored envelope is JSON of hex fields; it must not contain the phrase as plaintext.
-    // (Individual short words are not checked: random hex can contain e.g. "face".)
     expect(dump.values).not.toContain(words.join(' '));
     expect(dump.values).toContain('passcodeWrappedKey');
+    expect(dump.values).toContain('accountType');
   });
 
-  test('imports a wallet phrase', async ({ page }) => {
+  test('import: 12-word grid via smart paste, then passcode', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Import a wallet' }).click();
-    await page
-      .getByLabel('Recovery phrase')
-      .fill('test test test test test test test test test test test junk');
+    await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
+    await page.getByRole('button', { name: '12 words' }).click();
+    await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(12);
+
+    await pastePhrase(page, 'test test test test test test test test test test test junk');
+    await expect(page.getByLabel('Word 12', { exact: true })).toHaveValue('junk');
+    await expect(page.getByLabel('Word 1', { exact: true })).toHaveValue('test');
+
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
     await page.getByLabel('Passcode', { exact: true }).fill(PASS);
     await page.getByLabel('Confirm passcode').fill(PASS);
     await page.getByRole('button', { name: 'Import' }).click();
+
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
     await expect(page.getByTestId('address-EVM')).toHaveText(
       '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -136,51 +159,31 @@ test.describe('onboarding and unlock', () => {
   });
 
   test('settings reveal requires re-auth and clears the phrase on leaving', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-    const words = (await page.getByTestId('phrase-words').locator('span').allTextContents()).map(
-      (text) => text.replace(/^\d+\.\s*/, ''),
-    );
-    await page.getByRole('button', { name: 'I wrote it down' }).click();
-    const inputs = page.locator('input[id^="word-"]');
-    for (let i = 0; i < 3; i++) {
-      const id = await inputs.nth(i).getAttribute('id');
-      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
-      await inputs.nth(i).fill(words[position] ?? '');
-    }
-    await page.getByRole('button', { name: 'Verify' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByRole('button', { name: 'Unlock' }).click();
+    const words = await createToPasscode(page);
+    await finishCreate(page);
     await page.getByRole('button', { name: 'Settings' }).click();
 
     await page.getByLabel('Enter your passcode to continue').fill(PASS);
     await page.getByRole('button', { name: 'Reveal recovery phrase' }).click();
     await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-    await expect(page.getByTestId('phrase-words')).not.toHaveText('');
+    await expect(wordLocator(page)).toHaveCount(24);
     await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await expect(page.locator('body')).not.toContainText(words.join(' '));
   });
 
-  test('the phrase screen is empty until the explicit reveal tap', async ({ page }) => {
+  test('phrase hides when the app is backgrounded', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Create a wallet' }).click();
-    await page.getByLabel('Passcode', { exact: true }).fill(PASS);
-    await page.getByLabel('Confirm passcode').fill(PASS);
-    await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByTestId('phrase-words')).toHaveText('');
-
-    // Backgrounding hides an already revealed phrase.
     await page.getByRole('button', { name: 'Show recovery phrase' }).click();
     await expect(page.getByTestId('phrase-words')).not.toHaveText('');
     await page.evaluate(() => {
       Object.defineProperty(document, 'hidden', { value: true, configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await expect(page.getByTestId('phrase-words')).toHaveText('');
+    // The app wipes the temporary phrase and returns to the welcome screen.
+    await expect(page.getByRole('heading', { name: 'Your keys, your coins' })).toBeVisible();
+    await expect(page.getByTestId('phrase-words')).toHaveCount(0);
   });
 });
