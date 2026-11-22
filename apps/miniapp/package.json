@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "pnpm run build:libs && tsc --noEmit && vite build && node scripts/ensure-root-dist.mjs",
     "preview": "vite preview",
-    "lint": "pnpm run build:libs && eslint src/ api/",
+    "lint": "eslint src/ api/",
     "type-check": "pnpm run build:libs && tsc --noEmit && tsc -p api --noEmit",
     "test": "pnpm run build:libs && vitest run",
     "test:watch": "vitest",

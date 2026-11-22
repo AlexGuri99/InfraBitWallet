@@ -14,7 +14,7 @@
   "scripts": {
     "build": "pnpm --filter @onezerowallet/chain-ton build && tsc -p tsconfig.build.json",
     "dev": "vite dev",
-    "lint": "eslint src/",
+    "lint": "pnpm --filter @onezerowallet/chain-ton build && eslint src/",
     "type-check": "pnpm --filter @onezerowallet/chain-ton build && tsc --noEmit",
     "test": "pnpm --filter @onezerowallet/chain-ton build && vitest run"
   },
