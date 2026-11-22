@@ -10,6 +10,7 @@ import type { VaultManager } from '@onezerowallet/crypto-vault';
 import {
   filterActivity,
   formatChange,
+  formatDecimalShort,
   formatUsd,
   truncateAddress,
   type TonActivityItem,
@@ -337,8 +338,11 @@ export function HomeScreen({
   const [copiedPill, setCopiedPill] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // ONE canonical active address in testnet mode: the 0Q user-friendly form whose StateInit
+  // uses networkGlobalId -3. The mainnet raw hash (-239) is a DIFFERENT account hash and must
+  // never be used for testnet reads (that mismatch was the live bug).
   const tonAddress = info?.ton.addressTestnetNonBounceable ?? '';
-  const requestAddress = info?.ton.addressRaw ?? '';
+  const requestAddress = tonAddress;
 
   const refresh = useCallback(async (): Promise<void> => {
     if (!requestAddress) return;
@@ -480,7 +484,7 @@ export function HomeScreen({
       ? 'Syncing…'
       : portfolio.state === 'error'
         ? 'Offline'
-        : `${portfolio.value.balance} TON · ${formatChange(portfolio.value.change24h)}`;
+        : `${formatDecimalShort(portfolio.value.balanceRaw, 9, 4)} TON · ${formatChange(portfolio.value.change24h)}`;
 
   return (
     <ScreenShell title={t('home.title')}>
@@ -740,7 +744,11 @@ export function HomeScreen({
                       </span>
                     </span>
                     <span className="text-xs opacity-70">
-                      {item.status === 'failed' ? 'Failed' : ''}
+                      {item.isBounce === true
+                        ? t('home.bounced')
+                        : item.status === 'failed'
+                          ? 'Failed'
+                          : ''}
                     </span>
                   </button>
                 ))
@@ -807,7 +815,9 @@ export function HomeScreen({
                 {truncateAddress(sheet.item.counterparty)}
               </p>
               <p className="opacity-70">Fee: {sheet.item.fee} TON</p>
-              <p className="opacity-70">Status: {sheet.item.status}</p>
+              <p className="opacity-70">
+                Status: {sheet.item.isBounce === true ? t('home.bouncedStatus') : sheet.item.status}
+              </p>
               {sheet.item.comment ? (
                 <p className="rounded bg-black/5 dark:bg-white/10 p-2">
                   Comment: {sheet.item.comment}

@@ -15,9 +15,11 @@ export type {
   TonReadProvider,
   TonAddressFormsLike,
 } from './types.js';
+export { TON_NETWORK_GLOBAL_ID, tonNetworkGlobalId } from './types.js';
 
 export {
   formatDecimal,
+  formatDecimalShort,
   parseDecimal,
   formatUsd,
   formatChange,

@@ -101,6 +101,8 @@ const en = {
   'home.retry': 'Retry',
   'home.syncing': 'Syncing…',
   'home.txDetails': 'Transaction',
+  'home.bounced': 'Bounced',
+  'home.bouncedStatus': 'Bounced refund',
   'home.activityEmpty': 'No transactions yet — live TON Testnet history arrives in P2',
   'home.testnet': 'Testnet',
   'home.receive': 'Receive',

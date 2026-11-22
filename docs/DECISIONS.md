@@ -450,3 +450,33 @@ Variable names and local usage are documented in `services/api/README.md`; no `.
 
 **Not done yet:** the API service is not deployed as a serverless function and there is no proxy
 route that consumes these keys; that lands with the P2 TON read path.
+
+---
+
+## Decision: one canonical testnet address per wallet (fix for the live address mismatch)
+
+**Root cause (found in Telegram testing):** Home displayed `info.ton.addressTestnetNonBounceable`
+(a V5R1 StateInit built with `networkGlobalId = -3`, address `0QC5Zf…`) but queried the API with
+`info.ton.addressRaw`, which is the **mainnet** StateInit hash (`networkGlobalId = -239`). The two
+addresses are different accounts (`0:b965…` vs `0:2200…`), so the portfolio belonged to a wallet
+the UI never showed.
+
+**Fix:** in testnet mode the Home screen now uses the **0Q user-friendly testnet address as the
+single canonical value** for the hero pill, copy button, Receive sheet and QR code, and for
+`/api/ton/portfolio` and `/api/ton/activity`. The API validates and normalizes it back to the same
+testnet raw hash before calling providers. A component/E2E test asserts the queried address string
+and decoded 256-bit hash equal the displayed address.
+
+**V5R1 convention (must match P2b signing/deployment):**
+`TON_NETWORK_GLOBAL_ID = { testnet: -3, mainnet: -239 }`, exported from `@onezerowallet/chain-ton`.
+The wallet id (and therefore the StateInit hash/address) XORs this id, so a wallet's testnet and
+mainnet addresses are different accounts even with the same public key. Signing/deploying must use
+the same network id as the address that was derived and displayed.
+
+**Bounced refunds:** messages with TON Center `bounced: true`, an outbound body opcode
+`0xffffffff`, or TonAPI `bounced` are marked `isBounce` on `TonActivityItem` and shown with a
+**Bounced** badge / "Bounced refund" status instead of looking like a user send. They remain in the
+list (they are real chain events) but are clearly labelled.
+
+**Hero formatting:** the hero secondary pill truncates to 4 decimals (`formatDecimalShort`), while
+asset rows and the transaction detail keep full BigInt precision.

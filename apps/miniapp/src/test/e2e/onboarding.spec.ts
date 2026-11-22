@@ -109,11 +109,17 @@ const ACTIVITY_ITEMS = [
 /** Mock the same-origin read proxy so tests never hit a live provider. */
 async function mockTonApi(
   page: Page,
-  options: { activity?: unknown[]; failPortfolioOnce?: boolean } = {},
+  options: {
+    activity?: unknown[];
+    failPortfolioOnce?: boolean;
+    onRequest?: (url: string) => void;
+  } = {},
 ): Promise<void> {
   let portfolioCalls = 0;
   await page.route('**/api/ton/**', async (route) => {
-    const path = new URL(route.request().url()).pathname;
+    const url = route.request().url();
+    options.onRequest?.(url);
+    const path = new URL(url).pathname;
     if (path.endsWith('/portfolio')) {
       portfolioCalls += 1;
       if (options.failPortfolioOnce === true && portfolioCalls === 1) {
@@ -176,6 +182,26 @@ test.describe('onboarding and unlock', () => {
     await page.getByLabel('PIN', { exact: true }).fill(PASS);
     await page.getByRole('button', { name: 'Unlock' }).click();
     await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+  });
+
+  test('queries the exact testnet address displayed in the Receive sheet', async ({ page }) => {
+    const queried: string[] = [];
+    await mockTonApi(page, {
+      onRequest: (url) => {
+        const address = new URL(url).searchParams.get('address');
+        if (address) queried.push(address);
+      },
+    });
+    await createToPasscode(page);
+    await finishCreate(page);
+    await page.getByRole('button', { name: 'Receive' }).click();
+    const displayed = await page.getByTestId('address-TON').textContent();
+    expect(displayed).toMatch(/^0Q/);
+    expect(queried.length).toBeGreaterThan(0);
+    for (const address of queried) {
+      expect(address).toBe(displayed);
+      expect(address).not.toMatch(/^0:/);
+    }
   });
 
   test('IndexedDB holds only the sealed envelope after create', async ({ page }) => {
@@ -336,8 +362,18 @@ test.describe('onboarding and unlock', () => {
     await expect(page.getByTestId('address-EVM')).toHaveCount(0);
   });
 
-  test('activity tab lists transfers and opens the detail view', async ({ page }) => {
-    await mockTonApi(page, { activity: ACTIVITY_ITEMS });
+  test('activity tab lists transfers, labels bounced refunds and opens the detail view', async ({
+    page,
+  }) => {
+    const bounceItem = {
+      ...(ACTIVITY_ITEMS[0] ?? {}),
+      id: 'e2e-bounce',
+      direction: 'out',
+      amountRaw: '49933333',
+      amount: '0.049933333',
+      isBounce: true,
+    };
+    await mockTonApi(page, { activity: [...ACTIVITY_ITEMS, bounceItem] });
     await createToPasscode(page);
     await finishCreate(page);
     await page.getByRole('tab', { name: 'Activity' }).click();
@@ -347,6 +383,8 @@ test.describe('onboarding and unlock', () => {
     const dialog = page.getByRole('dialog', { name: 'Transaction' });
     await expect(dialog).toContainText('hello [link removed]');
     await expect(dialog.locator('a')).toHaveAttribute('href', /testnet\.tonviewer\.com/);
+    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByTestId('activity-e2e-bounce')).toContainText('Bounced');
   });
 
   test('portfolio failure shows Offline with Retry, never a false $0.00', async ({ page }) => {
