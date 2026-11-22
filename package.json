@@ -14,9 +14,11 @@
     "license-check": "node scripts/license-check.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md}\"",
-    "verify": "pnpm lint && pnpm type-check && pnpm test && pnpm -r --if-present build && pnpm format:check && pnpm audit --audit-level=high && pnpm license-check && pnpm e2e:install && pnpm test:e2e",
+    "verify": "pnpm build:libs && pnpm lint && pnpm type-check && pnpm test && pnpm test:esm && pnpm -r --if-present build && pnpm format:check && pnpm audit --audit-level=high && pnpm license-check && pnpm e2e:install && pnpm test:e2e",
     "ci": "pnpm verify",
-    "e2e:install": "pnpm --filter @onezerowallet/miniapp exec playwright install chromium webkit"
+    "e2e:install": "pnpm --filter @onezerowallet/miniapp exec playwright install chromium webkit",
+    "test:esm": "node scripts/esm-smoke.mjs",
+    "build:libs": "pnpm --filter @onezerowallet/chain-ton build && pnpm --filter @onezerowallet/api build"
   },
   "engines": {
     "node": ">=22.22.2 <23",

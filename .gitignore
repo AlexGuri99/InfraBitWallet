@@ -9,3 +9,4 @@ playwright-report/
 test-results/
 .vercel/
 .e2e/
+apps/miniapp/.esm-smoke/

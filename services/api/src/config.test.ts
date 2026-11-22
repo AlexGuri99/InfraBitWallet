@@ -4,7 +4,7 @@ import {
   providerBaseUrl,
   providerRequestHeaders,
   type ServerConfig,
-} from './config';
+} from './config.js';
 
 describe('server config: TON provider keys', () => {
   it('defaults to testnet + toncenter with no key (public rate limits)', () => {

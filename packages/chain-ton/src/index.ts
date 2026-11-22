@@ -14,7 +14,7 @@ export type {
   TonActivityItem,
   TonReadProvider,
   TonAddressFormsLike,
-} from './types';
+} from './types.js';
 
 export {
   formatDecimal,
@@ -29,4 +29,4 @@ export {
   tonAddressForNetwork,
   isTestnetUserFriendlyAddress,
   isProbablyTonAddress,
-} from './format';
+} from './format.js';

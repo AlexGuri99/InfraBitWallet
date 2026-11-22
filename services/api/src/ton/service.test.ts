@@ -4,11 +4,11 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Address, beginCell } from '@ton/core';
-import { getTonActivity, getTonPortfolio } from './service';
-import { clearCache } from './cache';
-import { ProviderError, type FetchLike } from './http';
-import { normalizeTonAddress, readLimit, readTonNetwork } from './validation';
-import type { ServerConfig } from '../config';
+import { getTonActivity, getTonPortfolio } from './service.js';
+import { clearCache } from './cache.js';
+import { ProviderError, type FetchLike } from './http.js';
+import { normalizeTonAddress, readLimit, readTonNetwork } from './validation.js';
+import type { ServerConfig } from '../config.js';
 
 const ADDRESS = '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287';
 const OTHER = '0:1111111111111111111111111111111111111111111111111111111111111111';

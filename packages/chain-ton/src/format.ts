@@ -5,7 +5,7 @@
  * point is ever used for a token amount. USD values may be floating point because they are
  * display-only estimates.
  */
-import type { TonActivityItem } from './types';
+import type { TonActivityItem } from './types.js';
 
 const MAX_COMMENT_LENGTH = 200;
 

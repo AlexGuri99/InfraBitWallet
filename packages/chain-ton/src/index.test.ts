@@ -16,7 +16,7 @@ import {
   isTestnetUserFriendlyAddress,
   isProbablyTonAddress,
   type TonActivityItem,
-} from './index';
+} from './index.js';
 
 const FORMS = {
   raw: '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287',

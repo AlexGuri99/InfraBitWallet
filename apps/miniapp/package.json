@@ -5,15 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/ensure-root-dist.mjs",
+    "build": "pnpm run build:libs && tsc --noEmit && vite build && node scripts/ensure-root-dist.mjs",
     "preview": "vite preview",
     "lint": "eslint src/ api/",
-    "type-check": "tsc --noEmit && tsc -p api --noEmit",
-    "test": "vitest run",
+    "type-check": "pnpm run build:libs && tsc --noEmit && tsc -p api --noEmit",
+    "test": "pnpm run build:libs && vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "pnpm run build:libs && playwright test",
+    "build:libs": "pnpm --filter @onezerowallet/chain-ton build && pnpm --filter @onezerowallet/api build"
   },
   "dependencies": {
+    "@onezerowallet/api": "workspace:*",
     "@onezerowallet/chain-ton": "workspace:*",
     "@onezerowallet/core": "workspace:*",
     "@onezerowallet/crypto-vault": "workspace:*",

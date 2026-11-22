@@ -3,14 +3,14 @@
  *
  * Normalized, sanitized activity (comments stripped of URLs, zero-value dust removed).
  */
-import { loadServerConfig } from '../../../../services/api/src/config';
-import { getTonActivity } from '../../../../services/api/src/ton/service';
 import {
+  getTonActivity,
+  loadServerConfig,
   normalizeTonAddress,
+  ProviderError,
   readLimit,
   readTonNetwork,
-} from '../../../../services/api/src/ton/validation';
-import { ProviderError } from '../../../../services/api/src/ton/http';
+} from '@onezerowallet/api';
 
 interface ApiRequest {
   method?: string | undefined;
