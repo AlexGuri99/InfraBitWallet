@@ -18,6 +18,8 @@ export interface TonAssetBalance {
   balance: string;
   /** USD value when a price is known; null for unknown jettons. */
   usdValue: number | null;
+  /** The owner's jetton wallet contract (required to build a TEP-74 transfer). */
+  jettonWalletAddress?: string | undefined;
   isScam?: boolean;
 }
 

@@ -49,7 +49,7 @@ function fakeResponse() {
   };
 }
 
-async function invoke(name) {
+async function invoke(name, request, expectedError) {
   const file = resolve(outDir, 'ton', `${name}.js`);
   if (!existsSync(file)) throw new Error(`compiled handler missing: ${file}`);
   const module = await import(pathToFileURL(file).href);
@@ -57,15 +57,12 @@ async function invoke(name) {
   if (typeof handler !== 'function') throw new Error(`${name}: default export is not a function`);
 
   const res = fakeResponse();
-  await handler(
-    { method: 'GET', query: { address: 'not-a-ton-address', network: 'testnet' } },
-    res,
-  );
+  await handler(request, res);
   if (res.statusCode !== 400) {
     throw new Error(`${name}: expected 400, got ${String(res.statusCode)} body=${res.body}`);
   }
   const parsed = JSON.parse(res.body);
-  if (parsed.error !== 'invalid_address') {
+  if (parsed.error !== expectedError) {
     throw new Error(`${name}: unexpected error payload ${res.body}`);
   }
   const text = readFileSync(file, 'utf8');
@@ -80,8 +77,16 @@ try {
   run(['--filter', '@onezerowallet/chain-ton', 'build']);
   run(['--filter', '@onezerowallet/api', 'build']);
   run(['--filter', '@onezerowallet/miniapp', 'exec', 'tsc', '-p', 'api/tsconfig.smoke.json']);
-  await invoke('portfolio');
-  await invoke('activity');
+  const getInvalid = { method: 'GET', query: { address: 'not-a-ton-address', network: 'testnet' } };
+  const postInvalid = {
+    method: 'POST',
+    body: { boc: 'not-a-boc', network: 'testnet' },
+  };
+  await invoke('portfolio', getInvalid, 'invalid_address');
+  await invoke('activity', getInvalid, 'invalid_address');
+  await invoke('wallet-state', getInvalid, 'invalid_address');
+  await invoke('emulate', postInvalid, 'invalid_boc');
+  await invoke('broadcast', postInvalid, 'invalid_boc');
   console.log('esm-smoke: OK');
 } finally {
   rmSync(outDir, { recursive: true, force: true });

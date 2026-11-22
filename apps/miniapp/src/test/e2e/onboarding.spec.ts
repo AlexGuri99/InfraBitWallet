@@ -145,6 +145,45 @@ async function mockTonApi(
       });
       return;
     }
+    if (path.endsWith('/wallet-state')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          address: new URL(url).searchParams.get('address') ?? '',
+          network: 'testnet',
+          status: 'uninit',
+          seqno: 0,
+          balanceRaw: '1500000000',
+          source: 'toncenter',
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/emulate')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          estimatedFeeRaw: '1000000',
+          balanceChanges: [{ assetId: 'ton', symbol: 'TON', deltaRaw: '-101000000', decimals: 9 }],
+          warnings: [],
+          willBounce: false,
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/broadcast')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' },
+        }),
+      });
+      return;
+    }
     await route.fulfill({ status: 404, body: '{}' });
   });
 }
@@ -297,7 +336,7 @@ test.describe('onboarding and unlock', () => {
     await page.getByRole('tab', { name: 'Wallet' }).click();
 
     await page.getByRole('button', { name: 'Send' }).click();
-    await expect(page.getByRole('dialog', { name: 'Send' })).toContainText('P2');
+    await expect(page.getByRole('dialog', { name: 'Send TON' })).toBeVisible();
     await page.getByRole('button', { name: 'Close' }).click();
   });
 
@@ -396,6 +435,28 @@ test.describe('onboarding and unlock', () => {
     await expect(page.getByText('$0.00')).toHaveCount(0);
     await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page.getByTestId('hero-balance')).toHaveText('$2.25');
+  });
+
+  test('sends TON from the signed payload with an emulated preview', async ({ page }) => {
+    await mockTonApi(page);
+    await createToPasscode(page);
+    await finishCreate(page);
+
+    await page.getByRole('button', { name: 'Receive' }).click();
+    const ownAddress = (await page.getByTestId('address-TON').textContent()) ?? '';
+    await page.getByRole('button', { name: 'Close' }).click();
+
+    await page.getByRole('button', { name: 'Send' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Send TON' });
+    await dialog.getByLabel('Recipient').fill(ownAddress);
+    await dialog.getByLabel('Amount').fill('0.1');
+    await dialog.getByRole('button', { name: 'Review transfer' }).click();
+
+    await expect(page.getByText(/First send — deploys Wallet V5R1/)).toBeVisible();
+    await expect(page.getByText(/Fee:/)).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm & Send' }).click();
+    await expect(page.getByRole('heading', { name: 'Submitted' })).toBeVisible();
+    await expect(page.getByText(/testnet\.tonviewer\.com\/message/)).toBeVisible();
   });
 
   test('settings reveal requires re-auth and clears the phrase on leaving', async ({ page }) => {

@@ -19,7 +19,9 @@ export class ProviderError extends Error {
 export type FetchLike = (
   input: string,
   init?: {
+    method?: string | undefined;
     headers?: Record<string, string> | undefined;
+    body?: string | undefined;
     signal?: AbortSignal | undefined;
   },
 ) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>;
@@ -30,7 +32,9 @@ export async function fetchJson<T>(
   provider: ProviderName,
   url: string,
   options: {
+    method?: 'GET' | 'POST' | undefined;
     headers?: Record<string, string> | undefined;
+    body?: string | undefined;
     timeoutMs?: number | undefined;
     fetchImpl?: FetchLike | undefined;
     signal?: AbortSignal | undefined;
@@ -46,10 +50,13 @@ export async function fetchJson<T>(
   };
   options.signal?.addEventListener('abort', onAbort);
   try {
-    const response = await doFetch(url, {
+    const init: NonNullable<Parameters<FetchLike>[1]> = {
       headers: options.headers,
       signal: controller.signal,
-    });
+    };
+    if (options.method !== undefined) init.method = options.method;
+    if (options.body !== undefined) init.body = options.body;
+    const response = await doFetch(url, init);
     if (!response.ok) throw new ProviderError(provider, response.status);
     return (await response.json()) as T;
   } catch (error) {

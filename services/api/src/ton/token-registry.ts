@@ -34,6 +34,7 @@ export function jettonAsset(
   master: string,
   balanceRaw: string,
   meta: TonApiJettonMeta | null,
+  jettonWalletAddress?: string,
 ): TonAssetBalance {
   const symbol = meta?.symbol ?? 'JETTON';
   const decimals = meta?.decimals ?? 9;
@@ -48,5 +49,6 @@ export function jettonAsset(
     // Jetton USD prices are not part of the v1 registry; never guess "$1" for USDT.
     usdValue: null,
     isScam: meta?.isScam ?? false,
+    jettonWalletAddress,
   };
 }

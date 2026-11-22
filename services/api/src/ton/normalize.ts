@@ -85,7 +85,7 @@ export function buildPortfolio(args: {
   network: TonNetwork;
   status: TonPortfolio['status'];
   balanceRaw: string;
-  jettonWallets: Array<{ jetton: string; balanceRaw: string }>;
+  jettonWallets: Array<{ address: string; jetton: string; balanceRaw: string }>;
   metadata: Record<string, TonApiJettonMeta | null>;
   price: TonApiPrice;
   updatedAt: number;
@@ -94,7 +94,12 @@ export function buildPortfolio(args: {
   const assets: TonAssetBalance[] = [
     native,
     ...args.jettonWallets.map((wallet) =>
-      jettonAsset(wallet.jetton, wallet.balanceRaw, args.metadata[wallet.jetton] ?? null),
+      jettonAsset(
+        wallet.jetton,
+        wallet.balanceRaw,
+        args.metadata[wallet.jetton] ?? null,
+        wallet.address,
+      ),
     ),
   ];
   const totalUsd =

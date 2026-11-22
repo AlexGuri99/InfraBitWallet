@@ -4,13 +4,13 @@
  * ton-native-only filtering.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import type { TonActivityItem, TonPortfolio } from '@onezerowallet/chain-ton';
 import { TelegramProvider } from '../telegram/TelegramProvider';
 import { HomeScreen, UI_TON_NETWORK } from '../ui/home';
-import { TonApiError, type TonReadApi } from '../ton/api';
+import { TonApiError, type TonReadApi, type TonWriteApi } from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
@@ -102,10 +102,13 @@ const ACTIVITY: TonActivityItem[] = [
 function apiWith(
   value: TonPortfolio | (() => Promise<TonPortfolio>),
   activity: TonActivityItem[] = [],
-): TonReadApi {
+): TonReadApi & TonWriteApi {
   return {
     getPortfolio: () => (typeof value === 'function' ? value() : Promise.resolve(value)),
     getActivity: () => Promise.resolve(activity),
+    getWalletState: () => Promise.reject(new Error('not used')),
+    emulate: () => Promise.reject(new Error('not used')),
+    broadcast: () => Promise.reject(new Error('not used')),
   };
 }
 
@@ -121,7 +124,7 @@ async function unlockedManager(
   return manager;
 }
 
-function renderHome(manager: VaultManager, api: TonReadApi) {
+function renderHome(manager: VaultManager, api: TonReadApi & TonWriteApi) {
   return render(
     <TelegramProvider>
       <HomeScreen manager={manager} onLock={() => {}} onSettings={() => {}} api={api} />
@@ -144,7 +147,7 @@ describe('Home: live TON data', () => {
   it('queries the exact testnet address it displays (same 256-bit hash)', async () => {
     const user = userEvent.setup();
     const requested: string[] = [];
-    const api: TonReadApi = {
+    const api: TonReadApi & TonWriteApi = {
       getPortfolio: (address) => {
         requested.push(address);
         return Promise.resolve(portfolio());
@@ -153,6 +156,9 @@ describe('Home: live TON data', () => {
         requested.push(address);
         return Promise.resolve([]);
       },
+      getWalletState: () => Promise.reject(new Error('not used')),
+      emulate: () => Promise.reject(new Error('not used')),
+      broadcast: () => Promise.reject(new Error('not used')),
     };
     renderHome(await unlockedManager(), api);
     await waitFor(() => {
@@ -254,13 +260,16 @@ describe('Home: live TON data', () => {
   it('shows an offline banner with Retry and no $0.00 on error', async () => {
     const user = userEvent.setup();
     let calls = 0;
-    const api: TonReadApi = {
+    const api: TonReadApi & TonWriteApi = {
       getPortfolio: () => {
         calls += 1;
         if (calls === 1) return Promise.reject(new TonApiError('offline'));
         return Promise.resolve(portfolio());
       },
       getActivity: () => Promise.resolve([]),
+      getWalletState: () => Promise.reject(new Error('not used')),
+      emulate: () => Promise.reject(new Error('not used')),
+      broadcast: () => Promise.reject(new Error('not used')),
     };
     renderHome(await unlockedManager(), api);
     expect(await screen.findByRole('alert')).toHaveTextContent(/Offline/);
@@ -325,6 +334,62 @@ describe('Home: live TON data', () => {
     expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
     expect(screen.queryByTestId('address-TRON')).not.toBeInTheDocument();
     expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();
+  });
+
+  it('runs the send flow from signed payload + emulation, rejecting mainnet prefixes', async () => {
+    const user = userEvent.setup();
+    const manager = await unlockedManager();
+    const info = manager.getSession()?.getPublicInfo(0);
+    if (!info) throw new Error('no info');
+    const api: TonReadApi & TonWriteApi = {
+      getPortfolio: () => Promise.resolve(portfolio()),
+      getActivity: () => Promise.resolve([]),
+      getWalletState: () =>
+        Promise.resolve({
+          address: info.ton.addressTestnetNonBounceable,
+          network: 'testnet',
+          status: 'uninit',
+          seqno: 0,
+          balanceRaw: '1500000000',
+          source: 'toncenter',
+        }),
+      emulate: () =>
+        Promise.resolve({
+          ok: true,
+          estimatedFeeRaw: '1000000',
+          balanceChanges: [{ assetId: 'ton', symbol: 'TON', deltaRaw: '-101000000', decimals: 9 }],
+          warnings: [],
+          willBounce: false,
+        }),
+      broadcast: () => Promise.resolve({ messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' } }),
+    };
+    renderHome(manager, api);
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send TON' });
+
+    await user.type(
+      within(dialog).getByLabelText('Recipient'),
+      `EQ${info.ton.addressTestnetNonBounceable.slice(2)}`,
+    );
+    await user.type(within(dialog).getByLabelText('Amount'), '0.1');
+    await user.click(within(dialog).getByRole('button', { name: 'Review transfer' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/Mainnet-only/);
+
+    await user.clear(within(dialog).getByLabelText('Recipient'));
+    await user.type(
+      within(dialog).getByLabelText('Recipient'),
+      info.ton.addressTestnetNonBounceable,
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Review transfer' }));
+    expect(await screen.findByText(/First send — deploys Wallet V5R1/)).toBeInTheDocument();
+    expect(screen.getByText(/Fee:/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Confirm & Send' }));
+    expect(await screen.findByText('Submitted')).toBeInTheDocument();
+    expect(screen.getByText(/testnet\.tonviewer\.com\/message/)).toBeInTheDocument();
   });
 
   it('wires lock and settings buttons', async () => {
