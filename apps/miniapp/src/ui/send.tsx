@@ -382,7 +382,7 @@ export function SendScreen({
                 {t('send.asset')}
               </label>
               <div className="flex items-center gap-3 rounded-2xl border border-hairline bg-surface px-3 py-2">
-                <TokenAvatar symbol={asset?.symbol ?? 'TON'} size={34} />
+                <TokenAvatar symbol={asset?.symbol ?? 'TON'} size={40} />
                 <select
                   id="send-asset"
                   className="min-h-10 flex-1 bg-transparent text-[15px] font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"

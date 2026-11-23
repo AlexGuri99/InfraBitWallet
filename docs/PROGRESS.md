@@ -201,6 +201,18 @@ live P2a/P2b TON read/send behaviour.
 
 ---
 
+### P2d: Branded coin icons (2026-11-23)
+
+| Area                                                                              | Status                                                | Evidence                                             |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| `react-web3-icons` (MIT, `sideEffects: false`) named imports for TON/USDT/TRX/ETH | DONE                                                  | `ui/coin-icons.tsx`, `package.json`                  |
+| 40px circular coin avatars (56px on Coin Detail), crisp in both themes            | DONE                                                  | `ui/common.tsx` `TokenAvatar`, screen rows           |
+| Unknown jetton monogram (deterministic tinted background + 2 letters, no fetch)   | DONE                                                  | `ui/coin-icons.tsx`, `coin-icons.test.tsx`           |
+| Inline SVG only — no `<img>`, no remote logo host, no `data:` fonts               | DONE                                                  | design e2e (zero image requests, no external origin) |
+| Bundle delta                                                                      | +3.94 kB raw / +1.86 kB gzip (1,566.99 → 1,570.93 kB) | build log                                            |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started
