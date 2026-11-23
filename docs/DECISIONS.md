@@ -506,3 +506,22 @@ the phrase holder and return to safety. The wallet shell owns only public chain 
 shells: they render the designed layout with disabled or toast-only CTAs and never build, sign or
 broadcast a payload. Live actions remain Deposit (address/QR), Send (P2b), Coin Detail and
 Transaction Detail.
+
+---
+
+## Decision: inline branded coin icons with tree-shaken static imports (P2d)
+
+**Library.** `react-web3-icons` (v5.1.0, MIT, `sideEffects: false`, no dependencies) provides the
+branded TON/USDT/TRX/ETH marks. `ui/coin-icons.tsx` imports exactly four named components and
+nothing else; with Vite/Rollup tree-shaking the production bundle grew by **+3.94 kB raw**
+(+1.86 kB gzip), so the whole icon catalogue stays out of the app. The package is added as a
+production dependency and recorded in `THIRD_PARTY_LICENSES.md`; MIT was already allow-listed.
+
+**Rendering.** Icons are inline SVG inside a circular wrapper (40×40 across rows and selectors,
+56×56 on Coin Detail). No `<img>`, no icon font and no remote CDN is involved, so the strict
+production CSP is unchanged.
+
+**Dynamic jettons.** Symbols outside the known map render a two-letter monogram on a
+deterministic tinted background selected from semantic tokens (hash of the symbol). The app never
+fetches a third-party jetton logo URL, which avoids a phishing/tracking surface and keeps
+`connect-src`/`img-src` tight.

@@ -233,6 +233,9 @@ importers:
       react-dom:
         specifier: ^19.0.0
         version: 19.3.1(react@19.3.1)
+      react-web3-icons:
+        specifier: ^5.1.0
+        version: 5.1.0(react@19.3.1)
       tailwindcss:
         specifier: ^3.4.0
         version: 3.4.19
@@ -2083,6 +2086,11 @@ packages:
   react-refresh@0.17.0:
     resolution: {integrity: sha512-z6F7K9bV85EfseRCp2bzrpyQ0Gkw1uLoCel9XBVWPg/TjRj94SkJzUTGfOa4bs7iJvBWtQG0Wq7wnI0syw3EBQ==}
     engines: {node: '>=0.10.0'}
+
+  react-web3-icons@5.1.0:
+    resolution: {integrity: sha512-M7D5uPJLc2q6u8b6HK/2lxqJdENZ2irhudd4mO08XqwEFmsr6opRTx77Z+py2/Oer+QjyCfj++1Kh4XNGVewug==}
+    peerDependencies:
+      react: '>=18'
 
   react@19.3.1:
     resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
@@ -4033,6 +4041,10 @@ snapshots:
   react-is@17.0.2: {}
 
   react-refresh@0.17.0: {}
+
+  react-web3-icons@5.1.0(react@19.3.1):
+    dependencies:
+      react: 19.3.1
 
   react@19.3.1: {}
 

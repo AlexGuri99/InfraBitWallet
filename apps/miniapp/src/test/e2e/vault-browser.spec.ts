@@ -76,7 +76,15 @@ async function applyProductionCsp(page: Page, csp: string): Promise<string[]> {
       });
       return;
     }
-    const response = await route.fetch();
+    let response;
+    try {
+      response = await route.fetch();
+    } catch {
+      // A request can be aborted when a test finishes while assets are still loading.
+      // Ignore it: the assertions in each test only depend on requests that complete.
+      await route.abort().catch(() => undefined);
+      return;
+    }
     await route.fulfill({
       response,
       headers: { ...response.headers(), 'content-security-policy': csp },
