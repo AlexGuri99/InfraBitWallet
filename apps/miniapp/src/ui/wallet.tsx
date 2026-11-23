@@ -1,17 +1,36 @@
 /**
- * Unlock, home and settings screens.
+ * Unlock screen and Settings tab.
  *
  * All passcodes and phrases are read from uncontrolled inputs at submit time; the phrase only
- * exists in the module holder and is written into the DOM on demand. Settings actions that
- * touch secrets require a fresh passcode re-authentication.
+ * exists in the module holder and is written into the DOM on demand. Settings actions that touch
+ * secrets require a fresh passcode re-authentication.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { setInactivityTimeout } from '@onezerowallet/crypto-vault';
-import type { VaultManager } from '@onezerowallet/crypto-vault';
+import type { PublicAccountInfo, VaultManager } from '@onezerowallet/crypto-vault';
+import { formatUsd } from '@onezerowallet/chain-ton';
 import type { BiometryApi } from '../adapters/biometry';
 import { t } from '../i18n';
 import { secretHolder } from '../vault/secret-holder';
-import { Button, ErrorText, Field, Notice, ScreenShell } from './common';
+import { Button, Card, ErrorText, Field, Notice, PhoneFrame, Sheet } from './common';
+import { usePreferences } from './preferences';
+import { useToast } from './toast';
+import {
+  ChevronRightIcon,
+  ClockIcon,
+  CopyIcon,
+  EyeIcon,
+  FingerprintIcon,
+  GridIcon,
+  KeyIcon,
+  LayersIcon,
+  LockIcon,
+  MoonIcon,
+  SunIcon,
+  TrashIcon,
+  BellIcon,
+  GlobeIcon,
+} from './icons';
 
 const AUTO_LOCK_KEY = 'ozw.autoLockMs';
 
@@ -128,52 +147,90 @@ export function UnlockScreen({
   };
 
   return (
-    <ScreenShell title={t('unlock.title')}>
-      <Field
-        id="unlock-passcode"
-        ref={passRef}
-        label={t('unlock.passcode')}
-        type="password"
-        inputMode="numeric"
-        pattern="[0-9]*"
-        maxLength={4}
-        autoComplete="current-password"
-        autoFocus
-      />
-      {retryAfterMs > 0 ? (
-        <p role="status" aria-live="polite" className="text-sm">
-          {rateLimitedText(retryAfterMs)}
-        </p>
-      ) : null}
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Button onClick={() => void unlock()} disabled={busy || retryAfterMs > 0}>
-        {busy ? t('common.working') : t('unlock.submit')}
-      </Button>
-      {bioAvailable && bioEnabled ? (
-        <Button variant="secondary" onClick={() => void unlockBiometric()} disabled={busy}>
-          {t('unlock.biometric')}
-        </Button>
-      ) : null}
-      <Notice>{t('home.notice')}</Notice>
-    </ScreenShell>
+    <PhoneFrame>
+      <main className="flex flex-1 flex-col justify-center gap-5 px-6 pb-10">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-hero shadow-hero">
+            <span className="text-[26px] font-extrabold tracking-[-0.03em] text-hero-ink">10</span>
+          </span>
+          <div>
+            <h1 className="text-[22px] font-extrabold tracking-[-0.02em] text-ink">
+              {t('unlock.title')}
+            </h1>
+            <p className="mt-1 text-[12.5px] text-ink-2">{t('app.name')}</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <Field
+            id="unlock-passcode"
+            ref={passRef}
+            label={t('unlock.passcode')}
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="current-password"
+            autoFocus
+            className="text-center font-mono text-[26px] tracking-[0.5em]"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void unlock();
+            }}
+          />
+          {retryAfterMs > 0 ? (
+            <p role="status" aria-live="polite" className="px-1 text-[12.5px] text-ink-2">
+              {rateLimitedText(retryAfterMs)}
+            </p>
+          ) : null}
+          {error ? <ErrorText>{error}</ErrorText> : null}
+          <Button onClick={() => void unlock()} disabled={busy || retryAfterMs > 0}>
+            {busy ? t('common.working') : t('unlock.submit')}
+          </Button>
+          {bioAvailable && bioEnabled ? (
+            <Button variant="secondary" onClick={() => void unlockBiometric()} disabled={busy}>
+              <FingerprintIcon size={17} />
+              {t('unlock.biometric')}
+            </Button>
+          ) : null}
+        </div>
+
+        <p className="text-center text-[11.5px] font-medium text-ink-muted">{t('home.notice')}</p>
+      </main>
+    </PhoneFrame>
   );
 }
 
-export function SettingsScreen({
-  manager,
-  biometry,
-  onBack,
-  onReveal,
-  onTestBackup,
-  onWiped,
-}: {
+type SettingsSheet =
+  'change-pin' | 'biometrics' | 'auto-lock' | 'reveal' | 'backup' | 'wipe' | 'appearance' | null;
+
+export interface SettingsTabProps {
   manager: VaultManager;
   biometry: BiometryApi;
-  onBack: () => void;
+  info: PublicAccountInfo | null;
+  tonAddress: string;
+  balanceUsd: number | null;
+  onLock: () => void;
   onReveal: () => void;
   onTestBackup: () => void;
   onWiped: () => void;
-}) {
+}
+
+export function SettingsTab({
+  manager,
+  biometry,
+  info,
+  tonAddress,
+  balanceUsd,
+  onLock,
+  onReveal,
+  onTestBackup,
+  onWiped,
+}: SettingsTabProps) {
+  const { theme, setTheme, guard } = usePreferences();
+  const toast = useToast();
+  const [sheet, setSheet] = useState<SettingsSheet>(null);
+  const [copied, setCopied] = useState(false);
+
   const reauthRef = useRef<HTMLInputElement>(null);
   const oldRef = useRef<HTMLInputElement>(null);
   const newRef = useRef<HTMLInputElement>(null);
@@ -197,6 +254,11 @@ export function SettingsScreen({
       setBioEnabled(await manager.hasBiometric());
     })();
   }, [biometry, manager]);
+
+  const closeSheet = (): void => {
+    setSheet(null);
+    setError(null);
+  };
 
   const reauth = async (): Promise<boolean> => {
     const session = manager.getSession();
@@ -225,6 +287,7 @@ export function SettingsScreen({
       return;
     }
     secretHolder.set(revealed.mnemonic);
+    setSheet(null);
     onReveal();
   };
 
@@ -235,6 +298,7 @@ export function SettingsScreen({
     const revealed = session.revealMnemonic();
     if (!revealed.ok) return;
     secretHolder.set(revealed.mnemonic);
+    setSheet(null);
     onTestBackup();
   };
 
@@ -268,6 +332,7 @@ export function SettingsScreen({
       if (!stored) setError(t('settings.error'));
     }
     setMessage(t('settings.changed'));
+    closeSheet();
   };
 
   const toggleBiometrics = async (enable: boolean): Promise<void> => {
@@ -299,6 +364,7 @@ export function SettingsScreen({
       await biometry.updateToken(null);
       setBioEnabled(false);
     }
+    closeSheet();
   };
 
   const wipe = async (): Promise<void> => {
@@ -311,6 +377,20 @@ export function SettingsScreen({
     onWiped();
   };
 
+  const copyAddress = async (): Promise<void> => {
+    if (!tonAddress) return;
+    try {
+      await navigator.clipboard.writeText(tonAddress);
+      setCopied(true);
+      toast.show(t('home.copied'));
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 1500);
+    } catch {
+      toast.show(t('home.copyFailed'));
+    }
+  };
+
   const autoLockOptions = useMemo(
     () => [
       { value: 60_000, label: t('settings.autoLock.min1') },
@@ -320,75 +400,324 @@ export function SettingsScreen({
     [],
   );
 
+  const comingSoon = (label: string): void => {
+    toast.show(`${label} — coming soon`);
+  };
+
   return (
-    <ScreenShell title={t('settings.title')} onBack={onBack}>
-      <section className="flex flex-col gap-2" aria-labelledby="settings-backup">
-        <h2 id="settings-backup" className="font-semibold">
-          {t('settings.reveal')}
-        </h2>
-        <Field
-          id="settings-reauth"
-          ref={reauthRef}
-          label={t('settings.requiresPasscode')}
-          type="password"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={4}
-          autoComplete="current-password"
-        />
-        <Button onClick={() => void reveal()}>{t('settings.reveal')}</Button>
-        <Button variant="secondary" onClick={() => void testBackup()}>
-          {t('settings.testBackup')}
-        </Button>
-      </section>
+    <PhoneFrame>
+      <main className="flex flex-1 flex-col gap-4 px-4 pb-[96px] pt-4">
+        <h1 className="text-[22px] font-extrabold tracking-[-0.02em] text-ink">Settings</h1>
 
-      <section className="flex flex-col gap-2" aria-labelledby="settings-passcode">
-        <h2 id="settings-passcode" className="font-semibold">
-          {t('settings.changePasscode')}
-        </h2>
-        <Field
-          id="old-passcode"
-          ref={oldRef}
-          label={t('settings.oldPasscode')}
-          type="password"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={4}
-          autoComplete="current-password"
-        />
-        <Field
-          id="new-passcode"
-          ref={newRef}
-          label={t('settings.newPasscode')}
-          type="password"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={4}
-          autoComplete="new-password"
-        />
-        <Field
-          id="confirm-passcode"
-          ref={confirmRef}
-          label={t('settings.confirmPasscode')}
-          type="password"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={4}
-          autoComplete="new-password"
-        />
-        <Button onClick={() => void changePasscode()}>{t('settings.save')}</Button>
-      </section>
+        <section className="flex flex-col items-center gap-2 rounded-[24px] bg-surface px-5 py-5 text-center shadow-card">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-hero text-[20px] font-extrabold tracking-[-0.02em] text-hero-ink shadow-hero">
+            OZ
+          </span>
+          <p className="text-[17px] font-bold tracking-[-0.01em] text-ink">{t('app.name')}</p>
+          <p className="tabular text-[13px] font-medium text-ink-2">
+            {guard(balanceUsd === null ? '—' : formatUsd(balanceUsd))}
+          </p>
+          <button
+            type="button"
+            onClick={() => void copyAddress()}
+            aria-label={t('home.copyTon')}
+            className="pressable flex items-center gap-1.5 rounded-full bg-surface-secondary px-3 py-1.5 font-mono text-[11.5px] text-ink-2"
+          >
+            {info ? `${tonAddress.slice(0, 6)}…${tonAddress.slice(-4)}` : '—'}
+            <CopyIcon size={12} />
+            {copied ? t('home.copied') : null}
+          </button>
+        </section>
 
-      {bioAvailable ? (
-        <section className="flex flex-col gap-2" aria-labelledby="settings-biometrics">
-          <h2 id="settings-biometrics" className="font-semibold">
-            {t('settings.biometrics')}:{' '}
-            {bioEnabled ? t('settings.biometrics.on') : t('settings.biometrics.off')}
-          </h2>
-          <p className="text-xs opacity-70">{t('settings.biometrics.explain')}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              comingSoon('Add / Import Wallet');
+            }}
+            className="pressable flex items-center gap-2 rounded-[20px] bg-surface px-3.5 py-3 text-left shadow-card"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface-secondary text-[16px] font-bold text-ink">
+              +
+            </span>
+            <span className="text-[12.5px] font-semibold text-ink">Add / Import</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              comingSoon('Portfolio');
+            }}
+            className="pressable flex items-center gap-2 rounded-[20px] bg-surface px-3.5 py-3 text-left shadow-card"
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface-secondary text-ink">
+              <GridIcon size={16} />
+            </span>
+            <span className="text-[12.5px] font-semibold text-ink">Portfolio</span>
+          </button>
+        </div>
+
+        <SettingsGroup title="Preferences">
+          <SettingsRow
+            icon={
+              <span className="text-hero-ink">
+                {theme === 'light' ? <SunIcon size={15} /> : <MoonIcon size={15} />}
+              </span>
+            }
+            iconTone="bg-hero"
+            title="Appearance"
+            value={theme === 'light' ? 'Light' : 'Dark'}
+            onClick={() => {
+              setSheet('appearance');
+            }}
+          />
+          <SettingsRow
+            icon={<BellIcon size={15} />}
+            iconTone="bg-swap-bg text-swap"
+            title="Sounds"
+            badge="Coming soon"
+            disabled
+          />
+          <SettingsRow
+            icon={<GlobeIcon size={15} />}
+            iconTone="bg-positive-bg text-positive"
+            title="Language"
+            value="English"
+            badge="Coming soon"
+            disabled
+          />
+        </SettingsGroup>
+
+        <SettingsGroup title="Security">
+          <SettingsRow
+            icon={<KeyIcon size={15} />}
+            iconTone="bg-positive-bg text-positive"
+            title="Change PIN"
+            onClick={() => {
+              setSheet('change-pin');
+            }}
+          />
+          <SettingsRow
+            icon={<FingerprintIcon size={15} />}
+            iconTone="bg-swap-bg text-swap"
+            title="Biometrics"
+            value={bioAvailable ? (bioEnabled ? 'On' : 'Off') : 'Unavailable'}
+            onClick={() => {
+              setSheet('biometrics');
+            }}
+          />
+          <SettingsRow
+            icon={<ClockIcon size={15} />}
+            iconTone="bg-surface-elevated text-ink-2"
+            title="Auto-Lock"
+            value={
+              autoLockOptions.find((option) => option.value === autoLockMs)?.label ?? '5 minutes'
+            }
+            onClick={() => {
+              setSheet('auto-lock');
+            }}
+          />
+          <SettingsRow
+            icon={<EyeIcon size={15} />}
+            iconTone="bg-surface-elevated text-ink-2"
+            title="Reveal Phrase"
+            onClick={() => {
+              setError(null);
+              setSheet('reveal');
+            }}
+          />
+          <SettingsRow
+            icon={<LayersIcon size={15} />}
+            iconTone="bg-surface-elevated text-ink-2"
+            title="Test Backup"
+            onClick={() => {
+              setError(null);
+              setSheet('backup');
+            }}
+          />
+          <SettingsRow
+            icon={<LockIcon size={15} />}
+            iconTone="bg-surface-elevated text-ink-2"
+            title="Lock Wallet"
+            onClick={onLock}
+          />
+          <SettingsRow
+            icon={<TrashIcon size={15} />}
+            iconTone="bg-surface-secondary text-negative"
+            title="Wipe Wallet"
+            danger
+            onClick={() => {
+              setError(null);
+              setSheet('wipe');
+            }}
+          />
+        </SettingsGroup>
+
+        <SettingsGroup title="More">
+          <SettingsRow
+            icon={<LayersIcon size={15} />}
+            iconTone="bg-swap-bg text-swap"
+            title="Assets & Activity"
+            badge="Coming soon"
+            disabled
+          />
+          <SettingsRow
+            icon={<GridIcon size={15} />}
+            iconTone="bg-positive-bg text-positive"
+            title="Subwallets"
+            badge="Coming soon"
+            disabled
+          />
+        </SettingsGroup>
+
+        {message ? (
+          <p role="status" className="px-1 text-[12.5px] font-medium text-positive">
+            {message}
+          </p>
+        ) : null}
+        <p className="px-2 pb-2 text-center text-[11.5px] text-ink-muted">{t('home.notice')}</p>
+      </main>
+
+      {sheet === 'appearance' ? (
+        <Sheet title="Appearance" onClose={closeSheet}>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                { id: 'light', label: 'Light', icon: <SunIcon size={18} /> },
+                { id: 'dark', label: 'Dark', icon: <MoonIcon size={18} /> },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                aria-pressed={theme === option.id}
+                onClick={() => {
+                  setTheme(option.id);
+                }}
+                className={`pressable flex flex-col items-center gap-2 rounded-[20px] px-4 py-5 text-[13px] font-semibold ${
+                  theme === option.id
+                    ? 'bg-accent-primary text-accent-ink'
+                    : 'bg-surface-secondary text-ink'
+                }`}
+              >
+                {option.icon}
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p className="px-1 text-[12px] text-ink-muted">
+            The theme is a device preference, stored locally and never synced.
+          </p>
+        </Sheet>
+      ) : null}
+
+      {sheet === 'change-pin' ? (
+        <Sheet title="Change PIN" onClose={closeSheet}>
           <Field
-            id="bio-passcode"
-            ref={bioPassRef}
+            id="old-passcode"
+            ref={oldRef}
+            label={t('settings.oldPasscode')}
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="current-password"
+          />
+          <Field
+            id="new-passcode"
+            ref={newRef}
+            label={t('settings.newPasscode')}
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="new-password"
+          />
+          <Field
+            id="confirm-passcode"
+            ref={confirmRef}
+            label={t('settings.confirmPasscode')}
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="new-password"
+          />
+          {error ? <ErrorText>{error}</ErrorText> : null}
+          <Button onClick={() => void changePasscode()}>{t('settings.save')}</Button>
+        </Sheet>
+      ) : null}
+
+      {sheet === 'biometrics' ? (
+        <Sheet title="Biometrics" onClose={closeSheet}>
+          <p className="text-[13px] leading-relaxed text-ink-2">
+            {t('settings.biometrics.explain')}
+          </p>
+          {bioAvailable ? (
+            <>
+              <Field
+                id="bio-passcode"
+                ref={bioPassRef}
+                label={t('settings.requiresPasscode')}
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                autoComplete="current-password"
+              />
+              {error ? <ErrorText>{error}</ErrorText> : null}
+              {bioEnabled ? (
+                <Button variant="secondary" onClick={() => void toggleBiometrics(false)}>
+                  {t('settings.biometrics.disable')}
+                </Button>
+              ) : (
+                <Button variant="secondary" onClick={() => void toggleBiometrics(true)}>
+                  {t('settings.biometrics.enable')}
+                </Button>
+              )}
+            </>
+          ) : (
+            <Notice tone="warning">Biometric unlock is unavailable on this device.</Notice>
+          )}
+        </Sheet>
+      ) : null}
+
+      {sheet === 'auto-lock' ? (
+        <Sheet title={t('settings.autoLock')} onClose={closeSheet}>
+          {autoLockOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={option.value === autoLockMs}
+              onClick={() => {
+                setAutoLockMs(option.value);
+                setInactivityTimeout(option.value);
+                try {
+                  localStorage.setItem(AUTO_LOCK_KEY, String(option.value));
+                } catch {
+                  // Preferences are non-secret; ignore storage failures.
+                }
+                toast.show(`Auto-lock: ${option.label}`);
+                closeSheet();
+              }}
+              className={`pressable flex items-center justify-between rounded-2xl px-4 py-3 text-[14px] font-semibold ${
+                option.value === autoLockMs
+                  ? 'bg-accent-primary text-accent-ink'
+                  : 'bg-surface-secondary text-ink'
+              }`}
+            >
+              {option.label}
+              {option.value === autoLockMs ? <span aria-hidden="true">✓</span> : null}
+            </button>
+          ))}
+        </Sheet>
+      ) : null}
+
+      {sheet === 'reveal' ? (
+        <Sheet title={t('settings.reveal')} onClose={closeSheet}>
+          <p className="text-[13px] leading-relaxed text-ink-2">{t('phrase.settings.warning')}</p>
+          <Field
+            id="settings-reauth"
+            ref={reauthRef}
             label={t('settings.requiresPasscode')}
             type="password"
             inputMode="numeric"
@@ -396,68 +725,100 @@ export function SettingsScreen({
             maxLength={4}
             autoComplete="current-password"
           />
-          {bioEnabled ? (
-            <Button variant="secondary" onClick={() => void toggleBiometrics(false)}>
-              {t('settings.biometrics.disable')}
-            </Button>
-          ) : (
-            <Button variant="secondary" onClick={() => void toggleBiometrics(true)}>
-              {t('settings.biometrics.enable')}
-            </Button>
-          )}
-        </section>
+          {error ? <ErrorText>{error}</ErrorText> : null}
+          <Button onClick={() => void reveal()}>{t('settings.reveal')}</Button>
+        </Sheet>
       ) : null}
 
-      <section className="flex flex-col gap-2" aria-labelledby="settings-autolock">
-        <h2 id="settings-autolock" className="font-semibold">
-          {t('settings.autoLock')}
-        </h2>
-        <select
-          aria-label={t('settings.autoLock')}
-          className="min-h-11 rounded-lg border border-gray-400/60 bg-transparent px-3 py-2"
-          value={autoLockMs}
-          onChange={(event) => {
-            const next = Number.parseInt(event.target.value, 10);
-            setAutoLockMs(next);
-            setInactivityTimeout(next);
-            try {
-              localStorage.setItem(AUTO_LOCK_KEY, String(next));
-            } catch {
-              // Preferences are non-secret; ignore storage failures.
-            }
-          }}
-        >
-          {autoLockOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </section>
-
-      <section className="flex flex-col gap-2" aria-labelledby="settings-wipe">
-        <h2 id="settings-wipe" className="font-semibold">
-          {t('settings.wipe')}
-        </h2>
-        <p className="text-xs opacity-70">{t('settings.wipeConfirm')}</p>
-        <Field
-          id="wipe-confirm"
-          ref={wipeRef}
-          label={t('settings.wipeConfirm')}
-          autoComplete="off"
-        />
-        <Button variant="danger" onClick={() => void wipe()}>
-          {t('settings.wipeButton')}
-        </Button>
-      </section>
-
-      {message ? (
-        <p role="status" className="text-sm">
-          {message}
-        </p>
+      {sheet === 'backup' ? (
+        <Sheet title={t('settings.testBackup')} onClose={closeSheet}>
+          <p className="text-[13px] leading-relaxed text-ink-2">{t('verify.body')}</p>
+          <Field
+            id="settings-reauth"
+            ref={reauthRef}
+            label={t('settings.requiresPasscode')}
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={4}
+            autoComplete="current-password"
+          />
+          {error ? <ErrorText>{error}</ErrorText> : null}
+          <Button onClick={() => void testBackup()}>{t('settings.testBackup')}</Button>
+        </Sheet>
       ) : null}
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Notice>{t('home.notice')}</Notice>
-    </ScreenShell>
+
+      {sheet === 'wipe' ? (
+        <Sheet title={t('settings.wipe')} onClose={closeSheet}>
+          <Notice tone="warning">{t('settings.wipeConfirm')}</Notice>
+          <Field
+            id="wipe-confirm"
+            ref={wipeRef}
+            label={t('settings.wipeConfirm')}
+            autoComplete="off"
+          />
+          {error ? <ErrorText>{error}</ErrorText> : null}
+          <Button variant="danger" onClick={() => void wipe()}>
+            {t('settings.wipeButton')}
+          </Button>
+        </Sheet>
+      ) : null}
+    </PhoneFrame>
+  );
+}
+
+function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section aria-label={title}>
+      <h2 className="mb-2 px-1 text-[14px] font-bold tracking-[0.01em] text-ink">{title}</h2>
+      <Card>{children}</Card>
+    </section>
+  );
+}
+
+function SettingsRow({
+  icon,
+  iconTone,
+  title,
+  value,
+  badge,
+  disabled = false,
+  danger = false,
+  onClick,
+}: {
+  icon: ReactNode;
+  iconTone: string;
+  title: string;
+  value?: string;
+  badge?: string;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="pressable flex w-full items-center gap-3 px-4 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--accent-link)]"
+    >
+      <span
+        className={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[10px] ${iconTone}`}
+      >
+        {icon}
+      </span>
+      <span
+        className={`flex-1 text-[14.5px] font-semibold ${danger ? 'text-negative' : 'text-ink'}`}
+      >
+        {title}
+      </span>
+      {value ? <span className="text-[12.5px] text-ink-2">{value}</span> : null}
+      {badge ? (
+        <span className="rounded-full bg-surface-secondary px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
+          {badge}
+        </span>
+      ) : null}
+      {disabled ? null : <ChevronRightIcon size={15} className="text-ink-muted" />}
+    </button>
   );
 }

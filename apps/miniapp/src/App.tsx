@@ -1,12 +1,13 @@
 /**
- * App state machine: onboarding, unlock, home and settings.
+ * App state machine: onboarding, unlock, wallet shell and settings sub-flows.
  *
  * The UI only calls the vault API. It never reads keys, keeps no secret in React state, and
  * clears the module-level phrase holder whenever a flow ends, the wallet locks, or the app is
  * backgrounded.
  *
- * Create order: phrase -> verify -> passcode (the vault is sealed last, after the user has
- * proven the backup). Import order: phrase (type auto-detected) -> passcode.
+ * Create order: phrase -> passcode (the vault is sealed last, after an explicit backup
+ * acknowledgement; the 3-word check lives in Settings -> Test Backup).
+ * Import order: phrase (type auto-detected) -> passcode.
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -23,9 +24,13 @@ import { t } from './i18n';
 import { CreatePhraseScreen, PhraseScreen, VerifyScreen, WelcomeScreen } from './ui/onboarding';
 import { DisambiguateScreen, ImportPhraseScreen } from './ui/import';
 import { PasscodeScreen } from './ui/passcode';
-import { SettingsScreen, UnlockScreen } from './ui/wallet';
-import { HomeScreen } from './ui/home';
-import { Notice, ScreenShell } from './ui/common';
+import { UnlockScreen } from './ui/wallet';
+import { WalletShell } from './ui/wallet-shell';
+import { PreferencesProvider } from './ui/preferences';
+import { ToastProvider } from './ui/toast';
+import { Notice, PhoneFrame, ScreenShell } from './ui/common';
+import { createTonReadApi, type TonReadApi, type TonWriteApi } from './ton/api';
+import type { WalletTab } from './ui/nav';
 
 type Screen =
   | 'loading'
@@ -37,7 +42,6 @@ type Screen =
   | 'import-passcode'
   | 'unlock'
   | 'home'
-  | 'settings'
   | 'settings-phrase'
   | 'settings-verify';
 
@@ -51,11 +55,17 @@ const ONBOARDING_SECRET_SCREENS: Screen[] = [
   'import-passcode',
 ];
 
+const defaultTonApi: TonReadApi & TonWriteApi = createTonReadApi();
+
 function LoadingScreen() {
   return (
-    <ScreenShell title={t('app.name')}>
-      <p aria-live="polite">{t('common.working')}</p>
-    </ScreenShell>
+    <PhoneFrame>
+      <main className="flex flex-1 items-center justify-center">
+        <p aria-live="polite" className="text-[13px] font-medium text-ink-2">
+          {t('common.working')}
+        </p>
+      </main>
+    </PhoneFrame>
   );
 }
 
@@ -63,6 +73,7 @@ export function App() {
   const { manager, biometry } = useVault();
   const { webApp } = useTelegram();
   const [screen, setScreen] = useState<Screen>('loading');
+  const [tab, setTab] = useState<WalletTab>('wallet');
   const [storageError, setStorageError] = useState(false);
   const [importAccountType, setImportAccountType] = useState<AccountType>('bip39-multichain');
 
@@ -90,7 +101,8 @@ export function App() {
     const wipe = (): void => {
       if (screen === 'settings-phrase' || screen === 'settings-verify') {
         secretHolder.clear();
-        setScreen('settings');
+        setScreen('home');
+        setTab('settings');
         return;
       }
       if (ONBOARDING_SECRET_SCREENS.includes(screen)) {
@@ -120,7 +132,7 @@ export function App() {
 
   // Notice an inactivity lock (the session locks itself); the UI follows.
   useEffect(() => {
-    const watch = ['home', 'settings', 'settings-phrase', 'settings-verify'].includes(screen);
+    const watch = ['home', 'settings-phrase', 'settings-verify'].includes(screen);
     if (!watch) return;
     const id = window.setInterval(() => {
       if (manager.getSession() === null) {
@@ -161,6 +173,7 @@ export function App() {
       setScreen('unlock');
       return null;
     }
+    setTab('wallet');
     setScreen('home');
     return null;
   };
@@ -199,166 +212,183 @@ export function App() {
       setScreen('unlock');
       return null;
     }
+    setTab('wallet');
     setScreen('home');
     return null;
   };
 
+  let content;
   if (storageError) {
-    return (
+    content = (
       <ScreenShell title={t('app.name')}>
         <Notice tone="warning">{t('error.storage')}</Notice>
       </ScreenShell>
     );
+  } else {
+    switch (screen) {
+      case 'loading':
+        content = <LoadingScreen />;
+        break;
+      case 'welcome':
+        content = (
+          <WelcomeScreen
+            onCreate={startCreate}
+            onImport={() => {
+              secretHolder.clear();
+              setScreen('import-phrase');
+            }}
+          />
+        );
+        break;
+      case 'create-phrase':
+        content = (
+          <CreatePhraseScreen
+            step={{ current: 1, total: 2 }}
+            onBack={() => {
+              secretHolder.clear();
+              setScreen('welcome');
+            }}
+            onDone={() => {
+              setScreen('create-passcode');
+            }}
+          />
+        );
+        break;
+      case 'create-passcode':
+        content = (
+          <PasscodeScreen
+            manager={manager}
+            title={t('passcode.title')}
+            step={{ current: 2, total: 2 }}
+            onBack={() => {
+              setScreen('create-phrase');
+            }}
+            onSubmit={sealCreatedWallet}
+            submitLabel={t('passcode.submit')}
+          />
+        );
+        break;
+      case 'import-phrase':
+        content = (
+          <ImportPhraseScreen
+            step={{ current: 1, total: 2 }}
+            onBack={() => {
+              secretHolder.clear();
+              setScreen('welcome');
+            }}
+            onNext={importPhraseNext}
+          />
+        );
+        break;
+      case 'import-disambiguate':
+        content = (
+          <DisambiguateScreen
+            step={{ current: 1, total: 2 }}
+            onBack={() => {
+              secretHolder.clear();
+              setScreen('import-phrase');
+            }}
+            onChoose={(accountType) => {
+              setImportAccountType(accountType);
+              setScreen('import-passcode');
+            }}
+          />
+        );
+        break;
+      case 'import-passcode':
+        content = (
+          <PasscodeScreen
+            manager={manager}
+            title={t('import.step.passcode')}
+            step={{ current: 2, total: 2 }}
+            onBack={() => {
+              secretHolder.clear();
+              setScreen('import-phrase');
+            }}
+            onSubmit={sealImportedWallet}
+            submitLabel={t('import.submit')}
+          />
+        );
+        break;
+      case 'unlock':
+        content = (
+          <UnlockScreen
+            manager={manager}
+            biometry={biometry}
+            onUnlocked={() => {
+              setScreen('home');
+            }}
+            onWiped={() => {
+              secretHolder.clear();
+              setScreen('welcome');
+            }}
+          />
+        );
+        break;
+      case 'home':
+        content = (
+          <WalletShell
+            manager={manager}
+            api={defaultTonApi}
+            biometry={biometry}
+            tab={tab}
+            onTabChange={setTab}
+            onLock={lock}
+            onRevealPhrase={() => {
+              setScreen('settings-phrase');
+            }}
+            onTestBackup={() => {
+              setScreen('settings-verify');
+            }}
+            onWiped={() => {
+              secretHolder.clear();
+              setScreen('welcome');
+            }}
+          />
+        );
+        break;
+      case 'settings-phrase':
+        content = (
+          <PhraseScreen
+            onBack={() => {
+              secretHolder.clear();
+              setScreen('home');
+              setTab('settings');
+            }}
+            onDone={() => {
+              secretHolder.clear();
+              setScreen('home');
+              setTab('settings');
+            }}
+          />
+        );
+        break;
+      case 'settings-verify':
+        content = (
+          <VerifyScreen
+            onCancel={() => {
+              secretHolder.clear();
+              setScreen('home');
+              setTab('settings');
+            }}
+            onVerified={() => {
+              setScreen('home');
+              setTab('settings');
+            }}
+          />
+        );
+        break;
+      default:
+        content = <LoadingScreen />;
+        break;
+    }
   }
 
-  switch (screen) {
-    case 'loading':
-      return <LoadingScreen />;
-    case 'welcome':
-      return (
-        <WelcomeScreen
-          onCreate={startCreate}
-          onImport={() => {
-            secretHolder.clear();
-            setScreen('import-phrase');
-          }}
-        />
-      );
-    case 'create-phrase':
-      return (
-        <CreatePhraseScreen
-          step={{ current: 1, total: 2 }}
-          onBack={() => {
-            secretHolder.clear();
-            setScreen('welcome');
-          }}
-          onDone={() => {
-            setScreen('create-passcode');
-          }}
-        />
-      );
-    case 'create-passcode':
-      return (
-        <PasscodeScreen
-          manager={manager}
-          title={t('passcode.title')}
-          step={{ current: 2, total: 2 }}
-          onBack={() => {
-            setScreen('create-phrase');
-          }}
-          onSubmit={sealCreatedWallet}
-          submitLabel={t('passcode.submit')}
-        />
-      );
-    case 'import-phrase':
-      return (
-        <ImportPhraseScreen
-          step={{ current: 1, total: 2 }}
-          onBack={() => {
-            secretHolder.clear();
-            setScreen('welcome');
-          }}
-          onNext={importPhraseNext}
-        />
-      );
-    case 'import-disambiguate':
-      return (
-        <DisambiguateScreen
-          step={{ current: 1, total: 2 }}
-          onBack={() => {
-            secretHolder.clear();
-            setScreen('import-phrase');
-          }}
-          onChoose={(accountType) => {
-            setImportAccountType(accountType);
-            setScreen('import-passcode');
-          }}
-        />
-      );
-    case 'import-passcode':
-      return (
-        <PasscodeScreen
-          manager={manager}
-          title={t('import.step.passcode')}
-          step={{ current: 2, total: 2 }}
-          onBack={() => {
-            secretHolder.clear();
-            setScreen('import-phrase');
-          }}
-          onSubmit={sealImportedWallet}
-          submitLabel={t('import.submit')}
-        />
-      );
-    case 'unlock':
-      return (
-        <UnlockScreen
-          manager={manager}
-          biometry={biometry}
-          onUnlocked={() => {
-            setScreen('home');
-          }}
-          onWiped={() => {
-            secretHolder.clear();
-            setScreen('welcome');
-          }}
-        />
-      );
-    case 'home':
-      return (
-        <HomeScreen
-          manager={manager}
-          onLock={lock}
-          onSettings={() => {
-            setScreen('settings');
-          }}
-        />
-      );
-    case 'settings':
-      return (
-        <SettingsScreen
-          manager={manager}
-          biometry={biometry}
-          onBack={() => {
-            setScreen('home');
-          }}
-          onReveal={() => {
-            setScreen('settings-phrase');
-          }}
-          onTestBackup={() => {
-            setScreen('settings-verify');
-          }}
-          onWiped={() => {
-            secretHolder.clear();
-            setScreen('welcome');
-          }}
-        />
-      );
-    case 'settings-phrase':
-      return (
-        <PhraseScreen
-          onBack={() => {
-            secretHolder.clear();
-            setScreen('settings');
-          }}
-          onDone={() => {
-            secretHolder.clear();
-            setScreen('settings');
-          }}
-        />
-      );
-    case 'settings-verify':
-      return (
-        <VerifyScreen
-          onCancel={() => {
-            secretHolder.clear();
-            setScreen('settings');
-          }}
-          onVerified={() => {
-            setScreen('settings');
-          }}
-        />
-      );
-    default:
-      return <LoadingScreen />;
-  }
+  return (
+    <PreferencesProvider>
+      <ToastProvider>{content}</ToastProvider>
+    </PreferencesProvider>
+  );
 }
+
+export { defaultTonApi };

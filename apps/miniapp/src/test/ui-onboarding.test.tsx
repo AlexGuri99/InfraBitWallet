@@ -1,6 +1,6 @@
 /**
- * Onboarding component tests: Create (phrase -> verify -> passcode), Import (12/24 grid with
- * smart paste -> passcode) and the security invariant that no phrase survives the flow.
+ * Onboarding component tests: Create (phrase -> PIN), Import (12/24 grid with smart paste -> PIN)
+ * and the security invariant that no phrase survives the flow.
  */
 import { describe, it, expect } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
@@ -15,6 +15,12 @@ function phraseWords(): string[] {
   return Array.from(screen.getByTestId('phrase-words').querySelectorAll('[data-role="word"]')).map(
     (el) => el.textContent,
   );
+}
+
+async function openImport(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
+  await user.click(await screen.findByRole('button', { name: /Secret Words/ }));
+  await screen.findByRole('heading', { name: 'Import a wallet' });
 }
 
 async function createToPasscode(user: ReturnType<typeof userEvent.setup>): Promise<string[]> {
@@ -66,7 +72,7 @@ describe('Onboarding: create', () => {
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
 
-  it('creates the wallet after phrase + passcode and clears the phrase', async () => {
+  it('creates the wallet after phrase + PIN and clears the phrase', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     const words = await createToPasscode(user);
@@ -77,10 +83,11 @@ describe('Onboarding: create', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await screen.findByRole('heading', { name: 'Your wallet' });
-    await user.click(screen.getByRole('button', { name: 'Receive' }));
+    await screen.findByTestId('hero-balance');
+    await user.click(screen.getByRole('button', { name: 'Deposit' }));
+    await user.click(screen.getByRole('button', { name: 'EVM' }));
     expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
-    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByTestId('phrase-words')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(words.join(' '));
     expect(secretHolder.has()).toBe(false);
@@ -97,7 +104,7 @@ describe('Onboarding: create', () => {
     await user.type(screen.getByLabelText('Confirm PIN'), '2580');
     expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('heading', { name: 'Your wallet' });
+    await screen.findByTestId('hero-balance');
   });
 
   it('rejects a trivial PIN when a device secret exists', async () => {
@@ -126,8 +133,7 @@ describe('Onboarding: import', () => {
   it('shows 24 boxes by default, switches to 12, fills from a paste, and imports', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
-    await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
-    await screen.findByRole('heading', { name: 'Import a wallet' });
+    await openImport(user);
     expect(screen.getAllByLabelText(/^Word \d+$/)).toHaveLength(24);
 
     await user.click(screen.getByRole('button', { name: '12 words' }));
@@ -147,8 +153,9 @@ describe('Onboarding: import', () => {
     await user.type(screen.getByLabelText('Confirm PIN'), PASS);
     await user.click(screen.getByRole('button', { name: 'Import' }));
 
-    await screen.findByRole('heading', { name: 'Your wallet' });
-    await user.click(screen.getByRole('button', { name: 'Receive' }));
+    await screen.findByTestId('hero-balance');
+    await user.click(screen.getByRole('button', { name: 'Deposit' }));
+    await user.click(screen.getByRole('button', { name: 'EVM' }));
     expect(screen.getByTestId('address-EVM')).toHaveTextContent(
       '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
     );
@@ -158,7 +165,7 @@ describe('Onboarding: import', () => {
   it('auto-switches from 24 to 12 when a 12-word phrase is pasted', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
-    await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
+    await openImport(user);
     fireEvent.paste(screen.getByLabelText('Word 1'), {
       clipboardData: { getData: () => MNEMONIC_12 },
     });
@@ -175,7 +182,7 @@ describe('Onboarding: import', () => {
   it('rejects an invalid phrase without echoing words', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
-    await user.click(await screen.findByRole('button', { name: 'Import a wallet' }));
+    await openImport(user);
     await user.click(screen.getByRole('button', { name: '12 words' }));
     fireEvent.paste(screen.getByLabelText('Word 1'), {
       clipboardData: {
@@ -186,7 +193,7 @@ describe('Onboarding: import', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).not.toContain('zzsecretzz');
-    expect(screen.getByLabelText('Word 1', { exact: true }).className).toContain('border-red-500');
+    expect(screen.getByLabelText('Word 1', { exact: true }).className).toContain('border-negative');
     expect(screen.getByRole('heading', { name: 'Import a wallet' })).toBeInTheDocument();
   });
 });

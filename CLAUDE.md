@@ -82,3 +82,10 @@ Stop and ask me BEFORE:
 - Use web search/fetch for current docs when unsure. Cite source. Never guess.
 - Before declaring a phase done: run lint, type-check, tests. Show results. State what's untested.
 - Never claim the wallet is "secure" or "audited". Recommend independent audit + bug bounty before mainnet.
+
+## 8. Design System
+
+- Always read and follow `DESIGN.md` at the repo root for all UI work in `apps/miniapp`.
+- Use semantic CSS custom properties (`--bg-canvas`, `--bg-surface`, `--hero-bg`, etc.) — never hardcode one-off hex colors.
+- Use self-hosted `@fontsource-variable` packages and inline SVGs only (strict CSP `font-src 'self'`, `default-src 'self'` enforced).
+- Follow Section 5.7 strictly for vault security invariants (Phrase → PIN order, no seed phrase on clipboard, uncontrolled inputs).

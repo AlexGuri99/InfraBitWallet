@@ -1,14 +1,15 @@
 /**
- * Dedicated passcode screen shared by Create (step 3) and Import (step 2).
+ * Dedicated 4-digit PIN screen shared by Create (step 2) and Import (step 2).
  *
- * The passcode is read from uncontrolled inputs only; React state holds metadata about the
- * policy (length, ok, error), never the value. Visibility toggling changes input types without
+ * The PIN is read from uncontrolled inputs only; React state holds metadata about the policy
+ * (length, ok, error), never the value. Visibility toggling changes input types without
  * re-rendering from a value prop.
  */
 import { useRef, useState } from 'react';
 import type { VaultManager } from '@onezerowallet/crypto-vault';
 import { t } from '../i18n';
 import { Button, ErrorText, Field, Notice, ScreenShell } from './common';
+import { EyeIcon, ShieldIcon } from './icons';
 
 interface PasscodeMeta {
   length: number;
@@ -78,53 +79,62 @@ export function PasscodeScreen({
 
   return (
     <ScreenShell title={title} onBack={onBack} step={step}>
-      <Notice tone={manager.usesDeviceSecret ? 'info' : 'warning'}>
-        {manager.usesDeviceSecret
-          ? t('passcode.requirements.device')
-          : t('passcode.requirements.noDevice')}
-      </Notice>
-      {manager.usesDeviceSecret ? null : (
-        <p className="text-xs opacity-70">{t('passcode.requirements.offline')}</p>
-      )}
+      <div className="flex flex-col items-center gap-2 py-2 text-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-positive-bg text-positive">
+          <ShieldIcon size={26} />
+        </span>
+        <p className="max-w-[300px] text-[12.5px] leading-relaxed text-ink-2">
+          {manager.usesDeviceSecret
+            ? t('passcode.requirements.device')
+            : t('passcode.requirements.noDevice')}
+        </p>
+      </div>
 
-      <Field
-        id="passcode"
-        ref={passRef}
-        label={t('passcode.label')}
-        type={type}
-        inputMode="numeric"
-        pattern="[0-9]*"
-        maxLength={4}
-        autoComplete="new-password"
-        autoFocus
-        onChange={(event) => {
-          update(event.target.value);
-        }}
-      />
-      <Field
-        id="passcode-confirm"
-        ref={confirmRef}
-        label={t('passcode.confirm')}
-        type={type}
-        inputMode="numeric"
-        pattern="[0-9]*"
-        maxLength={4}
-        autoComplete="new-password"
-      />
-      <Button
-        variant="secondary"
-        onClick={() => {
-          setVisible((v) => !v);
-        }}
-        aria-pressed={visible}
-        className="w-auto self-start px-3 min-h-9 text-sm"
-      >
-        {visible ? t('passcode.hide') : t('passcode.show')}
-      </Button>
+      <div className="flex flex-col gap-3 rounded-[24px] bg-surface p-4 shadow-card">
+        <Field
+          id="passcode"
+          ref={passRef}
+          label={t('passcode.label')}
+          type={type}
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={4}
+          autoComplete="new-password"
+          autoFocus
+          className="text-center font-mono text-[22px] tracking-[0.5em]"
+          onChange={(event) => {
+            update(event.target.value);
+          }}
+        />
+        <Field
+          id="passcode-confirm"
+          ref={confirmRef}
+          label={t('passcode.confirm')}
+          type={type}
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={4}
+          autoComplete="new-password"
+          className="text-center font-mono text-[22px] tracking-[0.5em]"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setVisible((v) => !v);
+          }}
+          aria-pressed={visible}
+          aria-label={visible ? t('passcode.hide') : t('passcode.show')}
+          className="pressable flex items-center justify-center gap-1.5 self-center rounded-full bg-surface-secondary px-3 py-1.5 text-[12.5px] font-semibold text-ink-2"
+        >
+          <EyeIcon hidden={visible} size={15} />
+          {visible ? t('passcode.hide') : t('passcode.show')}
+        </button>
+      </div>
+
       <p
         role="status"
         aria-live="polite"
-        className={`text-sm ${meta.ok ? 'text-green-600 dark:text-green-400' : 'opacity-70'}`}
+        className={`px-1 text-[12.5px] ${meta.ok ? 'text-positive' : 'text-ink-2'}`}
       >
         {meta.length === 0
           ? ''
@@ -132,6 +142,10 @@ export function PasscodeScreen({
               meta.ok ? t('passcode.met') : (meta.error ?? t('passcode.notMet'))
             }`}
       </p>
+
+      {manager.usesDeviceSecret ? null : (
+        <Notice tone="warning">{t('passcode.requirements.offline')}</Notice>
+      )}
       {error ? <ErrorText>{error}</ErrorText> : null}
       <Button
         onClick={() => {

@@ -480,3 +480,29 @@ list (they are real chain events) but are clearly labelled.
 
 **Hero formatting:** the hero secondary pill truncates to 4 decimals (`formatDecimalShort`), while
 asset rows and the transaction detail keep full BigInt precision.
+
+---
+
+## Decision: self-hosted fonts and CSS-variable theming (P2c)
+
+**Fonts.** Plus Jakarta Sans and JetBrains Mono ship as `@fontsource-variable/*` packages
+(OFL-1.1) and are imported from `main.tsx`. Vite bundles the `.woff2` files into `dist/assets`.
+`build.assetsInlineLimit` is `0` so no font is emitted as a `data:` URI: the production CSP keeps
+`font-src 'self'` and the app makes zero requests to Google Fonts or any CDN. An E2E test asserts
+all network requests share the app origin and that `woff2` responses are same-origin.
+
+**Theme.** Every colour is a semantic custom property on `:root` (Mint Light, the default) and
+`[data-theme='dark']` (Forest & Citron). `PreferencesProvider` sets `data-theme` on `<html>`,
+persists the choice in `localStorage` under `ozw.theme`, and mirrors the palette into the Telegram
+chrome (`setBackgroundColor` and, in light mode, `setHeaderColor`). No component hardcodes a hex
+value. `tabular-nums` is applied to every monetary surface so live balances and masking never
+jitter.
+
+**Navigation.** Settings remains a bottom-nav tab, not a modal, but secret-touching sub-flows
+(reveal phrase, test backup) stay in the App-level state machine so backgrounding can still wipe
+the phrase holder and return to safety. The wallet shell owns only public chain data and routing.
+
+**Shells.** Trade, Earn, Market, Assistant and the purchase rows on Deposit are labelled UI
+shells: they render the designed layout with disabled or toast-only CTAs and never build, sign or
+broadcast a payload. Live actions remain Deposit (address/QR), Send (P2b), Coin Detail and
+Transaction Detail.

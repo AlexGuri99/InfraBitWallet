@@ -1,849 +1,602 @@
 /**
- * Home dashboard with live TON Testnet data.
+ * Wallet Home (DESIGN.md §5.1–§5.2): top bar, connected hero + action dock, live funds and
+ * activity lists, and the floating navigation bar.
  *
- * Data comes only from the same-origin `/api/ton/*` proxy (provider keys never reach the client).
- * On load there is a skeleton; on failure a visible offline banner with Retry — never a silent
- * $0.00. Amounts are decimal strings formatted with BigInt helpers from chain-ton.
+ * Data comes only from the same-origin `/api/ton/*` proxy. Loading shows a syncing state and an
+ * upstream failure shows Offline + Retry — never a fabricated $0.00.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { VaultManager } from '@onezerowallet/crypto-vault';
+import { useMemo, useState } from 'react';
+import type { PublicAccountInfo } from '@onezerowallet/crypto-vault';
 import {
-  filterActivity,
   formatChange,
-  formatDecimal,
   formatDecimalShort,
   formatUsd,
-  truncateAddress,
   type TonActivityItem,
-  type TonAssetBalance,
-  type TonNetwork,
   type TonPortfolio,
 } from '@onezerowallet/chain-ton';
 import { t } from '../i18n';
-import { createTonReadApi, type TonReadApi, type TonWriteApi } from '../ton/api';
-import { SendSheet } from './send';
-import { Button, ErrorText, Notice, ScreenShell, Sheet } from './common';
+import type { AssetView } from './asset';
+import { activityKind, activityStatusLabel, clockTime, groupActivity, shortAddress } from './asset';
+import { usePreferences } from './preferences';
+import { useToast } from './toast';
 import { QrCode } from './qr';
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  CopyIcon,
+  EarnIcon,
+  EyeIcon,
+  MoonIcon,
+  QrIcon,
+  RefreshIcon,
+  SunIcon,
+  SwapIcon,
+} from './icons';
+import { Button, Card, SectionHeader, Sheet, TokenAvatar } from './common';
+import type { WalletTab } from './nav';
 
-export const UI_TON_NETWORK: TonNetwork = 'testnet';
+export type Load<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error' };
 
-// Stable default so refresh() does not change identity on every render.
-const defaultTonApi: TonReadApi & TonWriteApi = createTonReadApi();
-
-type Chain = 'ton' | 'tron' | 'evm';
-type Load<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error' };
-type SheetState =
-  | { kind: 'receive'; focus: Chain }
-  | { kind: 'notice'; title: string; body: string }
-  | { kind: 'activity'; item: TonActivityItem }
-  | null;
-
-function shortAddress(value: string): string {
-  return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
+export interface HomeActions {
+  onOpenDeposit: () => void;
+  onOpenSend: () => void;
+  onOpenTrade: () => void;
+  onOpenEarn: () => void;
+  onOpenCoin: (asset: AssetView) => void;
+  onOpenTx: (item: TonActivityItem) => void;
+  onLock: () => void;
+  onTabChange: (tab: WalletTab) => void;
 }
 
-function hashToHex(hash: string): string {
-  try {
-    return Array.from(atob(hash))
-      .map((char) => char.charCodeAt(0).toString(16).padStart(2, '0'))
-      .join('');
-  } catch {
-    return hash;
-  }
+function deltaUsd(portfolio: TonPortfolio): number | null {
+  if (portfolio.totalUsd === null || portfolio.change24h === null) return null;
+  const previous = portfolio.totalUsd / (1 + portfolio.change24h / 100);
+  return portfolio.totalUsd - previous;
 }
 
-function relativeTime(timestamp: number): string {
-  const seconds = Math.max(0, Math.floor(Date.now() / 1000) - timestamp);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${String(minutes)}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${String(hours)}h ago`;
-  return `${String(Math.floor(hours / 24))}d ago`;
+function StatusBadge({ item }: { item: TonActivityItem }) {
+  const kind = activityKind(item);
+  const tone =
+    kind === 'in'
+      ? 'bg-positive-bg text-positive'
+      : kind === 'bounce'
+        ? 'bg-swap-bg text-swap'
+        : kind === 'pending'
+          ? 'bg-surface-elevated text-ink-2'
+          : 'bg-surface-secondary text-ink-2';
+  const glyph =
+    kind === 'in'
+      ? '↙'
+      : kind === 'out'
+        ? '↗'
+        : kind === 'bounce'
+          ? '↩'
+          : kind === 'pending'
+            ? '…'
+            : '↗';
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[15px] font-bold ${tone}`}
+    >
+      {glyph}
+    </span>
+  );
 }
 
-function CopyButton({ value, label }: { value: string; label: string }) {
+function ActivityRow({
+  item,
+  onOpen,
+  guard,
+}: {
+  item: TonActivityItem;
+  onOpen: (item: TonActivityItem) => void;
+  guard: (value: string) => string;
+}) {
+  const kind = activityKind(item);
+  const sign = kind === 'in' || kind === 'bounce' ? '+' : '-';
+  const amount = `${sign}${guard(item.amount)} ${item.symbol}`;
+  return (
+    <button
+      type="button"
+      data-testid={`activity-${item.id}`}
+      onClick={() => {
+        onOpen(item);
+      }}
+      className="pressable flex w-full items-center gap-3 px-4 py-[14px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--accent-link)]"
+    >
+      <StatusBadge item={item} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">
+          {activityStatusLabel(item)}
+        </span>
+        <span className="block truncate text-[12.5px] text-ink-2">
+          {kind === 'in' ? 'from ' : 'to '}
+          {shortAddress(item.counterparty, 4, 4)} · {clockTime(item.timestamp)}
+        </span>
+      </span>
+      <span className="tabular shrink-0 text-right">
+        <span
+          className={`block text-[15px] font-semibold ${
+            kind === 'in' ? 'text-positive' : 'text-ink'
+          }`}
+        >
+          {amount}
+        </span>
+        <span className="block text-[12px] text-ink-muted">
+          {item.comment ? item.comment.slice(0, 22) : relativeStatus(item)}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function relativeStatus(item: TonActivityItem): string {
+  if (item.status === 'failed') return 'Failed';
+  if (item.status === 'pending') return 'Pending';
+  return '';
+}
+
+function AssetRowView({
+  asset,
+  onOpen,
+  guard,
+}: {
+  asset: AssetView;
+  onOpen: (asset: AssetView) => void;
+  guard: (value: string) => string;
+}) {
+  const balance = asset.chain !== 'ton' ? asset.balance : `${asset.balance} ${asset.symbol}`;
+  const usd = asset.usdValue === null ? '—' : formatUsd(asset.usdValue);
+  return (
+    <button
+      type="button"
+      data-testid={asset.testId}
+      aria-label={`${asset.name} ${asset.badge}`}
+      onClick={() => {
+        onOpen(asset);
+      }}
+      className="pressable flex w-full items-center gap-3 px-4 py-[14px] text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--accent-link)]"
+    >
+      <TokenAvatar symbol={asset.symbol} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">
+          {asset.name}
+        </span>
+        <span className="mt-0.5 inline-block rounded-full bg-surface-secondary px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.02em] text-ink-2">
+          {asset.badge}
+        </span>
+      </span>
+      <span className="tabular shrink-0 text-right">
+        <span className="block text-[15px] font-semibold text-ink">{guard(balance)}</span>
+        <span className="block text-[12.5px] text-ink-2">{guard(usd)}</span>
+      </span>
+    </button>
+  );
+}
+
+export interface WalletHomeProps extends HomeActions {
+  info: PublicAccountInfo | null;
+  tonAddress: string;
+  portfolio: Load<TonPortfolio>;
+  activity: Load<TonActivityItem[]>;
+  pending: TonActivityItem | null;
+  assets: AssetView[];
+  onRefresh: () => void;
+  onOpenSettings: () => void;
+}
+
+export function WalletHome({
+  info,
+  tonAddress,
+  portfolio,
+  activity,
+  pending,
+  assets,
+  onRefresh,
+  onOpenSettings,
+  onOpenDeposit,
+  onOpenSend,
+  onOpenTrade,
+  onOpenEarn,
+  onOpenCoin,
+  onOpenTx,
+}: WalletHomeProps) {
+  const { theme, toggleTheme, masked, toggleMasked, guard } = usePreferences();
+  const toast = useToast();
+  const [currency, setCurrency] = useState<'USD' | 'TON'>('USD');
+  const [sheet, setSheet] = useState<'wallet' | 'qr' | null>(null);
   const [copied, setCopied] = useState(false);
-  const copy = async (): Promise<void> => {
+
+  const portfolioReady = portfolio.state === 'ready' ? portfolio.value : null;
+  const change = portfolioReady?.change24h ?? null;
+  const delta = portfolioReady ? deltaUsd(portfolioReady) : null;
+
+  const balanceDisplay = useMemo(() => {
+    if (portfolio.state === 'loading') return '…';
+    if (portfolio.state === 'error') return '—';
+    if (masked) return '••••';
+    if (currency === 'TON') {
+      return `${formatDecimalShort(portfolio.value.balanceRaw, 9, 4)} TON`;
+    }
+    return formatUsd(portfolio.value.totalUsd);
+  }, [portfolio, masked, currency]);
+
+  const secondary = useMemo(() => {
+    if (!portfolioReady) {
+      return portfolio.state === 'error' ? t('home.offlineShort') : t('home.syncing');
+    }
+    return `${formatDecimalShort(portfolioReady.balanceRaw, 9, 4)} TON`;
+  }, [portfolioReady, portfolio.state]);
+
+  const deltaTone =
+    change === null || change === 0
+      ? 'text-hero-ink opacity-70'
+      : change > 0
+        ? 'text-positive'
+        : 'text-negative';
+  const deltaText =
+    change === null
+      ? null
+      : `${change >= 0 ? '↑' : '↓'} ${delta === null ? '' : `${formatUsd(delta)} `}(${formatChange(change)})`;
+
+  const copyAddress = async (value: string): Promise<void> => {
+    if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
+      toast.show(t('home.copied'));
       window.setTimeout(() => {
         setCopied(false);
       }, 1500);
     } catch {
-      setCopied(false);
-    }
-  };
-  return (
-    <Button
-      variant="secondary"
-      onClick={() => void copy()}
-      aria-label={label}
-      className="w-auto px-3 min-h-9 text-sm"
-    >
-      {copied ? t('home.copied') : t('home.copy')}
-    </Button>
-  );
-}
-
-function GearIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.11-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.96 4.6H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z" />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <rect x="4" y="10" width="16" height="11" rx="2" />
-      <path d="M8 10V7a4 4 0 1 1 8 0v3" />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <path d="M21 3v6h-6" />
-    </svg>
-  );
-}
-
-function EyeIcon({ hidden }: { hidden: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      aria-hidden="true"
-    >
-      {hidden ? (
-        <>
-          <path d="M3 3l18 18" />
-          <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
-          <path d="M9.9 5.2A10 10 0 0 1 12 5c5 0 9 7 9 7a17 17 0 0 1-2.2 3.1M6.1 6.1A17 17 0 0 0 3 12s4 7 9 7a9.9 9.9 0 0 0 3.9-.8" />
-        </>
-      ) : (
-        <>
-          <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" />
-          <circle cx="12" cy="12" r="3" />
-        </>
-      )}
-    </svg>
-  );
-}
-
-function ActionIcon({ kind }: { kind: 'receive' | 'send' | 'swap' | 'stake' }) {
-  const paths = {
-    receive: (
-      <>
-        <path d="M12 4v12" />
-        <path d="M6 10l6 6 6-6" />
-        <path d="M4 20h16" />
-      </>
-    ),
-    send: (
-      <>
-        <path d="M12 20V8" />
-        <path d="M6 14l6-6 6 6" />
-        <path d="M4 4h16" />
-      </>
-    ),
-    swap: (
-      <>
-        <path d="M4 8h13l-3-3" />
-        <path d="M20 16H7l3 3" />
-      </>
-    ),
-    stake: (
-      <>
-        <circle cx="12" cy="12" r="8" />
-        <path d="M12 8v8M9.5 10.5h5M9.5 13.5h5" />
-      </>
-    ),
-  } as const;
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-6 w-6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {paths[kind]}
-    </svg>
-  );
-}
-
-function TokenIcon({ symbol }: { symbol: string }) {
-  return (
-    <svg viewBox="0 0 40 40" className="h-10 w-10 shrink-0" aria-hidden="true">
-      <circle cx="20" cy="20" r="19" className="fill-current opacity-15" />
-      <text x="20" y="24" textAnchor="middle" fontSize="11" fontWeight="700" fill="currentColor">
-        {symbol.slice(0, 4)}
-      </text>
-    </svg>
-  );
-}
-
-interface AssetRow {
-  key: string;
-  testId: string;
-  name: string;
-  symbol: string;
-  badge: string;
-  balanceText: string;
-  usdText: string;
-  chain: Chain;
-}
-
-function chainBadge(asset: TonAssetBalance): string {
-  return asset.standard === 'native' ? 'TON' : 'TON · Jetton';
-}
-
-function staticRows(hasTron: boolean, hasEvm: boolean): AssetRow[] {
-  const rows: AssetRow[] = [
-    {
-      key: 'trx',
-      testId: 'asset-TRX',
-      name: 'TRON',
-      symbol: 'TRX',
-      badge: 'TRC-20',
-      balanceText: '—',
-      usdText: '—',
-      chain: 'tron',
-    },
-    {
-      key: 'eth',
-      testId: 'asset-ETH',
-      name: 'Ethereum',
-      symbol: 'ETH',
-      badge: 'ERC-20',
-      balanceText: '—',
-      usdText: '—',
-      chain: 'evm',
-    },
-  ];
-  return rows.filter((row) => (row.chain === 'tron' ? hasTron : hasEvm));
-}
-
-export function HomeScreen({
-  manager,
-  onLock,
-  onSettings,
-  api = defaultTonApi,
-}: {
-  manager: VaultManager;
-  onLock: () => void;
-  onSettings: () => void;
-  api?: TonReadApi & TonWriteApi;
-}) {
-  const session = manager.getSession();
-  const info = session?.getPublicInfo(0) ?? null;
-  const [tab, setTab] = useState<'wallet' | 'activity'>('wallet');
-  const [masked, setMasked] = useState(false);
-  const [sheet, setSheet] = useState<SheetState>(null);
-  const [portfolio, setPortfolio] = useState<Load<TonPortfolio>>({ state: 'loading' });
-  const [activity, setActivity] = useState<Load<TonActivityItem[]>>({ state: 'loading' });
-  const [copiedPill, setCopiedPill] = useState(false);
-  const [sendOpen, setSendOpen] = useState(false);
-  const [pending, setPending] = useState<TonActivityItem | null>(null);
-  const baselineRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // ONE canonical active address in testnet mode: the 0Q user-friendly form whose StateInit
-  // uses networkGlobalId -3. The mainnet raw hash (-239) is a DIFFERENT account hash and must
-  // never be used for testnet reads (that mismatch was the live bug).
-  const tonAddress = info?.ton.addressTestnetNonBounceable ?? '';
-  const requestAddress = tonAddress;
-
-  const refresh = useCallback(async (): Promise<void> => {
-    if (!requestAddress) return;
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setPortfolio({ state: 'loading' });
-    setActivity({ state: 'loading' });
-    const [portfolioResult, activityResult] = await Promise.allSettled([
-      api.getPortfolio(requestAddress, UI_TON_NETWORK, controller.signal),
-      api.getActivity(requestAddress, UI_TON_NETWORK, 20, controller.signal),
-    ]);
-    if (controller.signal.aborted) return;
-    setPortfolio(
-      portfolioResult.status === 'fulfilled'
-        ? { state: 'ready', value: portfolioResult.value }
-        : { state: 'error' },
-    );
-    setActivity(
-      activityResult.status === 'fulfilled'
-        ? { state: 'ready', value: filterActivity(activityResult.value) }
-        : { state: 'error' },
-    );
-  }, [api, requestAddress]);
-
-  useEffect(() => {
-    void refresh();
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [refresh]);
-
-  // While a submitted transfer is pending, poll and clear when Activity grows or after 60s.
-  useEffect(() => {
-    if (!pending) return;
-    const interval = window.setInterval(() => {
-      void refresh();
-    }, 5000);
-    const timeout = window.setTimeout(() => {
-      setPending(null);
-    }, 60_000);
-    return () => {
-      window.clearInterval(interval);
-      window.clearTimeout(timeout);
-    };
-  }, [pending, refresh]);
-
-  useEffect(() => {
-    if (!pending) return;
-    if (activity.state === 'ready' && activity.value.length > baselineRef.current) {
-      setPending(null);
-    }
-  }, [activity, pending]);
-
-  const portfolioReady = portfolio.state === 'ready' ? portfolio.value : null;
-  const hasTron = info?.tron !== undefined;
-  const hasEvm = info?.evm !== undefined;
-
-  const assetRows: AssetRow[] = useMemo(() => {
-    if (portfolioReady) {
-      const rows: AssetRow[] = portfolioReady.assets.map((asset, index) => ({
-        key: `${asset.id}-${String(index)}`,
-        testId:
-          asset.standard === 'native'
-            ? 'asset-TON'
-            : `asset-${asset.symbol.toUpperCase()}${asset.symbol.toUpperCase() === 'USDT' ? '' : `-${String(index)}`}`,
-        name: asset.name,
-        symbol: asset.symbol,
-        badge: chainBadge(asset),
-        balanceText: masked ? '••••' : `${asset.balance} ${asset.symbol}`,
-        usdText: masked ? '••••' : asset.usdValue === null ? '—' : formatUsd(asset.usdValue),
-        chain: 'ton',
-      }));
-      return [...rows, ...staticRows(hasTron, hasEvm)];
-    }
-    const placeholders: AssetRow[] = [
-      {
-        key: 'ton',
-        testId: 'asset-TON',
-        name: 'Toncoin',
-        symbol: 'TON',
-        badge: 'TON',
-        balanceText: portfolio.state === 'error' ? '—' : '…',
-        usdText: portfolio.state === 'error' ? '—' : '…',
-        chain: 'ton',
-      },
-      {
-        key: 'usdt',
-        testId: 'asset-USDT',
-        name: 'Tether USD',
-        symbol: 'USDT',
-        badge: 'TON · Jetton',
-        balanceText: portfolio.state === 'error' ? '—' : '…',
-        usdText: portfolio.state === 'error' ? '—' : '…',
-        chain: 'ton',
-      },
-    ];
-    return [...placeholders, ...staticRows(hasTron, hasEvm)];
-  }, [portfolioReady, portfolio.state, masked, hasTron, hasEvm]);
-
-  const copyTon = async (): Promise<void> => {
-    if (!tonAddress) return;
-    try {
-      await navigator.clipboard.writeText(tonAddress);
-      setCopiedPill(true);
-      window.setTimeout(() => {
-        setCopiedPill(false);
-      }, 1500);
-    } catch {
-      setCopiedPill(false);
+      toast.show(t('home.copyFailed'));
     }
   };
 
-  const openReceive = (focus: Chain): void => {
-    setSheet({ kind: 'receive', focus });
-  };
-
-  const receiveEntries = [
-    {
-      chain: 'ton' as Chain,
-      label: t('receive.ton'),
-      value: tonAddress,
-      hint: t('receive.tonHint'),
-    },
-    ...(info?.tron
-      ? [
-          {
-            chain: 'tron' as Chain,
-            label: t('receive.tron'),
-            value: info.tron.address,
-            hint: undefined,
-          },
-        ]
-      : []),
-    ...(info?.evm
-      ? [
-          {
-            chain: 'evm' as Chain,
-            label: t('receive.evm'),
-            value: info.evm.address,
-            hint: undefined,
-          },
-        ]
-      : []),
-  ];
-  const focusedEntry =
-    sheet?.kind === 'receive'
-      ? (receiveEntries.find((entry) => entry.chain === sheet.focus) ?? receiveEntries[0])
-      : undefined;
-
-  const balanceDisplay =
-    portfolio.state === 'loading'
-      ? '…'
-      : portfolio.state === 'error'
-        ? '—'
-        : masked
-          ? '••••'
-          : formatUsd(portfolio.value.totalUsd);
-  const secondaryDisplay =
-    portfolio.state === 'loading'
-      ? 'Syncing…'
-      : portfolio.state === 'error'
-        ? 'Offline'
-        : `${formatDecimalShort(portfolio.value.balanceRaw, 9, 4)} TON · ${formatChange(portfolio.value.change24h)}`;
+  const incoming = activity.state === 'ready' ? activity.value : [];
+  const allItems = pending ? [pending, ...incoming] : incoming;
+  const groups = groupActivity(allItems);
 
   return (
-    <ScreenShell title={t('home.title')}>
-      {info ? (
-        <>
-          <div className="flex items-center gap-2">
+    <div className="screen-enter flex flex-col pb-24">
+      <header className="flex items-center justify-between gap-2 px-4 py-3">
+        <h1 className="sr-only">{t('app.name')}</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSheet('wallet');
+            }}
+            className="pressable flex min-w-0 items-center gap-1.5 rounded-full bg-surface px-3 py-2 text-[14px] font-bold tracking-[-0.01em] text-ink shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+            aria-label={`${t('app.name')} wallet switcher`}
+          >
+            <span className="truncate">{t('app.name')}</span>
+            <ChevronDownIcon size={15} className="shrink-0 text-ink-2" />
+          </button>
+          <span className="shrink-0 rounded-full bg-positive-bg px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.04em] text-positive">
+            {t('home.testnet')}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={toggleMasked}
+            aria-label={masked ? t('home.showBalance') : t('home.hideBalance')}
+            className="pressable flex h-9 w-9 items-center justify-center rounded-full bg-surface text-ink shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+          >
+            <EyeIcon hidden={masked} size={18} />
+          </button>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+            className="pressable flex h-9 w-9 items-center justify-center rounded-full bg-surface text-ink shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+          >
+            {theme === 'light' ? <MoonIcon size={18} /> : <SunIcon size={18} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSheet('qr');
+            }}
+            aria-label={t('home.quickQr')}
+            className="pressable flex h-9 w-9 items-center justify-center rounded-full bg-surface text-ink shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+          >
+            <QrIcon size={18} />
+          </button>
+        </div>
+      </header>
+
+      {portfolio.state === 'error' ? (
+        <div
+          role="alert"
+          className="mx-4 mb-3 flex items-center justify-between gap-3 rounded-2xl bg-surface-secondary px-4 py-3 text-[13px] font-medium text-negative"
+        >
+          <span>{t('home.offline')}</span>
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="pressable flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink"
+          >
+            <RefreshIcon size={14} />
+            {t('home.retry')}
+          </button>
+        </div>
+      ) : null}
+
+      <section aria-label={t('home.mainWallet')} className="mx-4">
+        <div className="rounded-t-[26px] bg-gradient-to-br from-hero to-hero-end px-5 pb-5 pt-4 text-hero-ink shadow-hero">
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={() => {
-                openReceive('ton');
+                setCurrency((current) => (current === 'USD' ? 'TON' : 'USD'));
               }}
-              aria-label={t('home.walletInfo')}
-              className="h-9 w-9 shrink-0 rounded-full bg-indigo-500/15 ring-2 ring-indigo-500/40 text-indigo-600 dark:text-indigo-300 text-xs font-bold flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              aria-label={`Display currency: ${currency}. Tap to change.`}
+              className="pressable flex items-center gap-1 rounded-full bg-hero-pill px-3 py-1.5 text-[12px] font-bold uppercase tracking-[0.02em] text-hero-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-hero-ink"
             >
-              OZ
-            </button>
-            <div
-              role="tablist"
-              aria-label={t('home.title')}
-              className="flex-1 rounded-full bg-black/5 dark:bg-white/10 p-1"
-            >
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'wallet'}
-                  onClick={() => {
-                    setTab('wallet');
-                  }}
-                  className={`min-h-8 rounded-full text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                    tab === 'wallet'
-                      ? 'bg-[var(--tg-theme-section-bg-color,#fff)] shadow'
-                      : 'opacity-70'
-                  }`}
-                >
-                  {t('home.walletTab')}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'activity'}
-                  onClick={() => {
-                    setTab('activity');
-                  }}
-                  className={`min-h-8 rounded-full text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                    tab === 'activity'
-                      ? 'bg-[var(--tg-theme-section-bg-color,#fff)] shadow'
-                      : 'opacity-70'
-                  }`}
-                >
-                  {t('home.activityTab')}
-                </button>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                void refresh();
-              }}
-              aria-label="Refresh"
-              className="h-9 w-9 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-            >
-              <RefreshIcon />
+              {currency}
+              <ChevronDownIcon size={13} />
             </button>
             <button
               type="button"
-              onClick={onLock}
-              aria-label={t('home.lock')}
-              className="h-9 w-9 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              onClick={() => void copyAddress(tonAddress)}
+              data-testid="ton-address-pill"
+              aria-label={t('home.copyTon')}
+              className="pressable flex items-center gap-1.5 rounded-full bg-hero-pill px-3 py-1.5 font-mono text-[11.5px] font-medium text-hero-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-hero-ink"
             >
-              <LockIcon />
+              {shortAddress(tonAddress, 3, 4)}
+              <CopyIcon size={12} />
+              {copied ? <span className="sr-only">{t('home.copied')}</span> : null}
             </button>
-            <button
-              type="button"
-              onClick={onSettings}
-              aria-label={t('home.settings')}
-              className="h-9 w-9 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-            >
-              <GearIcon />
-            </button>
-            <span className="rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide">
-              {t('home.testnet')}
-            </span>
           </div>
 
-          {portfolio.state === 'error' ? (
-            <div
-              role="alert"
-              className="rounded-lg bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-100 p-3 text-sm flex items-center justify-between gap-3"
+          <p
+            data-testid="hero-balance"
+            className="tabular mt-4 text-[38px] font-extrabold leading-none tracking-[-0.03em]"
+          >
+            {balanceDisplay}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-hero-pill px-2.5 py-1 text-[12px] font-semibold">
+              {secondary}
+            </span>
+            {deltaText && portfolioReady && !masked ? (
+              <span
+                data-testid="hero-delta"
+                className={`tabular rounded-full bg-hero-pill px-2.5 py-1 text-[12px] font-semibold ${deltaTone}`}
+              >
+                {prefixArrow(change)} {formatUsd(delta)} ({formatChange(change)})
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-4 gap-1 rounded-b-[26px] border-t border-hairline bg-surface px-2 py-3">
+          {(
+            [
+              {
+                id: 'deposit',
+                label: t('home.deposit'),
+                icon: <ArrowDownIcon size={20} />,
+                run: onOpenDeposit,
+              },
+              {
+                id: 'send',
+                label: t('home.sendSell'),
+                icon: <ArrowUpIcon size={20} />,
+                run: onOpenSend,
+              },
+              {
+                id: 'trade',
+                label: t('home.trade'),
+                icon: <SwapIcon size={20} />,
+                run: onOpenTrade,
+              },
+              { id: 'earn', label: t('home.earn'), icon: <EarnIcon size={20} />, run: onOpenEarn },
+            ] as const
+          ).map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              onClick={action.run}
+              aria-label={action.label}
+              className="pressable flex flex-col items-center gap-1.5 rounded-2xl py-1 text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
             >
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-surface-secondary text-ink">
+                {action.icon}
+              </span>
+              <span className="text-[11.5px] font-semibold text-ink-2">{action.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <div className="mt-5 px-4">
+        <SectionHeader
+          right={
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="pressable flex h-7 w-7 items-center justify-center rounded-full bg-surface text-ink-2 shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+              aria-label={t('home.refresh')}
+            >
+              <RefreshIcon size={14} />
+            </button>
+          }
+        >
+          {t('home.availableFunds')}
+        </SectionHeader>
+        <Card>
+          {assets.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[13px] text-ink-muted">{t('home.syncing')}</p>
+          ) : (
+            assets.map((asset, index) => (
+              <div key={asset.key}>
+                {index > 0 ? <div className="ml-16 h-px bg-hairline" aria-hidden="true" /> : null}
+                <AssetRowView asset={asset} onOpen={onOpenCoin} guard={guard} />
+              </div>
+            ))
+          )}
+        </Card>
+      </div>
+
+      <div className="mt-5 px-4">
+        <SectionHeader>{t('home.activity')}</SectionHeader>
+        <Card>
+          {activity.state === 'loading' && !pending ? (
+            <p className="px-4 py-6 text-center text-[13px] text-ink-muted" aria-live="polite">
+              {t('home.syncing')}
+            </p>
+          ) : activity.state === 'error' && !pending ? (
+            <div className="flex items-center justify-between gap-3 px-4 py-5 text-[13px] text-ink-2">
               <span>{t('home.offline')}</span>
               <Button
                 variant="secondary"
-                onClick={() => {
-                  void refresh();
-                }}
-                className="w-auto px-3 min-h-9 text-sm"
+                onClick={onRefresh}
+                className="w-auto min-h-9 px-3 text-[12.5px]"
               >
                 {t('home.retry')}
               </Button>
             </div>
-          ) : null}
-
-          <section
-            className="rounded-2xl p-4 text-white border border-white/15 shadow-lg bg-gradient-to-br from-[#0b1b3a] via-[#1e2a78] to-[#0aa7c2]"
-            aria-label={t('home.mainWallet')}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium text-white/80">{t('home.mainWallet')}</span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void copyTon()}
-                  aria-label={t('home.copyTon')}
-                  data-testid="ton-address-pill"
-                  className="rounded-full bg-white/15 px-3 py-1 text-xs font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                >
-                  {copiedPill ? t('home.copied') : shortAddress(tonAddress)}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMasked((value) => !value);
-                  }}
-                  aria-label={masked ? t('home.showBalance') : t('home.hideBalance')}
-                  className="h-8 w-8 rounded-full bg-white/15 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                >
-                  <EyeIcon hidden={masked} />
-                </button>
-              </div>
-            </div>
-            <p data-testid="hero-balance" className="mt-4 text-4xl font-bold tracking-tight">
-              {balanceDisplay}
+          ) : allItems.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[13px] text-ink-muted">
+              {t('home.activityEmpty')}
             </p>
-            <span className="mt-2 inline-block rounded-full bg-white/15 px-3 py-1 text-xs text-white/80">
-              {secondaryDisplay}
-            </span>
-          </section>
-
-          <div className="grid grid-cols-4 gap-3">
-            {(
-              [
-                ['receive', 'home.receive', 'bg-blue-500/15 text-blue-600 dark:text-blue-300'],
-                ['send', 'home.send', 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300'],
-                ['swap', 'home.swap', 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-300'],
-                ['stake', 'home.stake', 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'],
-              ] as const
-            ).map(([kind, key, colors]) => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => {
-                  if (kind === 'receive') openReceive('ton');
-                  else if (kind === 'send') {
-                    if (!portfolioReady) {
-                      setSheet({
-                        kind: 'notice',
-                        title: t('home.send'),
-                        body: t('send.syncFirst'),
-                      });
-                    } else {
-                      setSendOpen(true);
-                    }
-                  } else if (kind === 'swap')
-                    setSheet({ kind: 'notice', title: t('home.swap'), body: t('home.swapNotice') });
-                  else
-                    setSheet({
-                      kind: 'notice',
-                      title: t('home.stake'),
-                      body: t('home.stakeNotice'),
-                    });
-                }}
-                aria-label={t(key)}
-                className="flex flex-col items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-xl py-1"
-              >
-                <span
-                  className={`h-12 w-12 rounded-2xl flex items-center justify-center ${colors}`}
-                >
-                  <ActionIcon kind={kind} />
-                </span>
-                <span className="text-xs">{t(key)}</span>
-              </button>
-            ))}
-          </div>
-
-          {tab === 'wallet' ? (
-            <section aria-label={t('home.walletTab')} className="flex flex-col gap-2">
-              {assetRows.map((asset) => (
-                <button
-                  key={asset.key}
-                  type="button"
-                  data-testid={asset.testId}
-                  aria-label={`${asset.name} ${asset.badge}`}
-                  onClick={() => {
-                    openReceive(asset.chain);
-                  }}
-                  className="w-full flex items-center gap-3 rounded-xl bg-black/5 dark:bg-white/10 p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                >
-                  <TokenIcon symbol={asset.symbol} />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-medium truncate">{asset.name}</span>
-                    <span className="inline-block mt-0.5 rounded-full bg-black/10 dark:bg-white/15 px-2 py-0.5 text-[10px] uppercase tracking-wide opacity-80">
-                      {asset.badge}
-                    </span>
-                  </span>
-                  <span className="text-right">
-                    <span className="block text-sm font-semibold">{asset.balanceText}</span>
-                    <span className="block text-xs opacity-70">{asset.usdText}</span>
-                  </span>
-                </button>
-              ))}
-            </section>
           ) : (
-            <section aria-label={t('home.activityTab')} className="flex flex-col gap-2">
-              {activity.state === 'loading' ? (
-                <p className="text-sm opacity-70" aria-live="polite">
-                  {t('home.syncing')}
-                </p>
-              ) : activity.state === 'error' ? (
-                <div
-                  role="alert"
-                  className="rounded-xl bg-black/5 dark:bg-white/10 p-4 text-sm flex items-center justify-between"
-                >
-                  <span>{t('home.offline')}</span>
-                  <Button
-                    variant="secondary"
-                    onClick={() => void refresh()}
-                    className="w-auto px-3 min-h-9 text-sm"
-                  >
-                    {t('home.retry')}
-                  </Button>
+            groups.map((group, groupIndex) => (
+              <div key={`${group.label}-${String(groupIndex)}`}>
+                <div className="flex justify-center bg-surface-secondary py-1.5">
+                  <span className="rounded-full bg-surface-elevated px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.02em] text-ink-2">
+                    {group.label}
+                  </span>
                 </div>
-              ) : activity.value.length === 0 && !pending ? (
-                <p className="rounded-xl bg-black/5 dark:bg-white/10 p-6 text-center text-sm opacity-70">
-                  {t('home.activityEmpty')}
-                </p>
-              ) : (
-                [...(pending ? [pending] : []), ...activity.value].map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    data-testid={`activity-${item.id}`}
-                    onClick={() => {
-                      setSheet({ kind: 'activity', item });
-                    }}
-                    className="w-full flex items-center gap-3 rounded-xl bg-black/5 dark:bg-white/10 p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={`h-9 w-9 rounded-full flex items-center justify-center ${
-                        item.direction === 'in'
-                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
-                          : 'bg-rose-500/15 text-rose-600 dark:text-rose-300'
-                      }`}
-                    >
-                      {item.direction === 'in' ? '↓' : '↑'}
-                    </span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-medium">
-                        {item.direction === 'in' ? '+' : '-'}
-                        {item.amount} {item.symbol}
-                      </span>
-                      <span className="block text-xs opacity-70 truncate">
-                        {truncateAddress(item.counterparty)} · {relativeTime(item.timestamp)}
-                      </span>
-                    </span>
-                    <span className="text-xs opacity-70">
-                      {item.isBounce === true
-                        ? t('home.bounced')
-                        : item.status === 'failed'
-                          ? 'Failed'
-                          : ''}
-                    </span>
-                  </button>
-                ))
-              )}
-            </section>
+                {group.items.map((item, index) => (
+                  <div key={item.id}>
+                    {index > 0 ? (
+                      <div className="ml-16 h-px bg-hairline" aria-hidden="true" />
+                    ) : null}
+                    <ActivityRow item={item} onOpen={onOpenTx} guard={guard} />
+                  </div>
+                ))}
+              </div>
+            ))
           )}
+        </Card>
+      </div>
 
-          <Notice>{t('home.notice')}</Notice>
-        </>
-      ) : (
-        <ErrorText>{t('settings.error')}</ErrorText>
-      )}
+      <p className="px-6 py-5 text-center text-[11.5px] font-medium text-ink-muted">
+        {t('home.notice')}
+      </p>
 
-      {sendOpen && info && portfolioReady ? (
-        <SendSheet
-          manager={manager}
-          info={info}
-          portfolio={portfolioReady}
-          api={api}
-          onClose={() => {
-            setSendOpen(false);
-          }}
-          onSubmitted={(decoded, submittedAsset) => {
-            baselineRef.current = activity.state === 'ready' ? activity.value.length : 0;
-            setPending({
-              id: `pending-${decoded.messageHash.hex.slice(0, 12)}`,
-              direction: 'out',
-              standard: decoded.asset.type === 'ton' ? 'native' : 'jetton',
-              symbol: submittedAsset.symbol,
-              decimals: submittedAsset.decimals,
-              amountRaw: decoded.amountRaw,
-              amount: formatDecimal(decoded.amountRaw, submittedAsset.decimals),
-              counterparty: decoded.recipient,
-              timestamp: Math.floor(Date.now() / 1000),
-              feeRaw: '0',
-              fee: '0',
-              status: 'pending',
-              hash: decoded.messageHash.base64,
-              comment: decoded.comment,
-              isScam: false,
-              isBounce: false,
-            });
-          }}
-        />
-      ) : null}
-
-      {sheet ? (
+      {sheet === 'wallet' ? (
         <Sheet
-          title={
-            sheet.kind === 'receive'
-              ? t('receive.title')
-              : sheet.kind === 'activity'
-                ? t('home.txDetails')
-                : sheet.title
-          }
+          title={t('home.wallets')}
           onClose={() => {
             setSheet(null);
           }}
         >
-          {sheet.kind === 'receive' ? (
-            <>
-              {focusedEntry ? (
-                <div className="flex flex-col items-center gap-2">
-                  <QrCode value={focusedEntry.value} label={`QR code for ${focusedEntry.label}`} />
-                  {focusedEntry.hint ? (
-                    <span className="text-xs opacity-70">{focusedEntry.hint}</span>
-                  ) : null}
-                </div>
-              ) : null}
-              {receiveEntries
-                .sort((a, b) => (a.chain === sheet.focus ? -1 : b.chain === sheet.focus ? 1 : 0))
-                .map((entry) => (
-                  <div
-                    key={entry.chain}
-                    className="rounded-lg bg-black/5 dark:bg-white/10 p-3 flex flex-col gap-1"
-                  >
-                    <span className="text-xs opacity-70">{entry.label}</span>
-                    <code
-                      className="text-xs break-all"
-                      data-testid={`address-${entry.chain.toUpperCase()}`}
-                    >
-                      {entry.value}
-                    </code>
-                    {entry.hint ? <span className="text-xs opacity-70">{entry.hint}</span> : null}
-                    <CopyButton value={entry.value} label={`${t('home.copy')} ${entry.label}`} />
-                  </div>
-                ))}
-            </>
-          ) : sheet.kind === 'activity' ? (
-            <div className="flex flex-col gap-2 text-sm">
-              <p className="text-lg font-semibold">
-                {sheet.item.direction === 'in' ? '+' : '-'}
-                {sheet.item.amount} {sheet.item.symbol}
-              </p>
-              <p className="opacity-70">
-                {sheet.item.direction === 'in' ? 'Received from' : 'Sent to'}{' '}
-                {truncateAddress(sheet.item.counterparty)}
-              </p>
-              <p className="opacity-70">Fee: {sheet.item.fee} TON</p>
-              <p className="opacity-70">
-                Status: {sheet.item.isBounce === true ? t('home.bouncedStatus') : sheet.item.status}
-              </p>
-              {sheet.item.comment ? (
-                <p className="rounded bg-black/5 dark:bg-white/10 p-2">
-                  Comment: {sheet.item.comment}
-                </p>
-              ) : null}
-              <a
-                className="underline text-blue-600 dark:text-blue-300 break-all"
-                href={`https://testnet.tonviewer.com/transaction/${hashToHex(sheet.item.hash)}`}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                View on testnet.tonviewer.com
-              </a>
-            </div>
-          ) : (
-            <p className="text-sm">{sheet.body}</p>
-          )}
+          <div className="flex items-center gap-3 rounded-[20px] bg-surface-secondary p-3.5">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-hero text-[12px] font-extrabold text-hero-ink">
+              OZ
+            </span>
+            <span className="flex-1">
+              <span className="block text-[15px] font-semibold text-ink">{t('app.name')}</span>
+              <span className="block text-[12px] text-ink-2">
+                {info ? shortAddress(tonAddress, 6, 4) : '—'}
+              </span>
+            </span>
+            <span className="rounded-full bg-positive-bg px-2 py-1 text-[10px] font-bold uppercase tracking-[0.04em] text-positive">
+              {t('home.testnet')}
+            </span>
+          </div>
+          <SheetRow
+            title="Vault Savings"
+            subtitle="Grow idle balances"
+            badge="Coming soon"
+            disabled
+          />
+          <SheetRow
+            title="+ Add / Import Wallet"
+            subtitle="Another wallet"
+            badge="Coming soon"
+            disabled
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setSheet(null);
+              onOpenSettings();
+            }}
+            className="pressable rounded-full bg-surface-secondary py-3 text-[13px] font-semibold text-ink"
+          >
+            Open settings
+          </button>
         </Sheet>
       ) : null}
-    </ScreenShell>
+
+      {sheet === 'qr' ? (
+        <Sheet
+          title={t('receive.title')}
+          onClose={() => {
+            setSheet(null);
+          }}
+        >
+          <div className="flex flex-col items-center gap-3">
+            <div className="rounded-[24px] bg-white p-3 shadow-card">
+              <QrCode value={tonAddress} size={200} label="QR code for your TON address" />
+            </div>
+            <code className="break-all rounded-2xl bg-surface-secondary px-3 py-2 text-center font-mono text-[11.5px] text-ink-2">
+              {tonAddress}
+            </code>
+            <Button variant="secondary" onClick={() => void copyAddress(tonAddress)}>
+              <CopyIcon size={16} />
+              {t('home.copyTon')}
+            </Button>
+            <p className="text-center text-[11.5px] text-ink-muted">{t('receive.tonHint')}</p>
+          </div>
+        </Sheet>
+      ) : null}
+    </div>
+  );
+}
+
+function prefixArrow(change: number | null): string {
+  if (change === null) return '';
+  return change >= 0 ? '↑' : '↓';
+}
+
+function SheetRow({
+  title,
+  subtitle,
+  badge,
+  disabled = false,
+}: {
+  title: string;
+  subtitle: string;
+  badge: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      aria-disabled={disabled}
+      className={`flex items-center gap-3 rounded-[20px] bg-surface-secondary p-3.5 ${
+        disabled ? 'opacity-60' : ''
+      }`}
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-elevated text-ink-2">
+        <span className="text-[12px] font-bold">+</span>
+      </span>
+      <span className="flex-1">
+        <span className="block text-[15px] font-semibold text-ink">{title}</span>
+        <span className="block text-[12px] text-ink-2">{subtitle}</span>
+      </span>
+      <span className="rounded-full bg-surface-elevated px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
+        {badge}
+      </span>
+    </div>
   );
 }

@@ -180,6 +180,27 @@ approval. Cadence: one commit per task.
 
 ---
 
+### P2c: Visual design system (2026-11-23)
+
+Implemented `DESIGN.md` across `apps/miniapp` without changing vault security invariants or the
+live P2a/P2b TON read/send behaviour.
+
+| Area                                                                                       | Status | Evidence                                                       |
+| ------------------------------------------------------------------------------------------ | ------ | -------------------------------------------------------------- |
+| Self-hosted Plus Jakarta Sans + JetBrains Mono (OFL-1.1), `font-src 'self'`                | DONE   | `main.tsx`, `index.css`, Vite `assetsInlineLimit: 0`           |
+| Dual-theme semantic tokens + `data-theme` toggle persisted in non-secret prefs             | DONE   | `index.css`, `ui/preferences.tsx`, design e2e                  |
+| Telegram chrome sync (`setBackgroundColor`, `setHeaderColor`)                              | DONE   | `ui/preferences.tsx`                                           |
+| Wallet home: top bar, connected hero + 4-action dock, funds, grouped activity              | DONE   | `ui/home.tsx`, `ui-home.test.tsx`, e2e                         |
+| Floating 4-tab nav (Wallet, Market, Assistant, Settings)                                   | DONE   | `ui/nav.tsx`, `ui/wallet-shell.tsx`, e2e                       |
+| Deposit/Fund, live Send/Sell, Trade shell, Earn shell                                      | DONE   | `ui/deposit.tsx`, `ui/send.tsx`, `ui/trade.tsx`, `ui/earn.tsx` |
+| Coin Detail (live balance + filtered activity, preview chart)                              | DONE   | `ui/coin-detail.tsx`, e2e                                      |
+| Transaction Detail (hero amount, dimmed address middle, hash link, Repeat)                 | DONE   | `ui/tx-detail.tsx`, e2e                                        |
+| Market + Assistant preview shells, labelled coming-soon rows                               | DONE   | `ui/market.tsx`, `ui/assistant.tsx`                            |
+| Onboarding / create / import / PIN restyle, no phrase clipboard, no mandatory 3-word check | DONE   | `ui/onboarding.tsx`, `ui/import.tsx`, `ui/passcode.tsx`        |
+| License allowlist gains OFL-1.1                                                            | DONE   | `scripts/license-check.mjs`, `THIRD_PARTY_LICENSES.md`         |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started
