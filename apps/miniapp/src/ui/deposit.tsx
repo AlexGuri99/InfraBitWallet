@@ -147,7 +147,7 @@ export function DepositScreen({
         </section>
 
         <Card className="flex items-center gap-3 p-4">
-          <TokenAvatar symbol={selected?.label ?? 'TON'} size={36} />
+          <TokenAvatar symbol={selected?.label ?? 'TON'} size={40} />
           <p className="flex-1 text-[12px] leading-relaxed text-ink-2">{t('deposit.sendOnly')}</p>
         </Card>
       </main>

@@ -14,6 +14,7 @@ import type {
 } from 'react';
 import { t } from '../i18n';
 import { ChevronLeftIcon, CloseIcon } from './icons';
+import { CoinIcon } from './coin-icons';
 
 export function StepIndicator({ current, total }: { current: number; total: number }) {
   return (
@@ -378,6 +379,7 @@ export function Segmented<T extends string>({
 }
 
 /** Round token avatar with a symbol fallback glyph. */
+/** Circular coin avatar: branded SVG for known coins, deterministic monogram for jettons. */
 export function TokenAvatar({
   symbol,
   size = 40,
@@ -387,13 +389,5 @@ export function TokenAvatar({
   size?: number;
   className?: string;
 }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-full bg-surface-secondary font-bold text-ink ${className}`}
-      style={{ width: size, height: size, fontSize: Math.max(10, size * 0.28) }}
-    >
-      {symbol.slice(0, 4).toUpperCase()}
-    </span>
-  );
+  return <CoinIcon symbol={symbol} size={size} className={className} />;
 }

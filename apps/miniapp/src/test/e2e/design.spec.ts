@@ -26,6 +26,26 @@ const PORTFOLIO = {
       balance: '1.5',
       usdValue: 2.25,
     },
+    {
+      id: '-1:27b3b038792c090b59897fbd890c4f5bc8a63d9ffc716f5861968972f617908b',
+      symbol: 'USDT',
+      name: 'Tether USD',
+      decimals: 6,
+      standard: 'jetton',
+      balanceRaw: '2500000',
+      balance: '2.5',
+      usdValue: null,
+    },
+    {
+      id: '-1:aaaa000000000000000000000000000000000000000000000000000000000001',
+      symbol: 'FOO',
+      name: 'Foo Token',
+      decimals: 9,
+      standard: 'jetton',
+      balanceRaw: '1000000000',
+      balance: '1',
+      usdValue: null,
+    },
   ],
   updatedAt: 0,
   source: 'toncenter',
@@ -154,6 +174,32 @@ test.describe('design system', () => {
     await expect(page.getByRole('heading', { name: 'Assistant' })).toBeVisible();
     await expect(page.getByText('Coming soon').first()).toBeVisible();
     await expect(page.getByLabel('Message the assistant')).toBeDisabled();
+  });
+
+  test('coin icons are inline SVGs and unknown jettons use a monogram', async ({ page }) => {
+    const imageRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.resourceType() === 'image') imageRequests.push(request.url());
+    });
+    await mockTonApi(page);
+    await createWallet(page);
+
+    await expect(page.locator('[data-testid="asset-TON"] svg')).toHaveCount(1);
+    await expect(page.locator('[data-testid="asset-USDT"] svg')).toHaveCount(1);
+    await expect(page.locator('[data-testid="asset-FOO-2"]')).toContainText('FO');
+    await expect(page.locator('[data-testid="asset-FOO-2"] svg')).toHaveCount(0);
+    const origin = new URL(page.url()).origin;
+    expect(
+      imageRequests.filter((url) => {
+        if (url.startsWith('data:')) return false;
+        return new URL(url).origin !== origin;
+      }),
+    ).toEqual([]);
+
+    await page.getByTestId('asset-TON').click();
+    await expect(page.getByRole('heading', { name: 'Toncoin' })).toBeVisible();
+    await expect(page.getByTestId('coin-balance')).toHaveText('1.5 TON');
+    expect(await page.locator('img').count()).toBe(0);
   });
 
   test('Coin Detail and Transaction Detail render live data', async ({ page }) => {
