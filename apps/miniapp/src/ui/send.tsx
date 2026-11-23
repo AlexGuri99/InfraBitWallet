@@ -1,12 +1,13 @@
 /**
- * 3-step TON Testnet send: form -> signed-BoC review + emulation -> submitted.
+ * Send screen (DESIGN.md §5.3) with the live P2b TON flow.
  *
- * The review renders ONLY the decoded signed BoC and the emulation result, so what is shown is
- * exactly what will be broadcast. Signing happens through the vault session (`signDigest`); no
- * private key ever reaches this component.
+ * form -> signed BoC review + emulation -> broadcast -> submitted. The review renders ONLY the
+ * decoded signed BoC and the emulation result, so what is shown is exactly what will be
+ * broadcast. Signing happens through the vault session (`signDigest`); no private key ever
+ * reaches this component. Sell is a designed shell with a disabled CTA.
  */
 import { useMemo, useState } from 'react';
-import type { VaultManager, PublicAccountInfo } from '@onezerowallet/crypto-vault';
+import type { PublicAccountInfo, VaultManager } from '@onezerowallet/crypto-vault';
 import {
   addressRequiresBounce,
   buildJettonTransfer,
@@ -24,9 +25,26 @@ import {
 } from '@onezerowallet/chain-ton';
 import { t } from '../i18n';
 import type { EmulationPayload, TonReadApi, TonWriteApi } from '../ton/api';
-import { Button, ErrorText, Field, Notice, PhraseInput, Sheet } from './common';
+import {
+  Button,
+  Card,
+  ErrorText,
+  Field,
+  Notice,
+  PhoneFrame,
+  PhraseInput,
+  ScreenHeader,
+  Segmented,
+} from './common';
+import { useToast } from './toast';
+import { TokenAvatar } from './common';
 
 const MAX_COMMENT = 120;
+
+export interface SendPrefill {
+  assetId?: string | undefined;
+  recipient?: string | undefined;
+}
 
 type Step =
   | { kind: 'form' }
@@ -42,29 +60,42 @@ function amountFor(asset: TonAssetBalance, value: string): bigint | null {
   return parseDecimal(value, asset.decimals);
 }
 
-export function SendSheet({
+function usdFor(value: string, price: number | null): number | null {
+  if (price === null) return null;
+  const parsed = Number.parseFloat(value || '0');
+  return Number.isFinite(parsed) ? parsed * price : null;
+}
+
+export function SendScreen({
   manager,
   info,
   portfolio,
   api,
-  onClose,
+  prefill,
+  onBack,
   onSubmitted,
 }: {
   manager: VaultManager;
   info: PublicAccountInfo;
   portfolio: TonPortfolio;
   api: TonReadApi & TonWriteApi;
-  onClose: () => void;
+  prefill?: SendPrefill | undefined;
+  onBack: () => void;
   onSubmitted: (
     decoded: DecodedSignedTransfer,
     asset: { symbol: string; decimals: number },
   ) => void;
 }) {
+  const toast = useToast();
+  const [mode, setMode] = useState<'send' | 'sell'>('send');
   const assets = portfolio.assets.filter(
     (asset) => asset.standard === 'native' || asset.jettonWalletAddress !== undefined,
   );
-  const [assetId, setAssetId] = useState(assets[0]?.id ?? 'ton');
-  const [recipient, setRecipient] = useState('');
+  const initialAsset = prefill?.assetId
+    ? (assets.find((entry) => entry.id === prefill.assetId)?.id ?? assets[0]?.id ?? 'ton')
+    : (assets[0]?.id ?? 'ton');
+  const [assetId, setAssetId] = useState(initialAsset);
+  const [recipient, setRecipient] = useState(prefill?.recipient ?? '');
   const [amount, setAmount] = useState('');
   const [comment, setComment] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -74,12 +105,8 @@ export function SendSheet({
     () => assets.find((entry) => entry.id === assetId) ?? assets[0],
     [assets, assetId],
   );
-
   const nativeAsset = assets.find((entry) => entry.standard === 'native');
-  const usdValue =
-    asset && asset.standard === 'native' && portfolio.priceUsd !== null
-      ? Number.parseFloat(amount || '0') * portfolio.priceUsd
-      : null;
+  const usdValue = asset && asset.standard === 'native' ? usdFor(amount, portfolio.priceUsd) : null;
 
   const validate = (): string | null => {
     if (!asset) return 'No asset selected';
@@ -146,12 +173,11 @@ export function SendSheet({
               destination,
               amountRaw: rawAmount,
               bounce: addressRequiresBounce(destination),
-              comment: comment.trim() === '' ? undefined : comment.trim(),
+              ...(comment.trim() === '' ? {} : { comment: comment.trim() }),
               deploy: state.status === 'uninit',
-              sendMode:
-                nativeAsset && rawAmount === BigInt(maxTonAmountRaw(nativeAsset.balanceRaw))
-                  ? SEND_MODE_MAX
-                  : undefined,
+              ...(nativeAsset && rawAmount === BigInt(maxTonAmountRaw(nativeAsset.balanceRaw))
+                ? { sendMode: SEND_MODE_MAX }
+                : {}),
             },
             sign,
           )
@@ -163,7 +189,7 @@ export function SendSheet({
               jettonWallet: asset.jettonWalletAddress ?? '',
               destination,
               amountRaw: rawAmount,
-              comment: comment.trim() === '' ? undefined : comment.trim(),
+              ...(comment.trim() === '' ? {} : { comment: comment.trim() }),
               deploy: state.status === 'uninit',
             },
             sign,
@@ -190,6 +216,7 @@ export function SendSheet({
         decimals: reviewAsset?.decimals ?? 9,
       });
       setStep({ kind: 'sent', hashHex: result.messageHash.hex, decoded: step.decoded });
+      toast.show(t('send.submitted'));
     } catch {
       setError('Broadcast failed. The transfer may not have been submitted.');
     } finally {
@@ -199,21 +226,39 @@ export function SendSheet({
 
   if (step.kind === 'sent') {
     return (
-      <Sheet title={t('send.submitted')} onClose={onClose}>
-        <p className="text-sm">{t('send.submittedBody')}</p>
-        <p className="text-sm font-semibold">
-          {step.decoded.amountRaw} {step.decoded.asset.type === 'ton' ? 'TON' : 'JETTON'}
-        </p>
-        <a
-          className="underline text-blue-600 dark:text-blue-300 break-all text-xs"
-          href={`https://testnet.tonviewer.com/message/${step.hashHex}`}
-          target="_blank"
-          rel="noreferrer noopener"
-        >
-          testnet.tonviewer.com/message/{step.hashHex.slice(0, 16)}…
-        </a>
-        <Button onClick={onClose}>{t('home.close')}</Button>
-      </Sheet>
+      <PhoneFrame>
+        <ScreenHeader title={t('send.submitted')} onBack={onBack} />
+        <main className="flex flex-1 flex-col items-center gap-4 px-5 pt-6">
+          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-positive-bg text-[26px] font-bold text-positive">
+            ✓
+          </div>
+          <p className="text-center text-[13px] leading-relaxed text-ink-2">
+            {t('send.submittedBody')}
+          </p>
+          <Card className="w-full p-4 text-center">
+            <p className="tabular text-[22px] font-extrabold tracking-[-0.02em] text-ink">
+              {step.decoded.amountRaw} {step.decoded.asset.type === 'ton' ? 'TON' : 'JETTON'}
+              <span className="text-[12px] font-medium text-ink-muted"> raw</span>
+            </p>
+            <a
+              className="mt-2 block break-all text-[11.5px] font-medium text-accent-link underline"
+              href={`https://testnet.tonviewer.com/message/${step.hashHex}`}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              testnet.tonviewer.com/message/{step.hashHex.slice(0, 16)}…
+            </a>
+          </Card>
+          <Button
+            onClick={() => {
+              setStep({ kind: 'form' });
+              onBack();
+            }}
+          >
+            {t('common.done')}
+          </Button>
+        </main>
+      </PhoneFrame>
     );
   }
 
@@ -221,120 +266,263 @@ export function SendSheet({
     const { decoded, emulation } = step;
     const fatal = !emulation.ok;
     return (
-      <Sheet title={t('send.review')} onClose={onClose}>
-        <div className="flex flex-col gap-1 text-sm">
-          <span className="text-xs opacity-70">{t('send.recipient')}</span>
-          <code className="break-all text-xs">{decoded.recipient}</code>
-          <span>
-            {t('send.amount')}: <strong>{decoded.amountRaw}</strong>{' '}
-            {decoded.asset.type === 'ton' ? 'TON (raw)' : 'JETTON (raw)'}
-          </span>
-          {decoded.comment ? (
-            <span>
-              {t('send.comment')}: {decoded.comment}
-            </span>
-          ) : null}
-          {decoded.hasStateInit ? (
-            <span className="rounded-full bg-blue-500/15 px-2 py-1 text-xs w-fit">
-              {t('send.deployBadge')}
-            </span>
-          ) : null}
-          <span className="text-xs opacity-70">
-            Fee: {formatDecimalShort(emulation.estimatedFeeRaw, 9, 6)} TON · seqno {decoded.seqno}
-          </span>
-          {emulation.balanceChanges.map((change) => (
-            <span key={change.assetId} className="text-xs">
-              {change.symbol} change: {formatDecimalShort(change.deltaRaw, change.decimals, 6)}
-            </span>
-          ))}
+      <PhoneFrame>
+        <ScreenHeader
+          title={t('send.review')}
+          onBack={() => {
+            setStep({ kind: 'form' });
+          }}
+        />
+        <main className="flex flex-1 flex-col gap-4 px-4 pb-10">
+          <Card className="flex flex-col gap-3 p-4">
+            <div>
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
+                {t('send.recipient')}
+              </p>
+              <code className="mt-1 block break-all font-mono text-[12.5px] text-ink">
+                {decoded.recipient}
+              </code>
+            </div>
+            <div className="h-px bg-hairline" />
+            <div>
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
+                {t('send.amount')}
+              </p>
+              <p className="tabular mt-1 text-[15px] font-semibold text-ink">
+                {decoded.amountRaw} {decoded.asset.type === 'ton' ? 'TON (raw)' : 'JETTON (raw)'}
+              </p>
+            </div>
+            {decoded.comment ? (
+              <>
+                <div className="h-px bg-hairline" />
+                <div>
+                  <p className="text-[11.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
+                    {t('send.comment')}
+                  </p>
+                  <p className="mt-1 text-[13px] text-ink">{decoded.comment}</p>
+                </div>
+              </>
+            ) : null}
+          </Card>
+
+          <Card className="flex flex-col gap-2 p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-ink-2">Network fee (est.)</span>
+              <span className="tabular text-[13px] font-semibold text-ink">
+                {formatDecimalShort(emulation.estimatedFeeRaw, 9, 6)} TON
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] text-ink-2">Seqno</span>
+              <span className="tabular text-[13px] font-semibold text-ink">{decoded.seqno}</span>
+            </div>
+            {decoded.hasStateInit ? (
+              <span className="mt-1 w-fit rounded-full bg-swap-bg px-2.5 py-1 text-[11.5px] font-semibold text-swap">
+                {t('send.deployBadge')}
+              </span>
+            ) : null}
+            {emulation.balanceChanges.map((change) => (
+              <div key={change.assetId} className="flex items-center justify-between">
+                <span className="text-[13px] text-ink-2">{change.symbol} change</span>
+                <span className="tabular text-[13px] font-semibold text-ink">
+                  {formatDecimalShort(change.deltaRaw, change.decimals, 6)}
+                </span>
+              </div>
+            ))}
+          </Card>
+
           {emulation.warnings.length > 0 ? (
             <Notice tone="warning">{emulation.warnings.join(' · ')}</Notice>
           ) : null}
           {fatal ? <ErrorText>{t('send.emulationFailed')}</ErrorText> : null}
-        </div>
-        {error ? <ErrorText>{error}</ErrorText> : null}
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setStep({ kind: 'form' });
-          }}
-          disabled={busy}
-        >
-          {t('settings.back')}
-        </Button>
-        <Button onClick={() => void broadcast()} disabled={busy || fatal}>
-          {busy ? t('common.working') : t('send.confirm')}
-        </Button>
-      </Sheet>
+          {error ? <ErrorText>{error}</ErrorText> : null}
+
+          <div className="mt-auto flex flex-col gap-2.5 pt-4">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setStep({ kind: 'form' });
+              }}
+              disabled={busy}
+            >
+              {t('settings.back')}
+            </Button>
+            <Button onClick={() => void broadcast()} disabled={busy || fatal}>
+              {busy ? t('common.working') : t('send.confirm')}
+            </Button>
+          </div>
+        </main>
+      </PhoneFrame>
     );
   }
 
   return (
-    <Sheet title={t('send.title')} onClose={onClose}>
-      <label className="text-sm font-medium" htmlFor="send-asset">
-        {t('send.asset')}
-      </label>
-      <select
-        id="send-asset"
-        className="min-h-11 rounded-lg border border-gray-400/60 bg-transparent px-3 py-2"
-        value={assetId}
-        onChange={(event) => {
-          setAssetId(event.target.value);
-          setAmount('');
-        }}
-      >
-        {assets.map((entry) => (
-          <option key={entry.id} value={entry.id}>
-            {entry.symbol} — {entry.balance}
-          </option>
-        ))}
-      </select>
+    <PhoneFrame>
+      <ScreenHeader
+        title={mode === 'send' ? t('send.title') : t('send.sellTitle')}
+        onBack={onBack}
+      />
+      <main className="flex flex-1 flex-col gap-4 px-4 pb-10">
+        <Segmented
+          label="Send or sell"
+          value={mode}
+          options={[
+            { value: 'send', label: t('send.modeSend') },
+            { value: 'sell', label: t('send.modeSell') },
+          ]}
+          onChange={setMode}
+        />
 
-      <Field
-        id="send-recipient"
-        label={t('send.recipient')}
-        value={recipient}
-        onChange={(event) => {
-          setRecipient(event.target.value);
-        }}
-        autoComplete="off"
-        spellCheck={false}
-        placeholder="0Q… / kQ… / 0:…"
-      />
-      <Field
-        id="send-amount"
-        label={t('send.amount')}
-        value={amount}
-        onChange={(event) => {
-          setAmount(event.target.value);
-        }}
-        inputMode="decimal"
-        autoComplete="off"
-        hint={usdValue === null ? undefined : `≈ ${formatUsd(usdValue)}`}
-      />
-      <Button
-        variant="secondary"
-        onClick={() => {
-          maxAmount();
-        }}
-        className="w-auto self-start px-3 min-h-9 text-sm"
-      >
-        {t('send.max')}
-      </Button>
-      <PhraseInput
-        id="send-comment"
-        label={t('send.comment')}
-        hint={`${String(comment.length)}/${String(MAX_COMMENT)}`}
-        value={comment}
-        onChange={(event) => {
-          setComment(event.target.value.slice(0, MAX_COMMENT));
-        }}
-      />
-      {error ? <ErrorText>{error}</ErrorText> : null}
-      <Button onClick={() => void review()} disabled={busy}>
-        {busy ? t('common.working') : t('send.reviewAction')}
-      </Button>
-      <Notice>{t('home.willNeverAsk')}</Notice>
-    </Sheet>
+        {mode === 'sell' ? (
+          <SellShell />
+        ) : (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="send-asset" className="px-1 text-[12.5px] font-semibold text-ink-2">
+                {t('send.asset')}
+              </label>
+              <div className="flex items-center gap-3 rounded-2xl border border-hairline bg-surface px-3 py-2">
+                <TokenAvatar symbol={asset?.symbol ?? 'TON'} size={34} />
+                <select
+                  id="send-asset"
+                  className="min-h-10 flex-1 bg-transparent text-[15px] font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+                  value={assetId}
+                  onChange={(event) => {
+                    setAssetId(event.target.value);
+                    setAmount('');
+                    setError(null);
+                  }}
+                >
+                  {assets.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.symbol} — {entry.balance}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <Field
+              id="send-recipient"
+              label={t('send.recipient')}
+              value={recipient}
+              onChange={(event) => {
+                setRecipient(event.target.value);
+                setError(null);
+              }}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="0Q… / kQ… / 0:…"
+            />
+
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between px-1">
+                <label htmlFor="send-amount" className="text-[12.5px] font-semibold text-ink-2">
+                  {t('send.amount')}
+                </label>
+                <button
+                  type="button"
+                  onClick={maxAmount}
+                  className="pressable rounded-full bg-surface-secondary px-2.5 py-1 text-[11.5px] font-bold text-accent-link focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+                >
+                  {t('send.max')}
+                </button>
+              </div>
+              <input
+                id="send-amount"
+                value={amount}
+                onChange={(event) => {
+                  setAmount(event.target.value);
+                  setError(null);
+                }}
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="0.0"
+                className="tabular min-h-16 w-full rounded-2xl border border-hairline bg-surface px-4 font-mono text-[22px] font-semibold text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+              />
+              <p className="px-1 text-[12px] text-ink-muted">
+                {usdValue === null
+                  ? `${asset?.balance ?? '—'} ${asset?.symbol ?? ''} available`
+                  : `≈ ${formatUsd(usdValue)}`}
+              </p>
+            </div>
+
+            <PhraseInput
+              id="send-comment"
+              label={t('send.comment')}
+              hint={`${String(comment.length)}/${String(MAX_COMMENT)}`}
+              value={comment}
+              onChange={(event) => {
+                setComment(event.target.value.slice(0, MAX_COMMENT));
+              }}
+            />
+
+            {error ? <ErrorText>{error}</ErrorText> : null}
+
+            <div className="mt-auto flex flex-col gap-2.5 pt-2">
+              <Button onClick={() => void review()} disabled={busy || !asset}>
+                {busy ? t('common.working') : t('send.reviewAction')}
+              </Button>
+              <p className="text-center text-[11.5px] text-ink-muted">{t('home.notice')}</p>
+            </div>
+          </>
+        )}
+      </main>
+    </PhoneFrame>
+  );
+}
+
+function SellShell() {
+  const toast = useToast();
+  const [amount, setAmount] = useState('');
+  return (
+    <>
+      <div className="rounded-[24px] bg-surface p-4 shadow-card">
+        <div className="flex items-center justify-between">
+          <span className="text-[12.5px] font-semibold text-ink-2">You Sell</span>
+          <span className="rounded-full bg-surface-secondary px-2.5 py-1 text-[11.5px] font-semibold text-ink-2">
+            TON
+          </span>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <input
+            aria-label="Sell amount"
+            inputMode="decimal"
+            value={amount}
+            onChange={(event) => {
+              setAmount(event.target.value);
+            }}
+            placeholder="0.0"
+            className="tabular min-w-0 flex-1 bg-transparent font-mono text-[26px] font-bold text-ink placeholder:text-ink-muted focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              toast.show('Payout — coming soon');
+            }}
+            className="pressable rounded-full bg-surface-secondary px-3 py-1.5 text-[11.5px] font-bold text-accent-link"
+          >
+            Max
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-[24px] bg-surface p-4 shadow-card">
+        <div className="flex items-center justify-between">
+          <span className="text-[12.5px] font-semibold text-ink-2">Payout</span>
+          <span className="rounded-full bg-surface-secondary px-2.5 py-1 text-[11.5px] font-semibold text-ink-2">
+            Bank transfer
+          </span>
+        </div>
+        <p className="mt-3 text-[22px] font-extrabold tracking-[-0.02em] text-ink-muted">—</p>
+        <p className="mt-1 text-[12px] text-ink-muted">
+          A licensed off-ramp provider will be added in a later phase.
+        </p>
+      </div>
+
+      <div className="mt-auto pt-2">
+        <Button disabled>Coming soon</Button>
+      </div>
+    </>
   );
 }

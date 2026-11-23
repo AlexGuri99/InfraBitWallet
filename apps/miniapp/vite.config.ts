@@ -22,6 +22,9 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
+    // Never inline fonts as data: URIs — strict CSP is `font-src 'self'`, and self-hosted
+    // .woff2 files must stay same-origin requests.
+    assetsInlineLimit: 0,
   },
   server: {
     headers: {

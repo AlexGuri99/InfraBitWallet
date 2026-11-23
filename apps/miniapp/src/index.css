@@ -2,52 +2,170 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Telegram theme variables fallback for local dev */
+/*
+ * OneZeroWallet design tokens (DESIGN.md §2).
+ * Semantic names only — components never hardcode a one-off hex value.
+ * Mint Light is the default; Forest & Citron applies via [data-theme='dark'].
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-canvas: #dff2e6;
+  --bg-surface: #ffffff;
+  --bg-surface-secondary: #f3f9f5;
+  --bg-surface-elevated: #ebf6ef;
+  --bg-glass: rgba(255, 255, 255, 0.84);
+
+  --hero-bg: #fff34c;
+  --hero-bg-end: #f7e831;
+  --hero-ink: #111814;
+  --hero-pill-bg: rgba(17, 24, 20, 0.08);
+
+  --accent-primary: #111814;
+  --accent-primary-ink: #ffffff;
+  --accent-link: #0f766e;
+  --tab-active-bg: #e3f5ea;
+
+  --text-primary: #111814;
+  --text-secondary: #52665b;
+  --text-muted: #83998d;
+
+  --status-positive: #15803d;
+  --status-positive-bg: rgba(21, 128, 61, 0.12);
+  --status-negative: #dc2626;
+  --status-swap: #0284c7;
+  --status-swap-bg: rgba(2, 132, 199, 0.12);
+
+  --border-subtle: rgba(17, 24, 20, 0.07);
+  --shadow-card: 0 10px 30px rgba(17, 24, 20, 0.06);
+  --shadow-hero: 0 16px 40px rgba(120, 122, 20, 0.18);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-canvas: #0a0f0d;
+  --bg-surface: #141d19;
+  --bg-surface-secondary: #1b2722;
+  --bg-surface-elevated: #22312a;
+  --bg-glass: rgba(20, 29, 25, 0.84);
+
+  --hero-bg: #e6f04a;
+  --hero-bg-end: #cfe030;
+  --hero-ink: #0a0f0d;
+  --hero-pill-bg: rgba(10, 15, 13, 0.12);
+
+  --accent-primary: #e6f04a;
+  --accent-primary-ink: #0a0f0d;
+  --accent-link: #5eead4;
+  --tab-active-bg: #e6f04a;
+
+  --text-primary: #f2f7f4;
+  --text-secondary: #94a89e;
+  --text-muted: #5e7368;
+
+  --status-positive: #34d399;
+  --status-positive-bg: rgba(52, 211, 153, 0.15);
+  --status-negative: #f87171;
+  --status-swap: #38bdf8;
+  --status-swap-bg: rgba(56, 189, 248, 0.15);
+
+  --border-subtle: rgba(242, 247, 244, 0.08);
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-hero: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
 :root {
-  --tg-theme-bg-color: #ffffff;
-  --tg-theme-text-color: #000000;
-  --tg-theme-hint-color: #999999;
-  --tg-theme-link-color: #2481cc;
-  --tg-theme-button-color: #2481cc;
-  --tg-theme-button-text-color: #ffffff;
-  --tg-theme-header-bg-color: #f0f0f0;
-  --tg-theme-accent-text-color: #2481cc;
-  --tg-theme-section-bg-color: #ffffff;
-  --tg-theme-section-separator-color: #e0e0e0;
-  --tg-theme-subtitle-text-color: #999999;
-  --tg-theme-destructive-text-color: #ff3b30;
+  --font-sans:
+    'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont,
+    sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --tg-theme-bg-color: #1a1a2e;
-    --tg-theme-text-color: #e0e0e0;
-    --tg-theme-hint-color: #888888;
-    --tg-theme-link-color: #5ba8e8;
-    --tg-theme-button-color: #5ba8e8;
-    --tg-theme-button-text-color: #ffffff;
-    --tg-theme-header-bg-color: #16213e;
-    --tg-theme-accent-text-color: #5ba8e8;
-    --tg-theme-section-bg-color: #1a1a2e;
-    --tg-theme-section-separator-color: #333355;
-    --tg-theme-subtitle-text-color: #888888;
-    --tg-theme-destructive-text-color: #ff6b6b;
-  }
+* {
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Safe area handling */
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: var(--tg-theme-bg-color);
-  color: var(--tg-theme-text-color);
+  overscroll-behavior-y: none;
 }
 
-/* Prevent text selection on UI elements */
+/* Numeric discipline: digits never jitter while balances scrub or mask. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Tactile press feedback (DESIGN.md §6). */
+.pressable {
+  transition: transform 120ms ease-out;
+}
+.pressable:active {
+  transform: scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pressable {
+    transition: none;
+  }
+  .pressable:active {
+    transform: none;
+  }
+}
+
+/* Screen transition for drilled-in views (DESIGN.md §6). */
+@keyframes ozw-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.screen-enter {
+  animation: ozw-slide-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ozw-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-enter {
+  animation: ozw-toast-in 160ms ease-out;
+}
+
+/* Hide scrollbars on horizontal pill rails without disabling scrolling. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Prevent text selection on chrome-like controls. */
 .no-select {
   -webkit-user-select: none;
   user-select: none;

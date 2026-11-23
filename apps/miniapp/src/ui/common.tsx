@@ -1,6 +1,8 @@
 /**
- * Small shared UI primitives. Mobile-first, Telegram theme variables, WCAG-friendly focus styles.
- * No secret ever passes through these components as props or state.
+ * Shared UI primitives (DESIGN.md §2–§4).
+ *
+ * Semantic tokens only — no screen hardcodes a colour. Mobile-first inside a 430px frame with
+ * Telegram safe areas. Nothing here ever receives a secret as a prop or keeps one in state.
  */
 import { useEffect } from 'react';
 import type {
@@ -10,74 +12,118 @@ import type {
   Ref,
   TextareaHTMLAttributes,
 } from 'react';
-import { useTelegram } from '../telegram';
 import { t } from '../i18n';
+import { ChevronLeftIcon, CloseIcon } from './icons';
 
 export function StepIndicator({ current, total }: { current: number; total: number }) {
   return (
-    <span className="text-xs opacity-70" aria-label={`Step ${String(current)} of ${String(total)}`}>
+    <span
+      className="text-[11.5px] font-semibold uppercase tracking-[0.02em] text-ink-2"
+      aria-label={`Step ${String(current)} of ${String(total)}`}
+    >
       Step {current} of {total}
     </span>
   );
 }
 
+/** Centred mobile viewport frame with Telegram safe-area insets. */
+export function PhoneFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-[100dvh] w-full justify-center bg-canvas text-ink">
+      <div
+        className="flex min-h-[100dvh] w-full max-w-[430px] flex-col"
+        style={{
+          paddingTop: 'env(safe-area-inset-top)',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)',
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={t('settings.back')}
+      className="pressable flex h-9 items-center gap-0.5 rounded-full bg-surface-secondary pl-1.5 pr-3 text-[13px] font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+    >
+      <ChevronLeftIcon size={18} />
+      {t('settings.back')}
+    </button>
+  );
+}
+
 /**
- * Mobile: full-bleed with Telegram safe areas. Desktop: a centred elevated card.
- * The card surface uses the Telegram section colour so the app still looks native.
+ * Standard sub-screen header: `< Back` pill on the left, centred title, optional right slot.
+ * The title is the screen's only h1.
+ */
+export function ScreenHeader({
+  title,
+  onBack,
+  right,
+  step,
+  floating = false,
+}: {
+  title: string;
+  onBack?: (() => void) | undefined;
+  right?: ReactNode;
+  step?: { current: number; total: number } | undefined;
+  floating?: boolean;
+}) {
+  return (
+    <header
+      className={`grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 ${
+        floating ? '' : 'sticky top-0 z-20 bg-glass backdrop-blur-[18px]'
+      }`}
+    >
+      <div className="flex justify-start">{onBack ? <BackButton onClick={onBack} /> : null}</div>
+      <h1 className="text-center text-[17px] font-bold tracking-[-0.01em] text-ink">{title}</h1>
+      <div className="flex items-center justify-end gap-2">
+        {step ? <StepIndicator current={step.current} total={step.total} /> : null}
+        {right}
+      </div>
+    </header>
+  );
+}
+
+/**
+ * Onboarding / flow shell: framed viewport with the standard header and a scrolling main column.
+ * Renders exactly one h1 (the screen title) and one main landmark.
  */
 export function ScreenShell({
   title,
   children,
   onBack,
   step,
+  right,
+  subtitle,
 }: {
   title: string;
   children: ReactNode;
   onBack?: (() => void) | undefined;
   step?: { current: number; total: number } | undefined;
+  right?: ReactNode;
+  subtitle?: ReactNode;
 }) {
-  const { theme } = useTelegram();
   return (
-    <div
-      className="min-h-screen w-full flex justify-center"
-      style={{
-        backgroundColor: theme?.backgroundColor ?? 'var(--tg-theme-bg-color, #fff)',
-        color: theme?.textColor ?? 'var(--tg-theme-text-color, #000)',
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        paddingLeft: 'env(safe-area-inset-left)',
-        paddingRight: 'env(safe-area-inset-right)',
-      }}
-    >
-      <div
-        className="w-full max-w-md flex flex-col min-h-screen sm:min-h-0 sm:my-8 sm:rounded-2xl sm:shadow-xl sm:border sm:border-black/10 overflow-hidden"
-        style={{
-          backgroundColor: theme?.sectionBgColor ?? 'var(--tg-theme-section-bg-color, #fff)',
-        }}
-      >
-        <header
-          className="px-4 py-3 flex items-center gap-3"
-          style={{
-            backgroundColor: theme?.headerBgColor ?? 'var(--tg-theme-header-bg-color, #f0f0f0)',
-          }}
-        >
-          {onBack ? (
-            <button
-              type="button"
-              onClick={onBack}
-              className="text-sm underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
-              aria-label="Back"
-            >
-              ←
-            </button>
-          ) : null}
-          <h1 className="text-lg font-semibold flex-1">{title}</h1>
-          {step ? <StepIndicator current={step.current} total={step.total} /> : null}
-        </header>
-        <main className="flex-1 px-4 py-6 flex flex-col gap-4 w-full">{children}</main>
-      </div>
-    </div>
+    <PhoneFrame>
+      <ScreenHeader title={title} onBack={onBack} step={step} right={right} />
+      <main className="flex flex-1 flex-col gap-4 px-4 pb-10 pt-1">
+        {subtitle}
+        {children}
+      </main>
+    </PhoneFrame>
   );
+}
+
+/** Full-bleed scrolling content with clearance for the floating nav (DESIGN.md §4). */
+export function ScreenBody({ children }: { children: ReactNode }) {
+  return <main className="flex-1 px-4 pb-[96px] pt-1">{children}</main>;
 }
 
 export function Button({
@@ -86,14 +132,43 @@ export function Button({
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' }) {
   const base =
-    'w-full min-h-11 rounded-lg px-4 py-2 font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed';
+    'pressable flex w-full min-h-12 items-center justify-center gap-2 rounded-full px-5 text-[15px] font-bold tracking-[-0.01em] focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)] focus-visible:ring-offset-2 focus-visible:ring-offset-[color:var(--bg-canvas)] disabled:opacity-40 disabled:cursor-not-allowed';
   const styles = {
-    primary:
-      'text-[var(--tg-theme-button-text-color,#fff)] bg-[var(--tg-theme-button-color,#2481cc)]',
-    secondary: 'border border-current bg-transparent',
-    danger: 'text-white bg-[var(--tg-theme-destructive-text-color,#ff3b30)]',
+    primary: 'bg-accent-primary text-accent-ink',
+    secondary: 'bg-surface-secondary text-ink',
+    danger: 'bg-negative text-white',
   } as const;
   return <button type="button" className={`${base} ${styles[variant]} ${className}`} {...props} />;
+}
+
+/** Compact round icon button used in the top utility cluster. */
+export function IconButton({
+  label,
+  children,
+  className = '',
+  tone = 'surface',
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  children: ReactNode;
+  tone?: 'surface' | 'glass' | 'hero';
+}) {
+  const tones = {
+    surface: 'bg-surface-secondary text-ink',
+    glass: 'bg-glass text-ink backdrop-blur-[18px]',
+    hero: 'bg-hero-pill text-hero-ink',
+  } as const;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={`pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)] ${tones[tone]} ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
 }
 
 export function Field({
@@ -101,6 +176,7 @@ export function Field({
   hint,
   id,
   ref,
+  className = '',
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   label: string;
@@ -109,17 +185,17 @@ export function Field({
   ref?: Ref<HTMLInputElement>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="px-1 text-[12.5px] font-semibold text-ink-2">
         {label}
       </label>
       <input
         id={id}
         ref={ref}
-        className="min-h-11 rounded-lg border border-gray-400/60 bg-transparent px-3 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className={`min-h-12 rounded-2xl border border-hairline bg-surface px-4 py-2 text-[15px] text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)] ${className}`}
         {...props}
       />
-      {hint ? <p className="text-xs opacity-70">{hint}</p> : null}
+      {hint ? <p className="px-1 text-[12px] text-ink-muted">{hint}</p> : null}
     </div>
   );
 }
@@ -137,8 +213,8 @@ export function PhraseInput({
   ref?: Ref<HTMLTextAreaElement>;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-sm font-medium">
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="px-1 text-[12.5px] font-semibold text-ink-2">
         {label}
       </label>
       <textarea
@@ -148,21 +224,17 @@ export function PhraseInput({
         autoComplete="off"
         autoCapitalize="none"
         spellCheck={false}
-        className="rounded-lg border border-gray-400/60 bg-transparent px-3 py-2 font-mono text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="rounded-2xl border border-hairline bg-surface px-4 py-3 font-mono text-[13px] text-ink placeholder:text-ink-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
         {...props}
       />
-      {hint ? <p className="text-xs opacity-70">{hint}</p> : null}
+      {hint ? <p className="px-1 text-[12px] text-ink-muted">{hint}</p> : null}
     </div>
   );
 }
 
 export function ErrorText({ children }: { children: ReactNode }) {
   return (
-    <p
-      role="alert"
-      aria-live="polite"
-      className="text-sm text-[var(--tg-theme-destructive-text-color,#ff3b30)]"
-    >
+    <p role="alert" aria-live="polite" className="px-1 text-[13px] font-medium text-negative">
       {children}
     </p>
   );
@@ -173,19 +245,42 @@ export function Notice({
   tone = 'info',
 }: {
   children: ReactNode;
-  tone?: 'info' | 'warning';
+  tone?: 'info' | 'warning' | 'positive';
 }) {
+  const tones = {
+    info: 'bg-surface-secondary text-ink-2',
+    warning: 'bg-[color:var(--status-positive-bg)] text-ink',
+    positive: 'bg-positive-bg text-positive',
+  } as const;
   return (
-    <p
-      className={`rounded-lg p-3 text-sm ${
-        tone === 'warning'
-          ? 'bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-100'
-          : 'bg-black/5 dark:bg-white/10'
-      }`}
-    >
-      {children}
-    </p>
+    <p className={`rounded-2xl px-4 py-3 text-[13px] leading-relaxed ${tones[tone]}`}>{children}</p>
   );
+}
+
+/** Rounded grouped list container (DESIGN.md §4). */
+export function Card({
+  children,
+  className = '',
+  as: Tag = 'div',
+}: {
+  children: ReactNode;
+  className?: string;
+  as?: 'div' | 'section';
+}) {
+  return <Tag className={`overflow-hidden rounded-[24px] bg-surface ${className}`}>{children}</Tag>;
+}
+
+export function SectionHeader({ children, right }: { children: ReactNode; right?: ReactNode }) {
+  return (
+    <div className="mb-2 flex items-center justify-between px-1">
+      <h2 className="text-[14px] font-bold tracking-[0.01em] text-ink">{children}</h2>
+      {right}
+    </div>
+  );
+}
+
+export function Divider({ inset = true }: { inset?: boolean }) {
+  return <div className={`${inset ? 'ml-16' : ''} h-px bg-hairline`} aria-hidden="true" />;
 }
 
 export function Sheet({
@@ -208,7 +303,7 @@ export function Sheet({
   }, [onClose]);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/45 sm:items-center"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -217,34 +312,87 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-4 flex flex-col gap-3 max-h-[85vh] overflow-y-auto"
-        style={{
-          backgroundColor: 'var(--tg-theme-bg-color, #fff)',
-          color: 'var(--tg-theme-text-color, #000)',
-        }}
+        className="flex max-h-[88dvh] w-full max-w-[430px] flex-col gap-3 overflow-y-auto rounded-t-[28px] bg-surface p-5 pb-[calc(env(safe-area-inset-bottom)+20px)] text-ink sm:rounded-[28px]"
       >
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{title}</h2>
+          <h2 className="text-[17px] font-bold tracking-[-0.01em]">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label={t('home.close')}
-            className="min-h-9 min-w-9 rounded-full bg-black/5 dark:bg-white/10 flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="pressable flex h-9 w-9 items-center justify-center rounded-full bg-surface-secondary text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
           >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
+            <CloseIcon size={18} />
           </button>
         </div>
         {children}
       </div>
     </div>
+  );
+}
+
+/** Segmented pill control (Send | Sell, timeframe pills, category chips). */
+export function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  size = 'md',
+}: {
+  label: string;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+  size?: 'md' | 'sm';
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className={`grid gap-1 rounded-full bg-surface-secondary p-1 ${
+        size === 'sm' ? 'text-[12px]' : 'text-[14px]'
+      }`}
+      style={{ gridTemplateColumns: `repeat(${String(options.length)}, minmax(0, 1fr))` }}
+    >
+      {options.map((option) => {
+        const active = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => {
+              onChange(option.value);
+            }}
+            className={`pressable min-h-9 rounded-full px-3 font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)] ${
+              active ? 'bg-surface text-ink shadow-card' : 'text-ink-2'
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Round token avatar with a symbol fallback glyph. */
+export function TokenAvatar({
+  symbol,
+  size = 40,
+  className = '',
+}: {
+  symbol: string;
+  size?: number;
+  className?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex shrink-0 items-center justify-center rounded-full bg-surface-secondary font-bold text-ink ${className}`}
+      style={{ width: size, height: size, fontSize: Math.max(10, size * 0.28) }}
+    >
+      {symbol.slice(0, 4).toUpperCase()}
+    </span>
   );
 }

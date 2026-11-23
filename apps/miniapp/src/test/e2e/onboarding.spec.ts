@@ -38,7 +38,7 @@ async function finishCreate(page: Page): Promise<void> {
   await page.getByLabel('Confirm PIN').fill(PASS);
   await expect(page.getByRole('status')).toHaveText(/Requirements met/);
   await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+  await expect(page.getByTestId('hero-balance')).toBeVisible();
 }
 
 async function pastePhrase(page: Page, phrase: string): Promise<void> {
@@ -194,11 +194,13 @@ test.describe('onboarding and unlock', () => {
     const words = await createToPasscode(page);
     await finishCreate(page);
 
-    await page.getByRole('button', { name: 'Receive' }).click();
-    await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
-    await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
+    await page.getByRole('button', { name: 'Deposit' }).click();
     await expect(page.getByTestId('address-TON')).toHaveText(/^0Q/);
-    await page.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('button', { name: 'EVM' }).click();
+    await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
+    await page.getByRole('button', { name: 'TRON' }).click();
+    await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
+    await page.getByRole('button', { name: 'Back' }).click();
 
     const dump = await page.evaluate(() => ({
       local: JSON.stringify(localStorage),
@@ -209,7 +211,8 @@ test.describe('onboarding and unlock', () => {
     expect(dump.session).not.toContain(words[0] ?? 'never');
     expect(dump.text).not.toContain(words.join(' '));
 
-    await page.getByRole('button', { name: 'Lock' }).click();
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Lock Wallet' }).click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('PIN', { exact: true }).fill('1357');
     await page.getByRole('button', { name: 'Unlock' }).click();
@@ -220,7 +223,7 @@ test.describe('onboarding and unlock', () => {
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
     await page.getByLabel('PIN', { exact: true }).fill(PASS);
     await page.getByRole('button', { name: 'Unlock' }).click();
-    await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+    await expect(page.getByTestId('hero-balance')).toBeVisible();
   });
 
   test('queries the exact testnet address displayed in the Receive sheet', async ({ page }) => {
@@ -233,7 +236,7 @@ test.describe('onboarding and unlock', () => {
     });
     await createToPasscode(page);
     await finishCreate(page);
-    await page.getByRole('button', { name: 'Receive' }).click();
+    await page.getByRole('button', { name: 'Deposit' }).click();
     const displayed = await page.getByTestId('address-TON').textContent();
     expect(displayed).toMatch(/^0Q/);
     expect(queried.length).toBeGreaterThan(0);
@@ -292,6 +295,7 @@ test.describe('onboarding and unlock', () => {
     await mockTonApi(page);
     await page.goto('/');
     await page.getByRole('button', { name: 'Import a wallet' }).click();
+    await page.getByRole('button', { name: /Secret Words/ }).click();
     await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
     await page.getByRole('button', { name: '12 words' }).click();
     await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(12);
@@ -306,8 +310,9 @@ test.describe('onboarding and unlock', () => {
     await page.getByLabel('Confirm PIN').fill(PASS);
     await page.getByRole('button', { name: 'Import' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
-    await page.getByRole('button', { name: 'Receive' }).click();
+    await expect(page.getByTestId('hero-balance')).toBeVisible();
+    await page.getByRole('button', { name: 'Deposit' }).click();
+    await page.getByRole('button', { name: 'EVM' }).click();
     await expect(page.getByTestId('address-EVM')).toHaveText(
       '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
     );
@@ -318,8 +323,11 @@ test.describe('onboarding and unlock', () => {
     await createToPasscode(page);
     await finishCreate(page);
 
-    await expect(page.getByText('Main Wallet')).toBeVisible();
-    await expect(page.getByText('Testnet')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Wallet' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(page.getByText('Testnet', { exact: true })).toBeVisible();
     await expect(page.getByTestId('hero-balance')).toHaveText('$2.25');
     await expect(page.getByTestId('asset-TON')).toContainText('Toncoin');
     await expect(page.getByTestId('asset-TON')).toContainText('1.5 TON');
@@ -331,13 +339,11 @@ test.describe('onboarding and unlock', () => {
     await expect(page.getByTestId('hero-balance')).toHaveText('••••');
     await page.getByRole('button', { name: 'Show balance' }).click();
 
-    await page.getByRole('tab', { name: 'Activity' }).click();
     await expect(page.getByText(/No transactions yet/)).toBeVisible();
-    await page.getByRole('tab', { name: 'Wallet' }).click();
 
-    await page.getByRole('button', { name: 'Send' }).click();
-    await expect(page.getByRole('dialog', { name: 'Send TON' })).toBeVisible();
-    await page.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('button', { name: 'Send / Sell' }).click();
+    await expect(page.getByRole('heading', { name: 'Send TON' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back' }).click();
   });
 
   test('ton-native import shows only TON assets and address', async ({ page }) => {
@@ -371,6 +377,7 @@ test.describe('onboarding and unlock', () => {
 
     await page.goto('/');
     await page.getByRole('button', { name: 'Import a wallet' }).click();
+    await page.getByRole('button', { name: /Secret Words/ }).click();
     await pastePhrase(page, tonPhrase);
     await expect(page.getByLabel('Word 24', { exact: true })).toHaveValue('solution');
     await page.getByRole('button', { name: 'Continue' }).click();
@@ -389,13 +396,13 @@ test.describe('onboarding and unlock', () => {
     await page.getByLabel('Confirm PIN').fill(PASS);
     await page.getByRole('button', { name: 'Import' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Your wallet' })).toBeVisible();
+    await expect(page.getByTestId('hero-balance')).toBeVisible();
     await expect(page.getByTestId('asset-TON')).toBeVisible();
     await expect(page.getByTestId('asset-USDT')).toBeVisible();
     await expect(page.getByTestId('asset-TRX')).toHaveCount(0);
     await expect(page.getByTestId('asset-ETH')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Receive' }).click();
+    await page.getByRole('button', { name: 'Deposit' }).click();
     await expect(page.getByTestId('address-TON')).toHaveText(/^0Q/);
     await expect(page.getByTestId('address-TRON')).toHaveCount(0);
     await expect(page.getByTestId('address-EVM')).toHaveCount(0);
@@ -415,14 +422,16 @@ test.describe('onboarding and unlock', () => {
     await mockTonApi(page, { activity: [...ACTIVITY_ITEMS, bounceItem] });
     await createToPasscode(page);
     await finishCreate(page);
-    await page.getByRole('tab', { name: 'Activity' }).click();
     const row = page.getByTestId('activity-e2e-tx');
     await expect(row).toContainText('+2 TON');
     await row.click();
-    const dialog = page.getByRole('dialog', { name: 'Transaction' });
-    await expect(dialog).toContainText('hello [link removed]');
-    await expect(dialog.locator('a')).toHaveAttribute('href', /testnet\.tonviewer\.com/);
-    await page.getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByRole('heading', { name: 'Received' })).toBeVisible();
+    await expect(page.getByText('hello [link removed]')).toBeVisible();
+    await expect(page.locator('a[href*="testnet.tonviewer.com/transaction"]')).toHaveAttribute(
+      'href',
+      /testnet\.tonviewer\.com/,
+    );
+    await page.getByRole('button', { name: 'Back' }).click();
     await expect(page.getByTestId('activity-e2e-bounce')).toContainText('Bounced');
   });
 
@@ -442,18 +451,18 @@ test.describe('onboarding and unlock', () => {
     await createToPasscode(page);
     await finishCreate(page);
 
-    await page.getByRole('button', { name: 'Receive' }).click();
+    await page.getByRole('button', { name: 'Deposit' }).click();
     const ownAddress = (await page.getByTestId('address-TON').textContent()) ?? '';
-    await page.getByRole('button', { name: 'Close' }).click();
+    await page.getByRole('button', { name: 'Back' }).click();
 
-    await page.getByRole('button', { name: 'Send' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Send TON' });
-    await dialog.getByLabel('Recipient').fill(ownAddress);
-    await dialog.getByLabel('Amount').fill('0.1');
-    await dialog.getByRole('button', { name: 'Review transfer' }).click();
+    await page.getByRole('button', { name: 'Send / Sell' }).click();
+    await expect(page.getByRole('heading', { name: 'Send TON' })).toBeVisible();
+    await page.getByLabel('Recipient').fill(ownAddress);
+    await page.getByLabel('Amount').fill('0.1');
+    await page.getByRole('button', { name: 'Review transfer' }).click();
 
     await expect(page.getByText(/First send — deploys Wallet V5R1/)).toBeVisible();
-    await expect(page.getByText(/Fee:/)).toBeVisible();
+    await expect(page.getByText(/Network fee/)).toBeVisible();
     await page.getByRole('button', { name: 'Confirm & Send' }).click();
     await expect(page.getByRole('heading', { name: 'Submitted' })).toBeVisible();
     await expect(page.getByText(/testnet\.tonviewer\.com\/message/)).toBeVisible();
@@ -463,8 +472,9 @@ test.describe('onboarding and unlock', () => {
     await mockTonApi(page);
     const words = await createToPasscode(page);
     await finishCreate(page);
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Settings' }).click();
 
+    await page.getByRole('button', { name: 'Reveal Phrase' }).click();
     await page.getByLabel('Enter your passcode to continue').fill(PASS);
     await page.getByRole('button', { name: 'Reveal recovery phrase' }).click();
     await page.getByRole('button', { name: 'Show recovery phrase' }).click();
@@ -478,7 +488,8 @@ test.describe('onboarding and unlock', () => {
     await mockTonApi(page);
     const words = await createToPasscode(page);
     await finishCreate(page);
-    await page.getByRole('button', { name: 'Settings' }).click();
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await page.getByRole('button', { name: 'Test Backup' }).click();
     await page.getByLabel('Enter your passcode to continue').fill(PASS);
     await page.getByRole('button', { name: 'Test your backup' }).click();
 

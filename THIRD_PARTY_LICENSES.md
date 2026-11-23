@@ -1,11 +1,12 @@
 # Third-party licenses
 
 Enforced by `pnpm license-check` (`scripts/license-check.mjs`), which runs in `pnpm verify` and in
-CI. It allows MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause and Unlicense (tweetnacl); anything
-else fails the build until it is reviewed and added here deliberately.
+CI. It allows MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, OFL-1.1 (self-hosted fonts) and
+Unlicense (tweetnacl); anything else fails the build until it is reviewed and added here
+deliberately.
 
-Last verified: 2026-11-22 (P2a) — `license-check: 129 package entries, all allow-listed`
-(MIT 118, ISC 4, Apache-2.0 2, BSD-3-Clause 3, Unlicense 1).
+Last verified: 2026-11-23 (P2c) — `license-check: 131 package entries, all allow-listed`
+(MIT 119, OFL-1.1 2, ISC 4, Apache-2.0 2, BSD-3-Clause 3, Unlicense 1).
 
 ## Direct dependencies
 
@@ -35,6 +36,8 @@ Last verified: 2026-11-22 (P2a) — `license-check: 129 package entries, all all
 | `zustand`                                            | MIT        | State (no secrets)                      |
 | `tailwindcss`                                        | MIT        | Styling                                 |
 | `qrcode-generator`                                   | MIT        | Inline SVG receive QR codes             |
+| `@fontsource-variable/plus-jakarta-sans`             | OFL-1.1    | Self-hosted UI sans (bundled .woff2)    |
+| `@fontsource-variable/jetbrains-mono`                | OFL-1.1    | Self-hosted mono (addresses / amounts)  |
 | `valibot` (override)                                 | MIT        | Transitive pin `>=1.4.2` for advisories |
 
 ## Notes

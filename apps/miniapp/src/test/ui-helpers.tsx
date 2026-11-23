@@ -7,6 +7,11 @@ import type { ReactElement } from 'react';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import { TelegramProvider } from '../telegram/TelegramProvider';
 import { VaultProvider, type VaultUi } from '../vault/context';
+import { PreferencesProvider } from '../ui/preferences';
+import { ToastProvider } from '../ui/toast';
+import { WalletShell } from '../ui/wallet-shell';
+import type { WalletTab } from '../ui/nav';
+import type { TonReadApi, TonWriteApi } from '../ton/api';
 import { App } from '../App';
 import type { BiometryApi } from '../adapters/biometry';
 
@@ -35,13 +40,44 @@ export function makeVault(options: { secure?: boolean; biometry?: BiometryApi } 
   };
 }
 
+/** Wrap already-built UI in the providers the app expects. */
+export function renderWithProviders(ui: ReactElement): ReturnType<typeof render> {
+  return render(
+    <TelegramProvider>
+      <PreferencesProvider>
+        <ToastProvider>{ui}</ToastProvider>
+      </PreferencesProvider>
+    </TelegramProvider>,
+  );
+}
+
 export function renderApp(vault: VaultUi): ReturnType<typeof render> {
-  const ui: ReactElement = (
+  return render(
     <TelegramProvider>
       <VaultProvider value={vault}>
         <App />
       </VaultProvider>
-    </TelegramProvider>
+    </TelegramProvider>,
   );
-  return render(ui);
+}
+
+/** Render the wallet shell directly with an injectable TON read/write API. */
+export function renderShell(
+  vault: VaultUi,
+  api: TonReadApi & TonWriteApi,
+  options: { tab?: WalletTab; onLock?: () => void; onTabChange?: (tab: WalletTab) => void } = {},
+): ReturnType<typeof render> {
+  return renderWithProviders(
+    <WalletShell
+      manager={vault.manager}
+      api={api}
+      biometry={vault.biometry}
+      tab={options.tab ?? 'wallet'}
+      onTabChange={options.onTabChange ?? (() => {})}
+      onLock={options.onLock ?? (() => {})}
+      onRevealPhrase={() => {}}
+      onTestBackup={() => {}}
+      onWiped={() => {}}
+    />,
+  );
 }

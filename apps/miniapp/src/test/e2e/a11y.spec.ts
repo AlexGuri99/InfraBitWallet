@@ -42,6 +42,7 @@ test.describe('accessibility', () => {
   test('form errors are announced and inputs are labelled', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Import a wallet' }).click();
+    await page.getByRole('button', { name: /Secret Words/ }).click();
     await expect(page.getByLabel('Word 1', { exact: true })).toBeVisible();
     await expect(page.getByLabel(/^Word \d+$/)).toHaveCount(24);
     await page.getByRole('button', { name: 'Continue' }).click();

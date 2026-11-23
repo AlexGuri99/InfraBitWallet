@@ -16,6 +16,7 @@ const ALLOWED = new Set([
   'CC-BY-4.0',
   'Unlicense',
   '0BSD',
+  'OFL-1.1',
 ]);
 
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';

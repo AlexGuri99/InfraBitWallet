@@ -1,17 +1,17 @@
 /**
- * Home dashboard tests with a mocked same-origin read API:
- * loaded balances, skeleton/error (never a false $0.00), activity list + detail, Receive QR and
- * ton-native-only filtering.
+ * Wallet Home tests with a mocked same-origin read API:
+ * loaded balances, skeleton/error (never a false $0.00), activity list + detail, Deposit QR,
+ * privacy masking and ton-native-only filtering.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import type { TonActivityItem, TonPortfolio } from '@onezerowallet/chain-ton';
-import { TelegramProvider } from '../telegram/TelegramProvider';
-import { HomeScreen, UI_TON_NETWORK } from '../ui/home';
+import { UI_TON_NETWORK } from '../ui/wallet-shell';
 import { TonApiError, type TonReadApi, type TonWriteApi } from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
+import { makeVault, renderShell } from './ui-helpers';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
 const TON_NATIVE_MNEMONIC = [
@@ -124,24 +124,17 @@ async function unlockedManager(
   return manager;
 }
 
-function renderHome(manager: VaultManager, api: TonReadApi & TonWriteApi) {
-  return render(
-    <TelegramProvider>
-      <HomeScreen manager={manager} onLock={() => {}} onSettings={() => {}} api={api} />
-    </TelegramProvider>,
-  );
-}
-
-describe('Home: live TON data', () => {
+describe('Wallet home: live TON data', () => {
   it('shows loaded balances, jettons and totals', async () => {
-    renderHome(await unlockedManager(), apiWith(portfolio()));
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio()));
     expect(await screen.findByTestId('hero-balance')).toHaveTextContent('$2.25');
     expect(screen.getByTestId('asset-TON')).toHaveTextContent('1.5 TON');
     expect(screen.getByTestId('asset-TON')).toHaveTextContent('$2.25');
     expect(screen.getByTestId('asset-USDT')).toHaveTextContent('2.5 USDT');
-    expect(screen.getByText(/Main Wallet/)).toBeInTheDocument();
     expect(screen.getByText('Testnet')).toBeInTheDocument();
     expect(screen.getByTestId('ton-address-pill')).toHaveTextContent(/^0Q/);
+    expect(screen.getByRole('tab', { name: 'Wallet' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('queries the exact testnet address it displays (same 256-bit hash)', async () => {
@@ -160,12 +153,13 @@ describe('Home: live TON data', () => {
       emulate: () => Promise.reject(new Error('not used')),
       broadcast: () => Promise.reject(new Error('not used')),
     };
-    renderHome(await unlockedManager(), api);
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, api);
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
 
-    await user.click(screen.getByRole('button', { name: 'Receive' }));
+    await user.click(screen.getByRole('button', { name: 'Deposit' }));
     const displayed = screen.getByTestId('address-TON').textContent;
     expect(displayed).toMatch(/^0Q/);
 
@@ -179,7 +173,6 @@ describe('Home: live TON data', () => {
     for (const address of requested) {
       expect(address).toBe(displayed);
       expect(hashOf(address)).toBe(hashOf(displayed));
-      // The mainnet raw hash (0:…) must never be queried in testnet mode.
       expect(address).not.toMatch(/^0:/);
     }
   });
@@ -191,19 +184,17 @@ describe('Home: live TON data', () => {
     const native = p.assets[0];
     if (!native) throw new Error('missing native asset');
     p.totalUsd = 6;
-    p.assets = [
-      { ...native, balanceRaw: '3999999979', balance: '3.999999979', usdValue: 6 },
-      ...p.assets.slice(1),
-    ];
-    renderHome(await unlockedManager(), apiWith(p));
+    p.assets = [{ ...native, balanceRaw: '3999999979', balance: '3.999999979', usdValue: 6 }];
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(p));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$6.00');
     });
-    expect(screen.getByText(/3\.9999 TON ·/)).toBeInTheDocument();
+    expect(screen.getByText(/3\.9999 TON/)).toBeInTheDocument();
     expect(screen.getByTestId('asset-TON')).toHaveTextContent('3.999999979 TON');
   });
 
-  it('labels bounced refunds instead of presenting them as a send', async () => {
+  it('labels bounced refunds and opens the live detail view', async () => {
     const user = userEvent.setup();
     const baseItem = ACTIVITY[0];
     if (!baseItem) throw new Error('missing activity fixture');
@@ -217,36 +208,39 @@ describe('Home: live TON data', () => {
         isBounce: true,
       },
     ];
-    renderHome(await unlockedManager(), apiWith(portfolio(), bounced));
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio(), bounced));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
-    await user.click(screen.getByRole('tab', { name: 'Activity' }));
     const row = await screen.findByTestId('activity-bounce-1');
     expect(row).toHaveTextContent('Bounced');
     await user.click(row);
-    expect(screen.getByRole('dialog', { name: 'Transaction' })).toHaveTextContent('Bounced refund');
+    expect(screen.getByRole('heading', { name: 'Bounced' })).toBeInTheDocument();
   });
 
-  it('masks the balance', async () => {
+  it('masks every balance from the top bar', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager(), apiWith(portfolio()));
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio()));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
     await user.click(screen.getByRole('button', { name: 'Hide balance' }));
     expect(screen.getByTestId('hero-balance')).toHaveTextContent('••••');
+    expect(screen.getByTestId('asset-TON')).toHaveTextContent('••••');
     await user.click(screen.getByRole('button', { name: 'Show balance' }));
     expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
   });
 
-  it('shows a loading skeleton, never a false $0.00', async () => {
+  it('shows a loading state, never a false $0.00', async () => {
     let resolve!: (value: TonPortfolio) => void;
     const pending = new Promise<TonPortfolio>((res) => {
       resolve = res;
     });
-    renderHome(
-      await unlockedManager(),
+    const manager = await unlockedManager();
+    renderShell(
+      { ...makeVault(), manager },
       apiWith(() => pending),
     );
     expect(screen.getByTestId('hero-balance')).toHaveTextContent('…');
@@ -271,7 +265,8 @@ describe('Home: live TON data', () => {
       emulate: () => Promise.reject(new Error('not used')),
       broadcast: () => Promise.reject(new Error('not used')),
     };
-    renderHome(await unlockedManager(), api);
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, api);
     expect(await screen.findByRole('alert')).toHaveTextContent(/Offline/);
     expect(screen.getByTestId('hero-balance')).toHaveTextContent('—');
     expect(screen.getByTestId('asset-TON')).toHaveTextContent('—');
@@ -283,54 +278,58 @@ describe('Home: live TON data', () => {
     });
   });
 
-  it('Receive sheet shows the testnet address and an inline QR code', async () => {
+  it('Deposit screen shows the testnet address, multichain addresses and an inline QR', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager(), apiWith(portfolio()));
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio()));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
-    await user.click(screen.getByRole('button', { name: 'Receive' }));
-    const dialog = screen.getByRole('dialog', { name: 'Receive' });
+    await user.click(screen.getByRole('button', { name: 'Deposit' }));
+    expect(screen.getByRole('heading', { name: 'Fund' })).toBeInTheDocument();
     expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
+    await user.click(screen.getByRole('button', { name: 'TRON' }));
     expect(screen.getByTestId('address-TRON')).toHaveTextContent(/^T/);
+    await user.click(screen.getByRole('button', { name: 'EVM' }));
     expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
-    expect(dialog.querySelector('svg[role="img"]')).not.toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(document.querySelector('svg[role="img"]')).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
   });
 
   it('renders activity and opens a sanitized detail view', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager(), apiWith(portfolio(), ACTIVITY));
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio(), ACTIVITY));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
-    await user.click(screen.getByRole('tab', { name: 'Activity' }));
     expect(await screen.findByTestId('activity-tx-1')).toHaveTextContent('+2 TON');
     await user.click(screen.getByTestId('activity-tx-1'));
-    const dialog = screen.getByRole('dialog', { name: 'Transaction' });
-    expect(dialog).toHaveTextContent('hello [link removed]');
-    expect(dialog.querySelector('a')?.getAttribute('href')).toContain('testnet.tonviewer.com');
+    const heading = screen.getByRole('heading', { name: 'Received' });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByText('hello [link removed]')).toBeInTheDocument();
+    expect(document.querySelector('a[href*="testnet.tonviewer.com/transaction"]')).not.toBeNull();
   });
 
   it('shows the empty activity state', async () => {
-    const user = userEvent.setup();
-    renderHome(await unlockedManager(), apiWith(portfolio(), []));
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio(), []));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
-    await user.click(screen.getByRole('tab', { name: 'Activity' }));
     expect(await screen.findByText(/No transactions yet/)).toBeInTheDocument();
   });
 
   it('ton-native-only hides TRON/EVM assets and addresses', async () => {
     const user = userEvent.setup();
-    renderHome(await unlockedManager('ton-native-only'), apiWith(portfolio()));
+    const manager = await unlockedManager('ton-native-only');
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio()));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
     expect(screen.queryByTestId('asset-TRX')).not.toBeInTheDocument();
     expect(screen.queryByTestId('asset-ETH')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Receive' }));
+    await user.click(screen.getByRole('button', { name: 'Deposit' }));
     expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
     expect(screen.queryByTestId('address-TRON')).not.toBeInTheDocument();
     expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();
@@ -363,56 +362,43 @@ describe('Home: live TON data', () => {
         }),
       broadcast: () => Promise.resolve({ messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' } }),
     };
-    renderHome(manager, api);
+    renderShell({ ...makeVault(), manager }, api);
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
-    await user.click(screen.getByRole('button', { name: 'Send' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Send TON' });
+    await user.click(screen.getByRole('button', { name: 'Send / Sell' }));
+    expect(await screen.findByRole('heading', { name: 'Send TON' })).toBeInTheDocument();
 
     await user.type(
-      within(dialog).getByLabelText('Recipient'),
+      screen.getByLabelText('Recipient'),
       `EQ${info.ton.addressTestnetNonBounceable.slice(2)}`,
     );
-    await user.type(within(dialog).getByLabelText('Amount'), '0.1');
-    await user.click(within(dialog).getByRole('button', { name: 'Review transfer' }));
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/Mainnet-only/);
+    await user.type(screen.getByLabelText('Amount'), '0.1');
+    await user.click(screen.getByRole('button', { name: 'Review transfer' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Mainnet-only/);
 
-    await user.clear(within(dialog).getByLabelText('Recipient'));
-    await user.type(
-      within(dialog).getByLabelText('Recipient'),
-      info.ton.addressTestnetNonBounceable,
-    );
-    await user.click(within(dialog).getByRole('button', { name: 'Review transfer' }));
+    await user.clear(screen.getByLabelText('Recipient'));
+    await user.type(screen.getByLabelText('Recipient'), info.ton.addressTestnetNonBounceable);
+    await user.click(screen.getByRole('button', { name: 'Review transfer' }));
     expect(await screen.findByText(/First send — deploys Wallet V5R1/)).toBeInTheDocument();
-    expect(screen.getByText(/Fee:/)).toBeInTheDocument();
+    expect(screen.getByText(/Network fee/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Confirm & Send' }));
-    expect(await screen.findByText('Submitted')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Submitted' })).toBeInTheDocument();
     expect(screen.getByText(/testnet\.tonviewer\.com\/message/)).toBeInTheDocument();
   });
 
-  it('wires lock and settings buttons', async () => {
+  it('wires the floating navigation tabs', async () => {
     const user = userEvent.setup();
-    const onLock = vi.fn();
-    const onSettings = vi.fn();
+    const onTabChange = vi.fn();
     const manager = await unlockedManager();
-    render(
-      <TelegramProvider>
-        <HomeScreen
-          manager={manager}
-          onLock={onLock}
-          onSettings={onSettings}
-          api={apiWith(portfolio())}
-        />
-      </TelegramProvider>,
-    );
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio()), { onTabChange });
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
     });
-    await user.click(screen.getByRole('button', { name: 'Lock' }));
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(onLock).toHaveBeenCalledOnce();
-    expect(onSettings).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('tab', { name: 'Settings' }));
+    expect(onTabChange).toHaveBeenCalledWith('settings');
+    await user.click(screen.getByRole('tab', { name: 'Market' }));
+    expect(onTabChange).toHaveBeenCalledWith('market');
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Stage C component tests: unlock errors, backoff notice, settings re-auth reveal, wipe.
+ * Unlock errors, backoff notice, settings re-auth reveal, test backup and wipe.
  */
 import { describe, it, expect } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -19,10 +19,15 @@ async function unlockUi(user: ReturnType<typeof userEvent.setup>): Promise<void>
   await screen.findByRole('heading', { name: 'Welcome back' });
   await user.type(screen.getByLabelText('PIN'), PASS);
   await user.click(screen.getByRole('button', { name: 'Unlock' }));
-  await screen.findByRole('heading', { name: 'Your wallet' });
+  await screen.findByTestId('hero-balance');
 }
 
-describe('Stage C: unlock and settings', () => {
+async function openSettings(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('tab', { name: 'Settings' }));
+  await screen.findByRole('heading', { name: 'Settings', level: 1 });
+}
+
+describe('Unlock and settings', () => {
   it('shows wrong-passcode and then a rate-limit message', async () => {
     const user = userEvent.setup();
     renderApp(await seededVault());
@@ -42,10 +47,10 @@ describe('Stage C: unlock and settings', () => {
     const user = userEvent.setup();
     renderApp(await seededVault());
     await unlockUi(user);
+    await openSettings(user);
 
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Settings' });
-
+    await user.click(screen.getByRole('button', { name: 'Reveal Phrase' }));
+    await screen.findByRole('dialog', { name: 'Reveal recovery phrase' });
     await user.type(screen.getByLabelText('Enter your passcode to continue'), PASS);
     await user.click(screen.getByRole('button', { name: 'Reveal recovery phrase' }));
     await screen.findByRole('heading', { name: 'Your recovery phrase' });
@@ -61,19 +66,19 @@ describe('Stage C: unlock and settings', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Back' }));
-    await screen.findByRole('heading', { name: 'Settings' });
+    await screen.findByRole('heading', { name: 'Settings', level: 1 });
     expect(document.body.textContent).not.toContain(words.join(' '));
     expect(document.body.textContent.toLowerCase()).not.toContain('junk');
     expect(secretHolder.has()).toBe(false);
   });
 
-  it('settings "Test your backup" re-runs verification without showing the phrase', async () => {
+  it('"Test Backup" re-runs verification without showing the phrase', async () => {
     const user = userEvent.setup();
     renderApp(await seededVault());
     await unlockUi(user);
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Settings' });
+    await openSettings(user);
 
+    await user.click(screen.getByRole('button', { name: 'Test Backup' }));
     await user.type(screen.getByLabelText('Enter your passcode to continue'), PASS);
     await user.click(screen.getByRole('button', { name: 'Test your backup' }));
     await screen.findByRole('heading', { name: 'Check your backup' });
@@ -87,7 +92,7 @@ describe('Stage C: unlock and settings', () => {
       await user.type(input, words[position] ?? '');
     }
     await user.click(screen.getByRole('button', { name: 'Verify' }));
-    await screen.findByRole('heading', { name: 'Settings' });
+    await screen.findByRole('heading', { name: 'Settings', level: 1 });
     expect(secretHolder.has()).toBe(false);
   });
 
@@ -95,9 +100,9 @@ describe('Stage C: unlock and settings', () => {
     const user = userEvent.setup();
     renderApp(await seededVault());
     await unlockUi(user);
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Settings' });
+    await openSettings(user);
 
+    await user.click(screen.getByRole('button', { name: 'Reveal Phrase' }));
     await user.type(screen.getByLabelText('Enter your passcode to continue'), '1357');
     await user.click(screen.getByRole('button', { name: 'Reveal recovery phrase' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Wrong passcode');
@@ -113,9 +118,10 @@ describe('Stage C: unlock and settings', () => {
       screen.queryByRole('button', { name: 'Unlock with biometrics' }),
     ).not.toBeInTheDocument();
     await unlockUi(user);
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Settings' });
+    await openSettings(user);
     expect(screen.queryByRole('heading', { name: /Biometric unlock/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Biometrics/ }));
+    expect(await screen.findByText(/unavailable on this device/i)).toBeInTheDocument();
   });
 
   it('wipes the wallet after typed confirmation', async () => {
@@ -123,12 +129,12 @@ describe('Stage C: unlock and settings', () => {
     const vault = await seededVault();
     renderApp(vault);
     await unlockUi(user);
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
-    await screen.findByRole('heading', { name: 'Settings' });
+    await openSettings(user);
 
+    await user.click(screen.getByRole('button', { name: 'Wipe Wallet' }));
     await user.type(screen.getByLabelText(/Type WIPE to confirm/), 'WIPE');
     await user.click(screen.getByRole('button', { name: 'Wipe' }));
-    await screen.findByRole('heading', { name: 'Your keys, your coins' });
+    await screen.findByText('Your keys, your coins');
     expect(await vault.manager.hasVault()).toBe(false);
     expect(secretHolder.has()).toBe(false);
   });
