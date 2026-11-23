@@ -31,9 +31,10 @@ export function PhoneFrame({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-[100dvh] w-full justify-center bg-canvas text-ink">
       <div
+        data-testid="phone-frame"
         className="flex min-h-[100dvh] w-full max-w-[430px] flex-col"
         style={{
-          paddingTop: 'env(safe-area-inset-top)',
+          paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))',
           paddingLeft: 'env(safe-area-inset-left)',
           paddingRight: 'env(safe-area-inset-right)',
         }}

@@ -265,6 +265,26 @@ export const RefreshIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const FullscreenEnterIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 4H4v5" />
+    <path d="M15 4h5v5" />
+    <path d="M9 20H4v-5" />
+    <path d="M15 20h5v-5" />
+    <path d="M9 9 4 4M15 9l5-5M9 15l-5 5M15 15l5 5" />
+  </Svg>
+);
+
+export const FullscreenExitIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 9h5V4" />
+    <path d="M20 9h-5V4" />
+    <path d="M4 15h5v5" />
+    <path d="M20 15h-5v5" />
+    <path d="M9 9 4 4M15 9l5-5M9 15l-5 5M15 15l5 5" />
+  </Svg>
+);
+
 export const SendIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M21 3L10 14" />
