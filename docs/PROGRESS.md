@@ -213,6 +213,20 @@ live P2a/P2b TON read/send behaviour.
 
 ---
 
+### P2e: Fullscreen toggle + Telegram safe areas (2026-11-23)
+
+| Area                                                                            | Status | Evidence                                            |
+| ------------------------------------------------------------------------------- | ------ | --------------------------------------------------- |
+| Bot API 8.0+ detect (`requestFullscreen`/`exitFullscreen` + version guard)      | DONE   | `telegram/fullscreen.tsx`                           |
+| `fullscreenChanged` / `fullscreenFailed` subscriptions with `offEvent` cleanup  | DONE   | `telegram/fullscreen.tsx`, `ui-fullscreen.test.tsx` |
+| Browser Fullscreen API fallback; button hidden when neither is supported        | DONE   | `telegram/fullscreen.tsx`, unit test                |
+| `safeAreaInset` + `contentSafeAreaInset` merged into `--app-safe-top/bottom`    | DONE   | `applySafeAreaVars`, `PhoneFrame`                   |
+| 36×36 top-bar control beside Privacy Eye, expand/compress icons, `aria-pressed` | DONE   | `ui/home.tsx`, `ui/icons.tsx`                       |
+| 4 utility buttons single-line at 360px; DESIGN §5.1 updated                     | DONE   | `DESIGN.md`, fullscreen E2E                         |
+| Failure toast (`"Fullscreen isn't available on this device"`)                   | DONE   | `ui-toast`, unit test                               |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started

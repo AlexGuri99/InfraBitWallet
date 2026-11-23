@@ -88,10 +88,11 @@ All colors are defined as semantic CSS custom properties so components transitio
 ### 5.1 Top Bar (Persistent on Wallet Home)
 
 - **Left**: Wallet Selector Pill (`OneZeroWallet ⌄`) opening a bottom-sheet switcher (`OneZeroWallet`, `Vault Savings [Shell]`, `+ Add / Import Wallet [Shell]`). Shows an inline `Testnet` badge in Testnet mode.
-- **Right Utility Cluster**: Three `36px × 36px` circular icon buttons:
+- **Right Utility Cluster**: Four `36px × 36px` circular icon buttons, `6px` apart, single-line down to a `360px` viewport (the left wallet-selector pill truncates gracefully):
   1. **Privacy Eye Toggle**: Masks/unmasks all balances and amounts across every screen with `••••`.
-  2. **Theme Switcher**: Toggles between Mint Light Mode and Forest Dark Mode (`data-theme`).
-  3. **Quick QR Button**: Opens the Receive / QR sheet directly.
+  2. **Fullscreen Toggle**: Expands to the 4-corner outward icon (`aria-label="Enter fullscreen"`, `aria-pressed="false"`) and compresses to the inward icon (`aria-label="Exit fullscreen"`, `aria-pressed="true"`). Uses Telegram Mini Apps Bot API 8.0+ `requestFullscreen` / `exitFullscreen` with `fullscreenChanged` / `fullscreenFailed` events, falls back to the standard browser Fullscreen API outside Telegram, and is hidden entirely when neither is supported. Entering fullscreen applies `--app-safe-top` = `max(env(safe-area-inset-top), safeAreaInset.top + contentSafeAreaInset.top)` so the top bar clears the device notch and Telegram's floating controls.
+  3. **Theme Switcher**: Toggles between Mint Light Mode and Forest Dark Mode (`data-theme`).
+  4. **Quick QR Button**: Opens the Receive / QR sheet directly.
 
 ### 5.2 Wallet Home Screen
 

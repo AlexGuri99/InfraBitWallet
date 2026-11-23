@@ -525,3 +525,30 @@ production CSP is unchanged.
 deterministic tinted background selected from semantic tokens (hash of the symbol). The app never
 fetches a third-party jetton logo URL, which avoids a phishing/tracking surface and keeps
 `connect-src`/`img-src` tight.
+
+---
+
+## Decision: Telegram fullscreen with a browser fallback and combined safe areas (P2e)
+
+**Detection.** The control is shown only when `requestFullscreen` **and** `exitFullscreen` exist
+and `isVersionAtLeast('8.0')` is not false. Outside Telegram it falls back to the standard
+Fullscreen API, but only when `document.fullscreenEnabled` is true and both
+`documentElement.requestFullscreen` and `document.exitFullscreen` exist. Otherwise the button is
+not rendered at all (no dead control).
+
+**State.** `isFullscreen` starts from `tg.isFullscreen` (or `document.fullscreenElement`) and
+follows the `fullscreenChanged` event. Toggle calls are wrapped in `try/catch`, and rejected
+promises are caught; `fullscreenFailed` and any thrown/rejected error surface the app-owned toast
+`"Fullscreen isn't available on this device"`. Every listener is removed with `offEvent` on
+unmount.
+
+**Safe areas.** `safeAreaInset` and `contentSafeAreaInset` are read on mount and on
+`safeAreaChanged` / `contentSafeAreaChanged`. Their top/bottom values are summed into
+`--app-safe-top` = `max(env(safe-area-inset-top), safe + content)px` (and the bottom equivalent)
+on `<html>`; `PhoneFrame` consumes `--app-safe-top`, so fullscreen shifts the Wallet top bar below
+the device notch and Telegram's floating Close/menu controls. Vars are reset on unmount so they
+cannot leak across sessions/screens.
+
+**Layout.** The utility cluster is now privacy eye, fullscreen, theme, QR with `6px` gaps. The
+left wallet pill is `flex-1 min-w-0` with a truncating label, keeping the bar single-line down to
+360px.

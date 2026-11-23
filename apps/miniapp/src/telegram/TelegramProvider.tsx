@@ -112,6 +112,12 @@ declare global {
         setBackgroundColor: (color: string) => void;
         enableClosingConfirmation: () => void;
         disableClosingConfirmation: () => void;
+        // Bot API 8.0+ fullscreen (feature-detect before use).
+        requestFullscreen?: () => unknown;
+        exitFullscreen?: () => unknown;
+        isFullscreen?: boolean;
+        safeAreaInset?: { top: number; bottom: number; left: number; right: number };
+        contentSafeAreaInset?: { top: number; bottom: number; left: number; right: number };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onEvent: (event: string, callback: (...args: any[]) => void) => void;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -31,6 +31,7 @@ import { SettingsTab } from './wallet';
 import type { TonReadApi, TonWriteApi } from '../ton/api';
 import type { BiometryApi } from '../adapters/biometry';
 import { useToast } from './toast';
+import { FullscreenProvider } from '../telegram/fullscreen';
 import { t } from '../i18n';
 
 export const UI_TON_NETWORK = 'testnet' as const;
@@ -85,7 +86,7 @@ function placeholderAssets(
   return [...rows, ...staticChainAssets(hasTron, hasEvm)];
 }
 
-export function WalletShell({
+function WalletShellContent({
   manager,
   api,
   biometry,
@@ -359,5 +360,14 @@ export function WalletShell({
 
       <BottomNav active={tab} onChange={onTabChange} />
     </div>
+  );
+}
+
+/** Fullscreen/safe-area context lives for the whole authenticated wallet shell. */
+export function WalletShell(props: Parameters<typeof WalletShellContent>[0]) {
+  return (
+    <FullscreenProvider>
+      <WalletShellContent {...props} />
+    </FullscreenProvider>
   );
 }

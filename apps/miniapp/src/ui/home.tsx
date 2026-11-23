@@ -18,6 +18,7 @@ import { t } from '../i18n';
 import type { AssetView } from './asset';
 import { activityKind, activityStatusLabel, clockTime, groupActivity, shortAddress } from './asset';
 import { usePreferences } from './preferences';
+import { useFullscreenControl } from '../telegram/fullscreen';
 import { useToast } from './toast';
 import { QrCode } from './qr';
 import {
@@ -27,6 +28,8 @@ import {
   CopyIcon,
   EarnIcon,
   EyeIcon,
+  FullscreenEnterIcon,
+  FullscreenExitIcon,
   MoonIcon,
   QrIcon,
   RefreshIcon,
@@ -204,6 +207,7 @@ export function WalletHome({
   onOpenTx,
 }: WalletHomeProps) {
   const { theme, toggleTheme, masked, toggleMasked, guard } = usePreferences();
+  const fullscreen = useFullscreenControl();
   const toast = useToast();
   const [currency, setCurrency] = useState<'USD' | 'TON'>('USD');
   const [sheet, setSheet] = useState<'wallet' | 'qr' | null>(null);
@@ -263,7 +267,7 @@ export function WalletHome({
     <div className="screen-enter flex flex-col pb-24">
       <header className="flex items-center justify-between gap-2 px-4 py-3">
         <h1 className="sr-only">{t('app.name')}</h1>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <button
             type="button"
             onClick={() => {
@@ -288,6 +292,23 @@ export function WalletHome({
           >
             <EyeIcon hidden={masked} size={18} />
           </button>
+          {fullscreen.isSupported ? (
+            <button
+              type="button"
+              onClick={fullscreen.toggle}
+              aria-label={
+                fullscreen.isFullscreen ? t('home.fullscreenExit') : t('home.fullscreenEnter')
+              }
+              aria-pressed={fullscreen.isFullscreen}
+              className="pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface text-ink shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
+            >
+              {fullscreen.isFullscreen ? (
+                <FullscreenExitIcon size={18} />
+              ) : (
+                <FullscreenEnterIcon size={18} />
+              )}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={toggleTheme}
