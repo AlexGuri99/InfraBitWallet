@@ -239,6 +239,16 @@ live P2a/P2b TON read/send behaviour.
 
 ---
 
+### P2g: Non-bounceable send to `uninit` recipient — false-positive abort (2026-11-25)
+
+| Area                                                                                                         | Status | Evidence                                  |
+| ------------------------------------------------------------------------------------------------------------ | ------ | ----------------------------------------- |
+| Harmless child abort (`compute_ph` skipped `no_state`, no bounce/exit/action code) no longer fails emulation | DONE   | `isHarmlessUninitCredit`, `write.test.ts` |
+| Root sender abort, any non-zero `exit_code`/`action.result_code`, or a bounce phase stays fail-closed        | DONE   | `write.test.ts` (root abort, bounce case) |
+| `bounce.type === "ok"` / TonAPI `bounce_phase` maps to `willBounce` + warning                                | DONE   | `readBouncePhase`, `write.test.ts`        |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started

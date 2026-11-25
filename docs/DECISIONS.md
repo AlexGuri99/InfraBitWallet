@@ -591,3 +591,26 @@ decimals (`formatDecimal`, exact BigInt math), renders the recipient in testnet 
 form (`Address.toString({ testOnly: true, bounceable })` via `toTestnetDisplayAddress`), and
 shows the emulated fee as `~0.0042 TON`. Symbol/decimals are frozen into the review step so a
 later asset change cannot alter what the confirmation screen displays.
+
+---
+
+## Decision: An `uninit` credit is not an abort (P2g)
+
+A valid non-bounceable (`0Q…`) transfer to a never-initialized recipient credits the account,
+skips the compute phase and marks that child transaction `aborted: true`. Treating any
+`aborted` in the trace as fatal blocked every such send. The emulation mapping now classifies
+per transaction:
+
+- **Harmless** (child only): `aborted` with a skipped compute phase whose reason is `no_state`
+  (TON Center) / `cskip_no_state` (TonAPI), no bounce phase, and zero/absent
+  `compute_ph.exit_code` and `action.result_code`. Some providers omit `compute_ph` entirely for
+  this credit; that is accepted only when the transaction's status is `uninit`/`nonexist` and
+  there is no action phase.
+- **Fatal** everywhere else: the root (sender) transaction aborted; any non-zero exit or action
+  result code on any transaction; a bounce phase (`bounce.type === "ok"` / `bounce_phase`
+  `TrPhaseBounceOk`, or its nofunds/negfunds variants); action result code 37 keeps predicting a
+  bounce.
+
+Bounce phases are now read from `description.bounce.type` (TON Center) and `bounce_phase`
+(TonAPI) in addition to the existing result-code 37 heuristic, so a bounceable transfer to an
+`uninit` account surfaces `willBounce` and fails closed instead of being silently credited.
