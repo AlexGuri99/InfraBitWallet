@@ -4,7 +4,7 @@
  * Renders exactly the on-chain item: status, hero amount, full counterparty with a dimmed middle,
  * the 64-char hash with a testnet explorer link, and a Repeat action that pre-fills Send.
  */
-import type { TonActivityItem } from '@onezerowallet/chain-ton';
+import { toTestnetDisplayAddress, type TonActivityItem } from '@onezerowallet/chain-ton';
 import { t } from '../i18n';
 import { activityKind, activityStatusLabel, fullTimestamp, hashToHex, splitAmount } from './asset';
 import { usePreferences } from './preferences';
@@ -64,11 +64,14 @@ export function TxDetailScreen({
   const { whole, fraction } = splitAmount(item.amount);
   const hashHex = hashToHex(item.hash);
   const sign = incoming ? '+' : '-';
+  // Pending items carry the raw address decoded from the signed BoC; show the same testnet
+  // user-friendly form as the Send Review screen so history and review always agree.
+  const counterparty = toTestnetDisplayAddress(item.counterparty, true);
 
   return (
     <PhoneFrame>
       <ScreenHeader title={activityStatusLabel(item)} onBack={onBack} />
-      <main className="flex flex-1 flex-col gap-4 px-4 pb-10">
+      <main className="flex flex-1 flex-col gap-4 px-4 pb-10 pt-3">
         <div className="text-center">
           <p className="text-[12.5px] font-medium text-ink-2">{fullTimestamp(item.timestamp)}</p>
         </div>
@@ -106,10 +109,10 @@ export function TxDetailScreen({
                 {incoming ? t('tx.from') : t('tx.to')}
               </p>
               <p className="mt-1">
-                <AddressDisplay address={item.counterparty} />
+                <AddressDisplay address={counterparty} />
               </p>
             </div>
-            <CopyLine value={item.counterparty} label={t('tx.copyAddress')} />
+            <CopyLine value={counterparty} label={t('tx.copyAddress')} />
           </div>
           <div className="h-px bg-hairline" />
           <div className="flex items-start justify-between gap-3">
