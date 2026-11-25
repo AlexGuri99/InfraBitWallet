@@ -249,6 +249,16 @@ live P2a/P2b TON read/send behaviour.
 
 ---
 
+### P2h: Transaction / Pending Detail polish (2026-11-25)
+
+| Area                                                                                         | Status | Evidence                                    |
+| -------------------------------------------------------------------------------------------- | ------ | ------------------------------------------- |
+| Pending detail counterparty rendered in testnet `kQ…`/`0Q…` form (raw `0:…` no longer shown) | DONE   | `ui/tx-detail.tsx`, `ui-tx-detail.test.tsx` |
+| Copy button copies the displayed friendly address; 6/6 highlight retained                    | DONE   | `ui/tx-detail.tsx`, component test          |
+| Timestamp breathing room below the sticky header (`pt-3` on the detail content column)       | DONE   | `ui/tx-detail.tsx`                          |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started

@@ -614,3 +614,15 @@ per transaction:
 Bounce phases are now read from `description.bounce.type` (TON Center) and `bounce_phase`
 (TonAPI) in addition to the existing result-code 37 heuristic, so a bounceable transfer to an
 `uninit` account surfaces `willBounce` and fails closed instead of being silently credited.
+
+---
+
+## Decision: One address representation across review and history (P2h)
+
+Pending items are built from the decoded signed BoC, so their counterparty is the raw `0:…`
+address. The Transaction / Pending Detail screen now runs it through the same
+`toTestnetDisplayAddress(raw, bounceable)` helper as Send Review, displaying `kQ…` (or the input
+unchanged if it cannot be parsed). The first-6/last-6 emphasis and the copy button are preserved;
+the button copies the displayed friendly form, so what is copied matches what is seen. The detail
+content column gains `pt-3` below the sticky header so the timestamp line is not clipped on
+mobile, normal or fullscreen.
