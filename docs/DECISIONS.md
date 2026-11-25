@@ -626,3 +626,34 @@ unchanged if it cannot be parsed). The first-6/last-6 emphasis and the copy butt
 the button copies the displayed friendly form, so what is copied matches what is seen. The detail
 content column gains `pt-3` below the sticky header so the timestamp line is not clipped on
 mobile, normal or fullscreen.
+
+---
+
+## Decision: STON.fi swap architecture — server quotes, offline client payloads, config-gated testnet (P3a)
+
+**Quote source.** STON.fi's official docs (fetched 2026-11-25) state that `api.ston.fi` serves
+**mainnet data only**, that DEX v2 removed expected-output getters, and that testnet swaps are
+built against configured contracts without a documented quote/simulation API. The proxy therefore
+quotes on mainnet via `POST /v1/swap/simulate` (snake_case query parameters, verified live), and on
+testnet only when `STON_TESTNET_API_BASE_URL` is configured by the operator; without it both swap
+endpoints return `swap_unavailable` and the Trade UI disables the CTA. No testnet router address is
+hardcoded or guessed — the documented testnet contracts (router `kQALh-…`, pTON `kQACS3…`) are only
+used as well-formed address fixtures in tests.
+
+**Fees.** `referralValue: 35` (basis points) is always encoded by the payload builder after
+`assertReferralFeeBps`, which rejects anything outside `[0, 100]` and therefore any pips-style
+value. `STON_REFERRAL_ADDRESS` is optional; when it is unset the router stores no referral address,
+the simulate call omits both referral parameters, and the quote reports `feeBps: 0` — the UI never
+claims a fee that is not collected. The referral address stays server-config only.
+
+**Payload building.** The Mini App builds the internal message offline with
+`@onezerowallet/swap-ton` (router `createSwapBody` + pTON `createTonTransferBody` / TEP-74
+transfer) from addresses the quote resolved. All wallet addresses the provider returns are
+normalised and validated; the builder fails closed on unsupported DEX versions, mismatched asset
+direction, missing jetton wallets, and non-positive amounts. `packages/chain-ton` signs the
+resulting internal message through the existing V5R1 closure (`buildSwapTransfer`), and the review
+decodes the _actual_ body (`decodeSwapPayload`) rather than showing form state.
+
+**Routers.** The quote must report DEX major version 2; an optional `STON_ALLOWED_ROUTERS`
+allowlist (reviewed config) rejects any other router. Tokens are never fetched from remote logos:
+swap assets carry metadata from the quote API and the UI renders the existing inline icon set.

@@ -28,7 +28,7 @@ import { TxDetailScreen } from './tx-detail';
 import { MarketScreen } from './market';
 import { AssistantScreen } from './assistant';
 import { SettingsTab } from './wallet';
-import type { TonReadApi, TonWriteApi } from '../ton/api';
+import type { TonReadApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import type { BiometryApi } from '../adapters/biometry';
 import { useToast } from './toast';
 import { FullscreenProvider } from '../telegram/fullscreen';
@@ -98,7 +98,7 @@ function WalletShellContent({
   onWiped,
 }: {
   manager: VaultManager;
-  api: TonReadApi & TonWriteApi;
+  api: TonReadApi & TonWriteApi & TonSwapApi;
   biometry: BiometryApi;
   tab: WalletTab;
   onTabChange: (tab: WalletTab) => void;
@@ -189,7 +189,7 @@ function WalletShellContent({
 
   const handleSubmitted = (
     decoded: DecodedSignedTransfer,
-    submittedAsset: { symbol: string; decimals: number },
+    submittedAsset: { symbol: string; decimals: number; amountRaw?: string | undefined },
   ): void => {
     baselineRef.current = activity.state === 'ready' ? activity.value.length : 0;
     setPending({
@@ -198,8 +198,8 @@ function WalletShellContent({
       standard: decoded.asset.type === 'ton' ? 'native' : 'jetton',
       symbol: submittedAsset.symbol,
       decimals: submittedAsset.decimals,
-      amountRaw: decoded.amountRaw,
-      amount: formatDecimal(decoded.amountRaw, submittedAsset.decimals),
+      amountRaw: submittedAsset.amountRaw ?? decoded.amountRaw,
+      amount: formatDecimal(submittedAsset.amountRaw ?? decoded.amountRaw, submittedAsset.decimals),
       counterparty: decoded.recipient,
       timestamp: Math.floor(Date.now() / 1000),
       feeRaw: '0',
@@ -245,12 +245,17 @@ function WalletShellContent({
       />
     );
   }
-  if (route.kind === 'trade') {
+  if (route.kind === 'trade' && info && portfolioReady) {
     return (
       <TradeScreen
+        manager={manager}
+        info={info}
+        portfolio={portfolioReady}
+        api={api}
         onBack={() => {
           setRoute({ kind: 'root' });
         }}
+        onSubmitted={handleSubmitted}
       />
     );
   }

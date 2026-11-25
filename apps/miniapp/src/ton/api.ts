@@ -38,6 +38,67 @@ export interface BroadcastPayload {
   messageHash: { hex: string; base64: string };
 }
 
+export interface SwapAssetPayload {
+  id: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  kind: 'native' | 'jetton';
+  contractAddress: string;
+  imageUrl: string | null;
+  verified: boolean;
+}
+
+export interface SwapQuoteRequestPayload {
+  network: TonNetwork;
+  offerAsset: string;
+  askAsset: string;
+  offerKind: 'native' | 'jetton';
+  askKind: 'native' | 'jetton';
+  offerUnits: string;
+  slippageBps: number;
+  userAddress: string;
+  offerJettonWallet?: string | undefined;
+}
+
+export interface SwapQuotePayload {
+  network: TonNetwork;
+  offer: { address: string; units: string };
+  ask: { address: string; units: string; minUnits: string };
+  minReceivedRaw: string;
+  slippageBps: number;
+  priceImpact: number | null;
+  swapRate: number | null;
+  providerMinUnits: string;
+  feeBps: number;
+  feeUnits: string;
+  referralAddress: string | null;
+  router: {
+    address: string;
+    majorVersion: number;
+    minorVersion: number;
+    routerType: string;
+    ptonMasterAddress: string;
+    ptonWalletAddress: string;
+    ptonVersion: string;
+    poolAddress: string;
+  };
+  direction: 'ton->jetton' | 'jetton->ton' | 'jetton->jetton';
+  offerJettonWalletAddress: string | null;
+  askJettonWalletAddress: string;
+  gas: {
+    gasBudget: string | null;
+    forwardGas: string | null;
+    estimatedGasConsumption: string | null;
+  };
+  quotedAt: number;
+}
+
+export interface TonSwapApi {
+  getSwapAssets(network: TonNetwork, signal?: AbortSignal): Promise<SwapAssetPayload[]>;
+  getSwapQuote(request: SwapQuoteRequestPayload, signal?: AbortSignal): Promise<SwapQuotePayload>;
+}
+
 export interface TonWriteApi {
   getWalletState(
     address: string,
@@ -118,7 +179,7 @@ function isPortfolio(value: unknown): value is TonPortfolio {
 
 export function createTonReadApi(
   fetchImpl: FetchLike = fetch as unknown as FetchLike,
-): TonReadApi & TonWriteApi {
+): TonReadApi & TonWriteApi & TonSwapApi {
   return {
     async getPortfolio(address, network, signal) {
       const query = new URLSearchParams({ address, network }).toString();
@@ -152,6 +213,20 @@ export function createTonReadApi(
     async broadcast(boc, network, signal) {
       const json = await postJson('/api/ton/broadcast', { boc, network }, fetchImpl, signal);
       return json as BroadcastPayload;
+    },
+    async getSwapAssets(network, signal) {
+      const query = new URLSearchParams({ network }).toString();
+      const json = await readJson(`/api/ton/swap/assets?${query}`, fetchImpl, signal);
+      const assets = (json as { assets?: unknown }).assets;
+      if (!Array.isArray(assets)) throw new TonApiError('bad_response');
+      return assets as SwapAssetPayload[];
+    },
+    async getSwapQuote(request, signal) {
+      const json = await postJson('/api/ton/swap/quote', request, fetchImpl, signal);
+      if (typeof json !== 'object' || json === null || !('minReceivedRaw' in json)) {
+        throw new TonApiError('bad_response');
+      }
+      return json as SwapQuotePayload;
     },
   };
 }

@@ -18,7 +18,7 @@
     "ci": "pnpm verify",
     "e2e:install": "pnpm --filter @onezerowallet/miniapp exec playwright install chromium webkit",
     "test:esm": "node scripts/esm-smoke.mjs",
-    "build:libs": "pnpm --filter @onezerowallet/chain-ton build && pnpm --filter @onezerowallet/api build"
+    "build:libs": "pnpm --filter @onezerowallet/swap-ton build && pnpm --filter @onezerowallet/chain-ton build && pnpm --filter @onezerowallet/api build"
   },
   "engines": {
     "node": ">=22.22.2 <23",

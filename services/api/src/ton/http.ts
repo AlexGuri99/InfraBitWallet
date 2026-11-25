@@ -2,7 +2,7 @@
  * Small JSON fetch helper with an abort timeout. Provider errors never carry upstream bodies,
  * headers or keys, so nothing sensitive can leak through an error message or stack trace.
  */
-export type ProviderName = 'toncenter' | 'tonapi';
+export type ProviderName = 'toncenter' | 'tonapi' | 'stonfi';
 
 export class ProviderError extends Error {
   readonly provider: ProviderName;

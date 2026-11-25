@@ -68,6 +68,22 @@ export function v5r1WalletAddress(publicKeyHex: string, network: TonNetwork): Wa
   };
 }
 
+/** Canonical raw form for a TON address (any encoding), or null when unparseable. */
+export function normalizeTonAddress(input: string): string | null {
+  try {
+    return Address.parse(input).toRawString();
+  } catch {
+    return null;
+  }
+}
+
+/** Compare two TON addresses whatever their encoding. */
+export function tonAddressEquals(a: string, b: string): boolean {
+  const left = normalizeTonAddress(a);
+  const right = normalizeTonAddress(b);
+  return left !== null && right !== null && left === right;
+}
+
 /**
  * Render a raw (`0:…`) address as the testnet user-friendly form (`0Q…`/`kQ…`) for display.
  *
@@ -132,6 +148,23 @@ export interface JettonTransferRequest {
   forwardTonRaw?: string | bigint | undefined;
 }
 
+export interface SwapTransferRequest {
+  publicKeyHex: string;
+  network: TonNetwork;
+  seqno: number;
+  /** Internal-message destination (STON.fi router pTON wallet or the user's jetton wallet). */
+  to: string;
+  /** Attached nanoTON: offer + forwarding gas for native offers, gas budget otherwise. */
+  valueRaw: string | bigint;
+  /** Base64 BoC of the swap body (built by @onezerowallet/swap-ton). */
+  bodyBoc: string;
+  /** Include the wallet's StateInit when the account is still uninit (first send). */
+  deploy?: boolean | undefined;
+  bounce?: boolean | undefined;
+  validUntil?: number | undefined;
+  sendMode?: number | undefined;
+}
+
 export interface DecodedTransferAsset {
   type: 'ton' | 'jetton';
   jettonWallet?: string | undefined;
@@ -167,7 +200,7 @@ function signerFor(sign: TransferSigner): (message: Cell) => Promise<NodeBuffer>
 }
 
 async function buildWalletMessage(
-  request: TonTransferRequest | JettonTransferRequest,
+  request: TonTransferRequest | JettonTransferRequest | SwapTransferRequest,
   message: MessageRelaxed,
   sign: TransferSigner,
 ): Promise<BuiltTransfer> {
@@ -212,6 +245,26 @@ export async function buildTonTransfer(
     to: Address.parse(request.destination),
     value: BigInt(request.amountRaw),
     bounce: request.bounce,
+    body,
+  });
+  return buildWalletMessage(request, message, sign);
+}
+
+/**
+ * Arbitrary internal message (DEX swap payload) signed by the V5R1 wallet. The body is opaque to
+ * this package; the swap adapter decoded it into the intent shown on the confirmation screen.
+ */
+export async function buildSwapTransfer(
+  request: SwapTransferRequest,
+  sign: TransferSigner,
+): Promise<BuiltTransfer> {
+  const cells = Cell.fromBoc(NodeBuffer.from(request.bodyBoc, 'base64'));
+  const body = cells[0];
+  if (!body) throw new Error('INVALID_SWAP_BODY');
+  const message = internal({
+    to: Address.parse(request.to),
+    value: BigInt(request.valueRaw),
+    bounce: request.bounce ?? true,
     body,
   });
   return buildWalletMessage(request, message, sign);

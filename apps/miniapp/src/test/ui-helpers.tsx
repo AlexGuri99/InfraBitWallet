@@ -11,7 +11,7 @@ import { PreferencesProvider } from '../ui/preferences';
 import { ToastProvider } from '../ui/toast';
 import { WalletShell } from '../ui/wallet-shell';
 import type { WalletTab } from '../ui/nav';
-import type { TonReadApi, TonWriteApi } from '../ton/api';
+import type { TonReadApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import { App } from '../App';
 import type { BiometryApi } from '../adapters/biometry';
 
@@ -64,7 +64,7 @@ export function renderApp(vault: VaultUi): ReturnType<typeof render> {
 /** Render the wallet shell directly with an injectable TON read/write API. */
 export function renderShell(
   vault: VaultUi,
-  api: TonReadApi & TonWriteApi,
+  api: TonReadApi & TonWriteApi & TonSwapApi,
   options: { tab?: WalletTab; onLock?: () => void; onTabChange?: (tab: WalletTab) => void } = {},
 ): ReturnType<typeof render> {
   return renderWithProviders(

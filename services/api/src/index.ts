@@ -8,3 +8,4 @@ export * from './ton/http.js';
 export * from './ton/validation.js';
 export * from './ton/service.js';
 export * from './ton/write.js';
+export * from './ton/swap.js';
