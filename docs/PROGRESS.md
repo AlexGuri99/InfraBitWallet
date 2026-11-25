@@ -227,6 +227,18 @@ live P2a/P2b TON read/send behaviour.
 
 ---
 
+### P2f: First live testnet send — emulation parsing + review formatting (2026-11-25)
+
+| Area                                                                                                      | Status | Evidence                                                             |
+| --------------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------- |
+| `/api/ton/emulate` parses the real TON Center shape (`transactions` hash map, `account_states`, `trace`)  | DONE   | `services/api/src/ton/write.ts`, `write.test.ts` (7 emulation cases) |
+| TonAPI fallback parses `MessageConsequences` (`trace.transaction` + children), not a `result` wrapper     | DONE   | `write.test.ts` (TonAPI fixture)                                     |
+| Fees accept JSON numbers (real schema) and decimal strings; balance deltas from state hashes or messages  | DONE   | `write.test.ts`                                                      |
+| Empty/unparseable upstream still fails closed; shape-only `console.warn` (top-level keys, no BoC/address) | DONE   | `logEmptyEmulation`, unit test                                       |
+| Review amount/fee formatted in token units; recipient shown as testnet `0Q…`/`kQ…`                        | DONE   | `ui/send.tsx`, `toTestnetDisplayAddress`, `ui-home.test.tsx`         |
+
+---
+
 ### P2: TON — Receive, Balances, History, Prices, Send
 
 **Status:** Not started

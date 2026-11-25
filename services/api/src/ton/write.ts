@@ -3,6 +3,11 @@
  *
  * Keys stay in provider headers. Responses are normalized and never include upstream bodies or
  * stack traces. Broadcast messages are signed BoCs from the client; this service cannot sign.
+ *
+ * Emulation response shapes verified 2026-11-25 against:
+ * - https://testnet.toncenter.com/api/emulate/doc.json (endpoint/request schema)
+ * - toncenter/ton-index-worker `ton-emulate-go/models/{response,models}.go` (response schema)
+ * - https://testnet.tonapi.io/v2/openapi.json (`MessageConsequences`)
  */
 import { Cell } from '@ton/core';
 import { Buffer } from 'node:buffer';
@@ -79,6 +84,31 @@ function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+/** Parse a nano-unit amount that upstreams may send as a JSON number or a decimal string. */
+function rawAmount(value: unknown): string | null {
+  if (typeof value === 'string') return /^\d+$/.test(value) ? value : null;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+    return String(value);
+  }
+  return null;
+}
+
+/** Transaction owner: TON Center sends a string, TonAPI an AccountAddress object. */
+function accountOf(tx: Record<string, unknown>): string | null {
+  const direct = str(tx['account']);
+  if (direct !== null) return direct;
+  const account = record(tx['account']);
+  return account ? str(account['address']) : null;
+}
+
+function isExternalIn(tx: Record<string, unknown>): boolean {
+  const inMsg = record(tx['in_msg']);
+  if (!inMsg) return false;
+  return (
+    inMsg['msg_type'] === 'ext_in_msg' || inMsg['source'] === null || inMsg['source'] === undefined
+  );
+}
+
 export async function getWalletState(
   address: string,
   network: TonNetwork,
@@ -123,12 +153,147 @@ export async function getWalletState(
   }
 }
 
+interface EmulationTransaction {
+  /** TON Center keys the transaction map by the hash it omits from each JSON object. */
+  key: string | null;
+  tx: Record<string, unknown>;
+}
+
+interface EmulationDoc {
+  transactions: EmulationTransaction[];
+  accountStates: Record<string, unknown>;
+  rootTx: Record<string, unknown> | null;
+}
+
+/**
+ * Normalize the two upstream shapes into one transaction list.
+ *
+ * TON Center `/api/emulate/v1/emulateTrace` returns
+ * `{ mc_block_seqno, trace: { tx_hash, children }, transactions: Record<hash, Tx>, account_states }`
+ * (verified against toncenter/ton-index-worker `ton-emulate-go/models`), while TonAPI
+ * `/v2/wallet/emulate` returns `MessageConsequences` `{ trace: { transaction, children }, event, risk }`.
+ * Both are accepted, plus an array-valued `transactions` field for defensive compatibility.
+ */
+function collectEmulation(raw: unknown): EmulationDoc {
+  const outer = record(raw) ?? {};
+  const inner = record(outer['result']) ?? outer;
+  const transactions: EmulationTransaction[] = [];
+  const seen = new Set<Record<string, unknown>>();
+  const add = (key: string | null, value: unknown): void => {
+    const tx = record(value);
+    if (!tx || seen.has(tx)) return;
+    seen.add(tx);
+    transactions.push({ key, tx });
+  };
+
+  const field = inner['transactions'];
+  if (Array.isArray(field)) {
+    for (const entry of field) add(null, entry);
+  } else {
+    const map = record(field);
+    if (map) for (const [key, value] of Object.entries(map)) add(key, value);
+  }
+
+  let rootTx: Record<string, unknown> | null = null;
+  const walk = (node: unknown): void => {
+    const value = record(node);
+    if (!value) return;
+    const tx = record(value['transaction']);
+    if (tx) {
+      add(null, tx);
+      rootTx = rootTx ?? tx;
+    }
+    for (const child of list(value['children'])) walk(child);
+  };
+  walk(inner['trace']);
+  if (inner['transaction']) walk(inner);
+
+  const trace = record(inner['trace']);
+  const rootKey = trace ? str(trace['tx_hash']) : null;
+  const keyedRoot = rootKey
+    ? (transactions.find((entry) => entry.key === rootKey)?.tx ?? null)
+    : null;
+  return {
+    transactions,
+    accountStates: record(inner['account_states']) ?? {},
+    rootTx: keyedRoot ?? rootTx,
+  };
+}
+
+function readCompute(tx: Record<string, unknown>): Record<string, unknown> | null {
+  const description = record(tx['description']);
+  return record(description?.['compute_ph']) ?? record(tx['compute_phase']);
+}
+
+function readAction(tx: Record<string, unknown>): Record<string, unknown> | null {
+  const description = record(tx['description']);
+  return record(description?.['action']) ?? record(tx['action_phase']);
+}
+
+function isAborted(tx: Record<string, unknown>): boolean {
+  const description = record(tx['description']);
+  const action = readAction(tx);
+  return (
+    tx['aborted'] === true ||
+    description?.['aborted'] === true ||
+    (action !== null && action['success'] === false)
+  );
+}
+
+function readExitCode(tx: Record<string, unknown>): number | null {
+  const compute = readCompute(tx);
+  if (!compute || compute['skipped'] === true) return null;
+  return num(compute['exit_code']);
+}
+
+/**
+ * Balance delta for one transaction's own account.
+ *
+ * Prefers TON Center's before/after account-state hashes resolved through the `account_states`
+ * map (exact), then the legacy inline `account_state_before/after` objects, and finally derives
+ * the delta from the message values and fees (`in - out - total_fees`), which is exact for every
+ * account a transaction touches and is the only signal TonAPI exposes.
+ */
+function balanceDelta(
+  tx: Record<string, unknown>,
+  accountStates: Record<string, unknown>,
+): bigint | null {
+  const beforeHash = str(tx['account_state_hash_before']);
+  const afterHash = str(tx['account_state_hash_after']);
+  if (beforeHash !== null && afterHash !== null) {
+    const before = record(accountStates[beforeHash]);
+    const after = record(accountStates[afterHash]);
+    const beforeRaw = before ? rawAmount(before['balance']) : null;
+    const afterRaw = after ? rawAmount(after['balance']) : null;
+    if (beforeRaw !== null && afterRaw !== null) return BigInt(afterRaw) - BigInt(beforeRaw);
+  }
+  const beforeState = record(tx['account_state_before']);
+  const afterState = record(tx['account_state_after']);
+  const beforeRaw = beforeState ? rawAmount(beforeState['balance']) : null;
+  const afterRaw = afterState ? rawAmount(afterState['balance']) : null;
+  if (beforeRaw !== null && afterRaw !== null) return BigInt(afterRaw) - BigInt(beforeRaw);
+
+  const inMsg = record(tx['in_msg']);
+  let incoming = 0n;
+  if (inMsg && inMsg['value'] !== null && inMsg['value'] !== undefined) {
+    const raw = rawAmount(inMsg['value']);
+    if (raw === null) return null;
+    incoming = BigInt(raw);
+  }
+  let outgoing = 0n;
+  for (const entry of list(tx['out_msgs'])) {
+    const msg = record(entry);
+    const raw = msg ? rawAmount(msg['value']) : null;
+    if (raw === null) return null;
+    outgoing += BigInt(raw);
+  }
+  return incoming - outgoing - BigInt(rawAmount(tx['total_fees']) ?? '0');
+}
+
 function mapEmulation(raw: unknown): EmulationResult {
-  const rootRecord = record(raw);
-  const inner =
-    rootRecord && record(rootRecord['result']) ? record(rootRecord['result']) : rootRecord;
-  const transactions = inner ? list(inner['transactions']) : [];
-  if (transactions.length === 0) {
+  const doc = collectEmulation(raw);
+  if (doc.transactions.length === 0) {
+    logEmptyEmulation(raw);
     return {
       ok: false,
       estimatedFeeRaw: '0',
@@ -138,50 +303,50 @@ function mapEmulation(raw: unknown): EmulationResult {
     };
   }
 
+  const rootTx =
+    doc.rootTx ??
+    doc.transactions.find((entry) => isExternalIn(entry.tx))?.tx ??
+    doc.transactions[0]?.tx ??
+    null;
+  const rootAccount = rootTx ? accountOf(rootTx) : null;
+
   let fees = 0n;
+  let walletDelta = 0n;
   const warnings: string[] = [];
-  const balanceChanges: EmulationBalanceChange[] = [];
   let firstExit: number | undefined;
   let willBounce = false;
   let aborted = false;
+  let destroyed = false;
 
-  for (const entry of transactions) {
-    const tx = record(entry);
-    if (!tx) continue;
-    const fee = str(tx['total_fees']);
-    if (fee && /^\d+$/.test(fee)) fees += BigInt(fee);
-    const description = record(tx['description']);
-    const compute = description ? record(description['compute_ph']) : null;
-    const action = description ? record(description['action']) : null;
-    const exitCode = compute ? num(compute['exit_code']) : null;
+  for (const { tx } of doc.transactions) {
+    fees += BigInt(rawAmount(tx['total_fees']) ?? '0');
+    const exitCode = readExitCode(tx);
     if (exitCode !== null && exitCode !== 0 && firstExit === undefined) firstExit = exitCode;
-    if (compute && compute['aborted'] === true) aborted = true;
+    if (isAborted(tx)) aborted = true;
+    const action = readAction(tx);
     if (action && action['result_code'] === 37) willBounce = true;
-    if (action && action['success'] === false) aborted = true;
-    const before = record(tx['account_state_before']);
-    const after = record(tx['account_state_after']);
-    const beforeBalance = before ? str(before['balance']) : null;
-    const afterBalance = after ? str(after['balance']) : null;
-    if (
-      beforeBalance &&
-      afterBalance &&
-      /^\d+$/.test(beforeBalance) &&
-      /^\d+$/.test(afterBalance)
-    ) {
-      const delta = BigInt(afterBalance) - BigInt(beforeBalance);
-      if (delta !== 0n) {
-        balanceChanges.push({
-          assetId: 'ton',
-          symbol: 'TON',
-          deltaRaw: delta.toString(),
-          decimals: 9,
-        });
-      }
+    const description = record(tx['description']);
+    if (tx['destroyed'] === true || description?.['destroyed'] === true) destroyed = true;
+
+    const account = accountOf(tx);
+    if (rootAccount === null || account === rootAccount) {
+      walletDelta += balanceDelta(tx, doc.accountStates) ?? 0n;
     }
+  }
+
+  const balanceChanges: EmulationBalanceChange[] = [];
+  if (walletDelta !== 0n) {
+    balanceChanges.push({
+      assetId: 'ton',
+      symbol: 'TON',
+      deltaRaw: walletDelta.toString(),
+      decimals: 9,
+    });
   }
 
   if (aborted) warnings.push('Emulation aborted');
   if (willBounce) warnings.push('Transfer may bounce');
+  if (destroyed) warnings.push('Account destroyed');
   if (firstExit !== undefined && firstExit !== 0) warnings.push(`Exit code ${String(firstExit)}`);
 
   return {
@@ -192,6 +357,20 @@ function mapEmulation(raw: unknown): EmulationResult {
     willBounce,
     exitCode: firstExit,
   };
+}
+
+/**
+ * Shape-only diagnostics for upstream schema drift. Never logs the BoC, addresses, message
+ * bodies or hashes — only the top-level keys, so a Vercel log line cannot leak a transfer.
+ */
+function logEmptyEmulation(raw: unknown): void {
+  const root = record(raw);
+  const inner = root ? (record(root['result']) ?? root) : null;
+  console.warn('[ton/emulate] upstream response contained no transactions', {
+    keys: inner ? Object.keys(inner).slice(0, 16) : [],
+    traceKeys:
+      inner && record(inner['trace']) ? Object.keys(record(inner['trace']) ?? {}).slice(0, 8) : [],
+  });
 }
 
 export async function emulateBoc(boc: string, options: WriteOptions): Promise<EmulationResult> {

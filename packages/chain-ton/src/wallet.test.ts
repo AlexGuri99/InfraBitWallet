@@ -11,6 +11,7 @@ import { Buffer as NodeBuffer } from 'buffer';
 import {
   v5r1WalletAddress,
   addressRequiresBounce,
+  toTestnetDisplayAddress,
   maxTonAmountRaw,
   buildTonTransfer,
   buildJettonTransfer,
@@ -51,6 +52,16 @@ describe('bounce rules and Max buffer', () => {
     expect(addressRequiresBounce('kQ' + VAULT_TESTNET_ADDRESS.slice(2))).toBe(true);
     expect(addressRequiresBounce('UQ' + VAULT_TESTNET_ADDRESS.slice(2))).toBe(false);
     expect(addressRequiresBounce('EQ' + VAULT_TESTNET_ADDRESS.slice(2))).toBe(true);
+  });
+
+  it('renders raw addresses as testnet user-friendly forms for review', () => {
+    const raw = Address.parse(VAULT_TESTNET_ADDRESS).toRawString();
+    expect(toTestnetDisplayAddress(raw, false)).toBe(VAULT_TESTNET_ADDRESS);
+    const bounceable = toTestnetDisplayAddress(raw, true);
+    expect(bounceable.startsWith('kQ')).toBe(true);
+    expect(Address.parse(bounceable).toRawString()).toBe(raw);
+    // Unparseable input is returned as-is; the caller fails closed elsewhere.
+    expect(toTestnetDisplayAddress('not-an-address', true)).toBe('not-an-address');
   });
 
   it('reserves a gas buffer from the max TON amount', () => {

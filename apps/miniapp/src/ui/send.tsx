@@ -12,12 +12,14 @@ import {
   addressRequiresBounce,
   buildJettonTransfer,
   buildTonTransfer,
+  formatDecimal,
   formatDecimalShort,
   formatUsd,
   isProbablyTonAddress,
   maxTonAmountRaw,
   parseDecimal,
   SEND_MODE_MAX,
+  toTestnetDisplayAddress,
   type BuiltTransfer,
   type DecodedSignedTransfer,
   type TonAssetBalance,
@@ -53,8 +55,17 @@ type Step =
       built: BuiltTransfer;
       decoded: DecodedSignedTransfer;
       emulation: EmulationPayload;
+      /** Symbol/decimals frozen at review time so later asset changes can't alter the display. */
+      symbol: string;
+      decimals: number;
     }
-  | { kind: 'sent'; hashHex: string; decoded: DecodedSignedTransfer };
+  | {
+      kind: 'sent';
+      hashHex: string;
+      decoded: DecodedSignedTransfer;
+      symbol: string;
+      decimals: number;
+    };
 
 function amountFor(asset: TonAssetBalance, value: string): bigint | null {
   return parseDecimal(value, asset.decimals);
@@ -196,7 +207,14 @@ export function SendScreen({
           );
       const decoded = built.decoded;
       const emulation = await api.emulate(built.boc, 'testnet');
-      setStep({ kind: 'review', built, decoded, emulation });
+      setStep({
+        kind: 'review',
+        built,
+        decoded,
+        emulation,
+        symbol: asset.symbol,
+        decimals: asset.decimals,
+      });
     } catch {
       setError('Could not build or emulate the transfer. Nothing was sent.');
     } finally {
@@ -210,12 +228,14 @@ export function SendScreen({
     setError(null);
     try {
       const result = await api.broadcast(step.built.boc, 'testnet');
-      const reviewAsset = assets.find((entry) => entry.id === assetId);
-      onSubmitted(step.decoded, {
-        symbol: reviewAsset?.symbol ?? (step.decoded.asset.type === 'ton' ? 'TON' : 'JETTON'),
-        decimals: reviewAsset?.decimals ?? 9,
+      onSubmitted(step.decoded, { symbol: step.symbol, decimals: step.decimals });
+      setStep({
+        kind: 'sent',
+        hashHex: result.messageHash.hex,
+        decoded: step.decoded,
+        symbol: step.symbol,
+        decimals: step.decimals,
       });
-      setStep({ kind: 'sent', hashHex: result.messageHash.hex, decoded: step.decoded });
       toast.show(t('send.submitted'));
     } catch {
       setError('Broadcast failed. The transfer may not have been submitted.');
@@ -237,8 +257,7 @@ export function SendScreen({
           </p>
           <Card className="w-full p-4 text-center">
             <p className="tabular text-[22px] font-extrabold tracking-[-0.02em] text-ink">
-              {step.decoded.amountRaw} {step.decoded.asset.type === 'ton' ? 'TON' : 'JETTON'}
-              <span className="text-[12px] font-medium text-ink-muted"> raw</span>
+              {formatDecimal(step.decoded.amountRaw, step.decimals)} {step.symbol}
             </p>
             <a
               className="mt-2 block break-all text-[11.5px] font-medium text-accent-link underline"
@@ -280,7 +299,7 @@ export function SendScreen({
                 {t('send.recipient')}
               </p>
               <code className="mt-1 block break-all font-mono text-[12.5px] text-ink">
-                {decoded.recipient}
+                {toTestnetDisplayAddress(decoded.recipient, decoded.bounce)}
               </code>
             </div>
             <div className="h-px bg-hairline" />
@@ -289,7 +308,7 @@ export function SendScreen({
                 {t('send.amount')}
               </p>
               <p className="tabular mt-1 text-[15px] font-semibold text-ink">
-                {decoded.amountRaw} {decoded.asset.type === 'ton' ? 'TON (raw)' : 'JETTON (raw)'}
+                {formatDecimal(decoded.amountRaw, step.decimals)} {step.symbol}
               </p>
             </div>
             {decoded.comment ? (
@@ -309,7 +328,7 @@ export function SendScreen({
             <div className="flex items-center justify-between">
               <span className="text-[13px] text-ink-2">Network fee (est.)</span>
               <span className="tabular text-[13px] font-semibold text-ink">
-                {formatDecimalShort(emulation.estimatedFeeRaw, 9, 6)} TON
+                ~{formatDecimalShort(emulation.estimatedFeeRaw, 9, 6)} TON
               </span>
             </div>
             <div className="flex items-center justify-between">

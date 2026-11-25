@@ -552,3 +552,42 @@ cannot leak across sessions/screens.
 **Layout.** The utility cluster is now privacy eye, fullscreen, theme, QR with `6px` gaps. The
 left wallet pill is `flex-1 min-w-0` with a truncating label, keeping the bar single-line down to
 360px.
+
+---
+
+## Decision: Parse the documented emulation response shapes, and render the review in user units (P2f)
+
+**Emulation parsing.** The first real TON Testnet V5R1 send returned
+`{ ok: false, estimatedFeeRaw: "0", warnings: ["Emulation returned no transactions"] }` while the
+upstream call succeeded. The parser assumed `transactions` was an array of objects with string
+fees and `account_state_before/after` balances. The actual TON Center
+`/api/emulate/v1/emulateTrace` response (verified against `toncenter/ton-index-worker`
+`ton-emulate-go/models/response.go` + `models.go`, 2026-11-25) is:
+
+- `transactions`: `Record<base64 tx hash, Tx>` — the hash is the map key, not a field.
+- `account_states`: `Record<base64 state hash, { balance: number, account_status }>`; a
+  transaction's before/after balances are resolved via `account_state_hash_before/after`.
+- `total_fees` is a **JSON number**, not a string.
+- `description.aborted` / `description.destroyed` are top-level in `TransactionDescr`;
+  `compute_ph.exit_code` and `action.result_code` live under `description`.
+- `trace` is `{ tx_hash, in_msg_hash, children }` referencing the transaction map.
+
+TonAPI `/v2/wallet/emulate` (checked against `testnet.tonapi.io/v2/openapi.json`) returns
+`MessageConsequences` `{ trace: { transaction, children }, event, risk }` — not `{ result: … }`.
+Its fee/exit fields are `total_fees`, `compute_phase.exit_code`, `action_phase.result_code`, and
+it exposes only `end_balance`, so the wallet delta is derived as `in − out − total_fees`
+(exact per account and also used as the TON Center fallback when state hashes are unresolved).
+
+Both shapes are normalized into one transaction list; `transactions` as an array is still
+accepted defensively. The wallet balance delta is scoped to the trace root's account (so a
+destination's credit or a jetton wallet's balance never appears as the user's change); fees are
+summed across the trace. A genuinely empty/unparseable 200 response still fails closed
+(`ok: false`) and logs only the top-level response keys — never the BoC, addresses, hashes or
+message bodies — so schema drift is visible in Vercel logs without leaking a transfer.
+
+**Review formatting.** The review renders the decoded signed BoC, so it showed raw nano units
+(`1949999999 TON (raw)`) and a raw `0:…` recipient. It now formats the amount with the asset's
+decimals (`formatDecimal`, exact BigInt math), renders the recipient in testnet user-friendly
+form (`Address.toString({ testOnly: true, bounceable })` via `toTestnetDisplayAddress`), and
+shows the emulated fee as `~0.0042 TON`. Symbol/decimals are frozen into the review step so a
+later asset change cannot alter what the confirmation screen displays.
