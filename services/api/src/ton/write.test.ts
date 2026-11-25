@@ -298,6 +298,97 @@ describe('emulate', () => {
     expect(result.warnings.join(' ')).not.toMatch(/destroyed/i);
   });
 
+  it('accepts a non-bounceable transfer to an uninit recipient (skipped no_state child)', async () => {
+    const trace = tonCenterTrace({
+      trace: {
+        tx_hash: 'cm9vdA==',
+        in_msg_hash: 'aW49',
+        children: [{ tx_hash: 'Y2hpbGQ=', in_msg_hash: 'b3V0', children: [] }],
+      },
+      transactions: {
+        'cm9vdA==': tonCenterTx({}),
+        'Y2hpbGQ=': tonCenterTx({
+          account: DESTINATION,
+          orig_status: 'uninit',
+          end_status: 'uninit',
+          out_msgs: [],
+          total_fees: 0,
+          account_state_hash_before: 'Y2hpbGRiZWZvcmU=',
+          account_state_hash_after: 'Y2hpbGRhZnRlcg==',
+          description: {
+            credit_first: true,
+            credit_ph: { credit: 1000000000 },
+            compute_ph: { type: 'skipped', skipped: true, reason: 'no_state' },
+            aborted: true,
+            destroyed: false,
+          },
+        }),
+      },
+    });
+    const { fetchImpl } = mock(() => ({ ok: true, status: 200, body: trace }));
+    const result = await emulateBoc('te6ccgEBAQEAAgAAAA==', { config: CONFIG, fetchImpl });
+    expect(result.ok).toBe(true);
+    expect(result.estimatedFeeRaw).toBe('3600000');
+    expect(result.willBounce).toBe(false);
+    expect(result.warnings.join(' ')).not.toMatch(/aborted/i);
+    expect(result.balanceChanges).toEqual([
+      { assetId: 'ton', symbol: 'TON', deltaRaw: '-1003600000', decimals: 9 },
+    ]);
+  });
+
+  it('still fails closed when the root sender transaction is aborted', async () => {
+    const trace = tonCenterTrace({
+      trace: { tx_hash: 'cm9vdA==', in_msg_hash: 'aW49', children: [] },
+      transactions: {
+        'cm9vdA==': tonCenterTx({
+          description: {
+            credit_first: true,
+            compute_ph: { skipped: false, success: true, exit_code: 0 },
+            action: { success: true, result_code: 0 },
+            aborted: true,
+            destroyed: false,
+          },
+        }),
+      },
+    });
+    const { fetchImpl } = mock(() => ({ ok: true, status: 200, body: trace }));
+    const result = await emulateBoc('te6ccgEBAQEAAgAAAA==', { config: CONFIG, fetchImpl });
+    expect(result.ok).toBe(false);
+    expect(result.warnings.join(' ')).toMatch(/aborted/i);
+  });
+
+  it('flags a bounceable transfer to an uninit recipient as a bounce', async () => {
+    const trace = tonCenterTrace({
+      trace: {
+        tx_hash: 'cm9vdA==',
+        in_msg_hash: 'aW49',
+        children: [{ tx_hash: 'Y2hpbGQ=', in_msg_hash: 'b3V0', children: [] }],
+      },
+      transactions: {
+        'cm9vdA==': tonCenterTx({}),
+        'Y2hpbGQ=': tonCenterTx({
+          account: DESTINATION,
+          orig_status: 'uninit',
+          end_status: 'uninit',
+          out_msgs: [],
+          total_fees: 0,
+          description: {
+            credit_first: true,
+            compute_ph: { type: 'skipped', skipped: true, reason: 'no_state' },
+            bounce: { type: 'ok', msg_size: { cells: 0, bits: 0 }, msg_fees: 0, fwd_fees: 0 },
+            aborted: true,
+            destroyed: false,
+          },
+        }),
+      },
+    });
+    const { fetchImpl } = mock(() => ({ ok: true, status: 200, body: trace }));
+    const result = await emulateBoc('te6ccgEBAQEAAgAAAA==', { config: CONFIG, fetchImpl });
+    expect(result.willBounce).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.warnings.join(' ')).toMatch(/bounce/i);
+  });
+
   it('flags bounce prediction and exit codes from the real description', async () => {
     const trace = tonCenterTrace({
       trace: { tx_hash: 'cm9vdA==', in_msg_hash: 'aW49', children: [] },

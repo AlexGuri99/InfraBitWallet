@@ -242,8 +242,56 @@ function isAborted(tx: Record<string, unknown>): boolean {
 
 function readExitCode(tx: Record<string, unknown>): number | null {
   const compute = readCompute(tx);
-  if (!compute || compute['skipped'] === true) return null;
+  if (!compute || compute['skipped'] === true || compute['type'] === 'skipped') return null;
   return num(compute['exit_code']);
+}
+
+/**
+ * Bounce phase, if the transaction's inbound message was returned to its sender.
+ * TON Center emits `description.bounce: { type: "ok" | "nofunds" | "negfunds" }`; TonAPI emits
+ * `bounce_phase: "TrPhaseBounceOk" | "TrPhaseBounceNofunds" | "TrPhaseBounceNegfunds"`.
+ */
+function readBouncePhase(tx: Record<string, unknown>): string | null {
+  const description = record(tx['description']);
+  const legacy = record(description?.['bounce']);
+  if (legacy) return str(legacy['type']);
+  return str(tx['bounce_phase']);
+}
+
+/** Reason a compute phase was skipped, normalized across both provider spellings. */
+function readSkipReason(tx: Record<string, unknown>): string | null {
+  const compute = readCompute(tx);
+  if (!compute) return null;
+  const skipped = compute['skipped'] === true || compute['type'] === 'skipped';
+  if (!skipped) return null;
+  return str(compute['reason']) ?? str(compute['skip_reason']);
+}
+
+/** `no_state` in TON Center, `cskip_no_state` in TonAPI. */
+function isNoStateSkip(tx: Record<string, unknown>): boolean {
+  const reason = readSkipReason(tx);
+  return reason === 'no_state' || reason === 'cskip_no_state';
+}
+
+/**
+ * A non-bounceable transfer to an `uninit` account is credited without running code, so its
+ * child transaction is marked `aborted` with a skipped `no_state` compute phase. That is a
+ * successful send, not a failure — provided nothing else in that transaction failed.
+ */
+function isHarmlessUninitCredit(tx: Record<string, unknown>): boolean {
+  if (readBouncePhase(tx) !== null) return false;
+  const exitCode = readExitCode(tx);
+  if (exitCode !== null && exitCode !== 0) return false;
+  const action = readAction(tx);
+  if (action) {
+    const resultCode = num(action['result_code']);
+    if (action['success'] === false) return false;
+    if (resultCode !== null && resultCode !== 0) return false;
+  }
+  if (isNoStateSkip(tx)) return true;
+  // Some providers omit compute_ph entirely for a credit to a never-initialized account.
+  const status = str(tx['orig_status']) ?? str(tx['end_status']);
+  return readCompute(tx) === null && !action && (status === 'uninit' || status === 'nonexist');
 }
 
 /**
@@ -320,13 +368,30 @@ function mapEmulation(raw: unknown): EmulationResult {
 
   for (const { tx } of doc.transactions) {
     fees += BigInt(rawAmount(tx['total_fees']) ?? '0');
-    const exitCode = readExitCode(tx);
-    if (exitCode !== null && exitCode !== 0 && firstExit === undefined) firstExit = exitCode;
-    if (isAborted(tx)) aborted = true;
-    const action = readAction(tx);
-    if (action && action['result_code'] === 37) willBounce = true;
     const description = record(tx['description']);
     if (tx['destroyed'] === true || description?.['destroyed'] === true) destroyed = true;
+
+    // Strict fail-closed signals: any non-zero exit/action code, or a bounced message, fails
+    // emulation no matter which account produced it.
+    const exitCode = readExitCode(tx);
+    if (exitCode !== null && exitCode !== 0) {
+      if (firstExit === undefined) firstExit = exitCode;
+      aborted = true;
+    }
+    const action = readAction(tx);
+    const resultCode = action ? num(action['result_code']) : null;
+    if (resultCode !== null && resultCode !== 0) aborted = true;
+    const bouncePhase = readBouncePhase(tx);
+    if (bouncePhase !== null) {
+      willBounce = true;
+      aborted = true;
+    }
+    // Kept from the original heuristic: action result_code 37 (insufficient funds) means the
+    // outbound message could not be fully funded and will bounce.
+    if (resultCode === 37) willBounce = true;
+
+    // The sender tx aborted, or a child aborted for a reason other than an uninit credit.
+    if (isAborted(tx) && (tx === rootTx || !isHarmlessUninitCredit(tx))) aborted = true;
 
     const account = accountOf(tx);
     if (rootAccount === null || account === rootAccount) {
