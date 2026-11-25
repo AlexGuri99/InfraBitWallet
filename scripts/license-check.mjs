@@ -7,6 +7,8 @@ import { execFileSync } from 'node:child_process';
 
 const ALLOWED = new Set([
   'MIT',
+  'MIT OR CC0-1.0',
+  '(MIT OR CC0-1.0)',
   'Apache-2.0',
   'BSD-2-Clause',
   'BSD-3-Clause',

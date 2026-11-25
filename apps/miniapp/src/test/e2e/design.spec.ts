@@ -51,6 +51,41 @@ const PORTFOLIO = {
   source: 'toncenter',
 };
 
+const SWAP_NATIVE = '0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const SWAP_JETTON = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const SWAP_JETTON_WALLET = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+const SWAP_PTON_MASTER = '0:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const SWAP_ROUTER = '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const SWAP_PTON_WALLET = '0:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+const SWAP_QUOTE = {
+  network: 'testnet',
+  offer: { address: SWAP_NATIVE, units: '1000000000' },
+  ask: { address: SWAP_JETTON, units: '2500000', minUnits: '2475000' },
+  minReceivedRaw: '2475000',
+  slippageBps: 100,
+  priceImpact: 0.001,
+  swapRate: 2.5,
+  providerMinUnits: '2475000',
+  feeBps: 35,
+  feeUnits: '3500',
+  referralAddress: null,
+  router: {
+    address: SWAP_ROUTER,
+    majorVersion: 2,
+    minorVersion: 1,
+    routerType: 'ConstantProduct',
+    ptonMasterAddress: SWAP_PTON_MASTER,
+    ptonWalletAddress: SWAP_PTON_WALLET,
+    ptonVersion: '2.1',
+    poolAddress: '0:9999999999999999999999999999999999999999999999999999999999999999',
+  },
+  direction: 'ton->jetton',
+  offerJettonWalletAddress: null,
+  askJettonWalletAddress: SWAP_JETTON_WALLET,
+  gas: { gasBudget: '1310000000', forwardGas: '100000000', estimatedGasConsumption: '120000000' },
+  quotedAt: 0,
+};
+
 async function mockTonApi(page: Page): Promise<void> {
   await page.route('**/api/ton/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -59,6 +94,83 @@ async function mockTonApi(page: Page): Promise<void> {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify(PORTFOLIO),
+      });
+      return;
+    }
+    if (path.endsWith('/swap/assets')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          network: 'testnet',
+          assets: [
+            {
+              id: 'native',
+              symbol: 'TON',
+              name: 'Gram',
+              decimals: 9,
+              kind: 'native',
+              contractAddress: SWAP_NATIVE,
+              imageUrl: null,
+              verified: true,
+            },
+            {
+              id: SWAP_JETTON,
+              symbol: 'USDT',
+              name: 'Tether USD',
+              decimals: 6,
+              kind: 'jetton',
+              contractAddress: SWAP_JETTON,
+              imageUrl: null,
+              verified: true,
+            },
+          ],
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/swap/quote')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(SWAP_QUOTE),
+      });
+      return;
+    }
+    if (path.endsWith('/wallet-state')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          address: PORTFOLIO.address,
+          network: 'testnet',
+          status: 'active',
+          seqno: 5,
+          balanceRaw: PORTFOLIO.balanceRaw,
+          source: 'toncenter',
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/emulate')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          estimatedFeeRaw: '31000000',
+          balanceChanges: [],
+          warnings: [],
+          willBounce: false,
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/broadcast')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' } }),
       });
       return;
     }
@@ -104,9 +216,27 @@ test.describe('design system', () => {
     await page.waitForLoadState('networkidle');
     const origin = new URL(page.url()).origin;
     expect([...origins]).toEqual([origin]);
-    expect(fontResponses.length).toBeGreaterThan(0);
     for (const url of fontResponses) {
       expect(new URL(url).origin).toBe(origin);
+    }
+    // Chromium shares its HTTP cache across contexts, so a preceding test may already have
+    // fetched the woff2 files (zero responses here). Assert the intent instead: the faces are
+    // actually loaded and every @font-face URL in the app stylesheet is same-origin.
+    const fonts = await page.evaluate(async () => {
+      await document.fonts.ready;
+      const link = document.querySelector<HTMLLinkElement>('link[rel="stylesheet"]');
+      const css = link ? await fetch(link.href).then((response) => response.text()) : '';
+      return {
+        loaded: document.fonts.check('16px "Plus Jakarta Sans"'),
+        sources: [...css.matchAll(/url\((["']?)([^"')]+\.woff2)\1\)/g)].map(
+          (match) => match[2] ?? '',
+        ),
+      };
+    });
+    expect(fonts.loaded).toBe(true);
+    expect(fonts.sources.length).toBeGreaterThan(0);
+    for (const source of fonts.sources) {
+      expect(new URL(source, origin).origin).toBe(origin);
     }
     expect([...origins].some((o) => /fonts\.(googleapis|gstatic)\.com/.test(o))).toBe(false);
   });
@@ -148,13 +278,29 @@ test.describe('design system', () => {
     );
   });
 
-  test('Trade and Earn are labelled UI shells with disabled CTAs', async ({ page }) => {
+  test('Trade runs a mocked live swap in both themes; Earn is a labelled shell', async ({
+    page,
+  }) => {
+    const cspViolations: string[] = [];
+    page.on('console', (message) => {
+      if (/Content Security Policy/i.test(message.text())) cspViolations.push(message.text());
+    });
     await mockTonApi(page);
     await createWallet(page);
+
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.getByRole('button', { name: 'Trade' }).click();
     await expect(page.getByRole('heading', { name: 'Trade' })).toBeVisible();
-    await expect(page.getByText('Coming in P3').first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Coming in P3' })).toBeDisabled();
+    await page.getByLabel('You sell amount').fill('1');
+    await expect(page.getByText('Minimum received').first()).toBeVisible();
+    await expect(page.getByText('0.35%').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Review transfer' }).click();
+    await expect(page.getByRole('heading', { name: 'Review swap' })).toBeVisible();
+    await expect(page.getByText(/~0.031 TON/)).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm & Swap' }).click();
+    await expect(page.getByRole('heading', { name: 'Swap submitted' })).toBeVisible();
+    expect(cspViolations).toEqual([]);
     await page.getByRole('button', { name: 'Back' }).click();
 
     await page.getByRole('button', { name: 'Earn' }).click();

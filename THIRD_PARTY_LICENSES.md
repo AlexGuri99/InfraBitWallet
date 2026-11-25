@@ -1,12 +1,12 @@
 # Third-party licenses
 
 Enforced by `pnpm license-check` (`scripts/license-check.mjs`), which runs in `pnpm verify` and in
-CI. It allows MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, OFL-1.1 (self-hosted fonts) and
-Unlicense (tweetnacl); anything else fails the build until it is reviewed and added here
-deliberately.
+CI. It allows MIT, the dual `MIT OR CC0-1.0` (type-fest, a `@ston-fi/api` transitive), ISC,
+Apache-2.0, BSD-2-Clause, BSD-3-Clause, OFL-1.1 (self-hosted fonts) and Unlicense (tweetnacl);
+anything else fails the build until it is reviewed and added here deliberately.
 
-Last verified: 2026-11-23 (P2d) — `license-check: 132 package entries, all allow-listed`
-(MIT 120, OFL-1.1 2, ISC 4, Apache-2.0 2, BSD-3-Clause 3, Unlicense 1).
+Last verified: 2026-11-25 (P3a) — `license-check: 145 package entries, all allow-listed`
+(MIT 132, OFL-1.1 2, ISC 4, Apache-2.0 2, BSD-3-Clause 3, Unlicense 1, MIT OR CC0-1.0 1).
 
 ## Direct dependencies
 
@@ -39,6 +39,8 @@ Last verified: 2026-11-23 (P2d) — `license-check: 132 package entries, all all
 | `@fontsource-variable/plus-jakarta-sans`             | OFL-1.1    | Self-hosted UI sans (bundled .woff2)        |
 | `@fontsource-variable/jetbrains-mono`                | OFL-1.1    | Self-hosted mono (addresses / amounts)      |
 | `react-web3-icons`                                   | MIT        | Inline branded coin SVGs (TON/USDT/TRX/ETH) |
+| `@ston-fi/sdk`                                       | MIT        | STON.fi DEX v2 swap payload builder         |
+| `@ston-fi/api`                                       | MIT        | Peer of @ston-fi/sdk (REST typings)         |
 | `valibot` (override)                                 | MIT        | Transitive pin `>=1.4.2` for advisories     |
 
 ## Notes

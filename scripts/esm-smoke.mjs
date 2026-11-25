@@ -74,6 +74,7 @@ async function invoke(name, request, expectedError) {
 
 try {
   rmSync(outDir, { recursive: true, force: true });
+  run(['--filter', '@onezerowallet/swap-ton', 'build']);
   run(['--filter', '@onezerowallet/chain-ton', 'build']);
   run(['--filter', '@onezerowallet/api', 'build']);
   run(['--filter', '@onezerowallet/miniapp', 'exec', 'tsc', '-p', 'api/tsconfig.smoke.json']);
@@ -87,6 +88,12 @@ try {
   await invoke('wallet-state', getInvalid, 'invalid_address');
   await invoke('emulate', postInvalid, 'invalid_boc');
   await invoke('broadcast', postInvalid, 'invalid_boc');
+  await invoke(
+    'swap/assets',
+    { method: 'GET', query: { network: 'mainnet' } },
+    'invalid_network',
+  );
+  await invoke('swap/quote', { method: 'POST', body: { network: 'testnet' } }, 'invalid_request');
   console.log('esm-smoke: OK');
 } finally {
   rmSync(outDir, { recursive: true, force: true });

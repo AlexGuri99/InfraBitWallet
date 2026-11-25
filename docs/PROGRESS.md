@@ -363,3 +363,18 @@ live P2a/P2b TON read/send behaviour.
 2. Does 0x add its own protocol/network fee on top of our integrator fee? Check before P5.
 3. SunSwap V4 docs — need to determine if there's an atomic swap integrator fee parameter for future TRON swap inclusion.
 4. `@telegram-apps/sdk` vs `@tma.js/sdk` — **ANSWERED:** Same project, renamed. `@telegram-apps/sdk` is current (v3.11.8), MIT license. `@tma.js/sdk` is legacy (v3.3.0). Source: npm registry metadata (both share `telegram-mini-apps-dev` org, both MIT).
+
+---
+
+### P3a: Live TON swaps via STON.fi DEX v2 (2026-11-25)
+
+| Area                                                                                                       | Status | Evidence                                             |
+| ---------------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------- |
+| `@ston-fi/sdk` v2 adapter with 35 bps referral (`referralValue`), 100 bps hard cap, bps/pips guard         | DONE   | `packages/swap-ton/src/fees.ts`, tests               |
+| Offline payload builder: TON→jetton, jetton→TON, jetton→jetton (`to`, `value`, body BoC)                   | DONE   | `packages/swap-ton/src/payload.ts`, tests            |
+| Signed-payload decoder used by the anti-drainer review                                                     | DONE   | `decodeSwapPayload`, tests                           |
+| Same-origin `GET /api/ton/swap/assets` + `POST /api/ton/swap/quote` with strict validation and fail-closed | DONE   | `services/api/src/ton/swap.ts`, `swap.test.ts`       |
+| V5R1 `buildSwapTransfer` in chain-ton (signed inside the vault closure)                                    | DONE   | `packages/chain-ton/src/wallet.ts`                   |
+| Trade UI: selectors, flip, Max + gas reserve, slippage presets, debounced quote, decoded review, broadcast | DONE   | `apps/miniapp/src/ui/trade.tsx`, `ui-trade.test.tsx` |
+| Testnet: official v2.1 router/pTON documented, quotes require an operator endpoint; disabled otherwise     | DONE   | `services/api/README.md`, e2e                        |
+| Mainnet REST path kept behind the network switch (mainnet still requires owner sign-off)                   | DONE   | `SwapService`, config                                |

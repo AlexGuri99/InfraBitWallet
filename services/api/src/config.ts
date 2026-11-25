@@ -26,7 +26,20 @@ export interface ServerConfig {
   toncenterApiKey?: string | undefined;
   toncenterTestnetApiKey?: string | undefined;
   tonapiApiKey?: string | undefined;
+  /**
+   * STON.fi REST base URL (mainnet). `api.ston.fi` serves mainnet data only (docs.ston.fi
+   * "Setup and environments"), so testnet quotes require an operator-provided endpoint.
+   */
+  stonApiBaseUrl?: string | undefined;
+  stonTestnetApiBaseUrl?: string | undefined;
+  /** Reviewed fee-recipient for the 35 bps referral fee; omitted = no fee is collected. */
+  stonReferralAddress?: string | undefined;
+  /** Optional signed-off router allowlist; when set, quotes from other routers are rejected. */
+  stonAllowedRouters?: string[] | undefined;
 }
+
+/** Documented mainnet REST API base URL (docs.ston.fi / api.ston.fi). */
+export const STON_MAINNET_API_URL = 'https://api.ston.fi' as const;
 
 export type ConfigResult =
   { ok: true; config: ServerConfig } | { ok: false; error: 'INVALID_SERVER_ENV' };
@@ -43,6 +56,22 @@ const envSchema = z.object({
   TONCENTER_API_KEY: optionalKey,
   TONCENTER_TESTNET_API_KEY: optionalKey,
   TONAPI_API_KEY: optionalKey,
+  STON_API_BASE_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().pipe(z.url()).optional(),
+  ),
+  STON_TESTNET_API_BASE_URL: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().pipe(z.url()).optional(),
+  ),
+  STON_REFERRAL_ADDRESS: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(1).max(100).optional(),
+  ),
+  STON_ALLOWED_ROUTERS: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().optional(),
+  ),
 });
 
 /**
@@ -58,8 +87,15 @@ export function loadServerConfig(
     TONCENTER_API_KEY: env['TONCENTER_API_KEY'],
     TONCENTER_TESTNET_API_KEY: env['TONCENTER_TESTNET_API_KEY'],
     TONAPI_API_KEY: env['TONAPI_API_KEY'],
+    STON_API_BASE_URL: env['STON_API_BASE_URL'],
+    STON_TESTNET_API_BASE_URL: env['STON_TESTNET_API_BASE_URL'],
+    STON_REFERRAL_ADDRESS: env['STON_REFERRAL_ADDRESS'],
+    STON_ALLOWED_ROUTERS: env['STON_ALLOWED_ROUTERS'],
   });
   if (!parsed.success) return { ok: false, error: 'INVALID_SERVER_ENV' };
+  const routers = parsed.data.STON_ALLOWED_ROUTERS?.split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
   return {
     ok: true,
     config: {
@@ -68,6 +104,10 @@ export function loadServerConfig(
       toncenterApiKey: parsed.data.TONCENTER_API_KEY,
       toncenterTestnetApiKey: parsed.data.TONCENTER_TESTNET_API_KEY,
       tonapiApiKey: parsed.data.TONAPI_API_KEY,
+      stonApiBaseUrl: parsed.data.STON_API_BASE_URL,
+      stonTestnetApiBaseUrl: parsed.data.STON_TESTNET_API_BASE_URL,
+      stonReferralAddress: parsed.data.STON_REFERRAL_ADDRESS,
+      ...(routers && routers.length > 0 ? { stonAllowedRouters: routers } : {}),
     },
   };
 }

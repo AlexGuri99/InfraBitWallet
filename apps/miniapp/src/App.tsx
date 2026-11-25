@@ -29,7 +29,7 @@ import { WalletShell } from './ui/wallet-shell';
 import { PreferencesProvider } from './ui/preferences';
 import { ToastProvider } from './ui/toast';
 import { Notice, PhoneFrame, ScreenShell } from './ui/common';
-import { createTonReadApi, type TonReadApi, type TonWriteApi } from './ton/api';
+import { createTonReadApi, type TonReadApi, type TonSwapApi, type TonWriteApi } from './ton/api';
 import type { WalletTab } from './ui/nav';
 
 type Screen =
@@ -55,7 +55,7 @@ const ONBOARDING_SECRET_SCREENS: Screen[] = [
   'import-passcode',
 ];
 
-const defaultTonApi: TonReadApi & TonWriteApi = createTonReadApi();
+const defaultTonApi: TonReadApi & TonWriteApi & TonSwapApi = createTonReadApi();
 
 function LoadingScreen() {
   return (

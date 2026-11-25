@@ -9,7 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import type { TonActivityItem, TonPortfolio } from '@onezerowallet/chain-ton';
 import { UI_TON_NETWORK } from '../ui/wallet-shell';
-import { TonApiError, type TonReadApi, type TonWriteApi } from '../ton/api';
+import { TonApiError, type TonReadApi, type TonSwapApi, type TonWriteApi } from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 import { makeVault, renderShell } from './ui-helpers';
 
@@ -102,13 +102,15 @@ const ACTIVITY: TonActivityItem[] = [
 function apiWith(
   value: TonPortfolio | (() => Promise<TonPortfolio>),
   activity: TonActivityItem[] = [],
-): TonReadApi & TonWriteApi {
+): TonReadApi & TonWriteApi & TonSwapApi {
   return {
     getPortfolio: () => (typeof value === 'function' ? value() : Promise.resolve(value)),
     getActivity: () => Promise.resolve(activity),
     getWalletState: () => Promise.reject(new Error('not used')),
     emulate: () => Promise.reject(new Error('not used')),
     broadcast: () => Promise.reject(new Error('not used')),
+    getSwapAssets: () => Promise.reject(new Error('not used')),
+    getSwapQuote: () => Promise.reject(new Error('not used')),
   };
 }
 
@@ -140,7 +142,7 @@ describe('Wallet home: live TON data', () => {
   it('queries the exact testnet address it displays (same 256-bit hash)', async () => {
     const user = userEvent.setup();
     const requested: string[] = [];
-    const api: TonReadApi & TonWriteApi = {
+    const api: TonReadApi & TonWriteApi & TonSwapApi = {
       getPortfolio: (address) => {
         requested.push(address);
         return Promise.resolve(portfolio());
@@ -152,6 +154,8 @@ describe('Wallet home: live TON data', () => {
       getWalletState: () => Promise.reject(new Error('not used')),
       emulate: () => Promise.reject(new Error('not used')),
       broadcast: () => Promise.reject(new Error('not used')),
+      getSwapAssets: () => Promise.reject(new Error('not used')),
+      getSwapQuote: () => Promise.reject(new Error('not used')),
     };
     const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, api);
@@ -254,7 +258,7 @@ describe('Wallet home: live TON data', () => {
   it('shows an offline banner with Retry and no $0.00 on error', async () => {
     const user = userEvent.setup();
     let calls = 0;
-    const api: TonReadApi & TonWriteApi = {
+    const api: TonReadApi & TonWriteApi & TonSwapApi = {
       getPortfolio: () => {
         calls += 1;
         if (calls === 1) return Promise.reject(new TonApiError('offline'));
@@ -264,6 +268,8 @@ describe('Wallet home: live TON data', () => {
       getWalletState: () => Promise.reject(new Error('not used')),
       emulate: () => Promise.reject(new Error('not used')),
       broadcast: () => Promise.reject(new Error('not used')),
+      getSwapAssets: () => Promise.reject(new Error('not used')),
+      getSwapQuote: () => Promise.reject(new Error('not used')),
     };
     const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, api);
@@ -340,7 +346,7 @@ describe('Wallet home: live TON data', () => {
     const manager = await unlockedManager();
     const info = manager.getSession()?.getPublicInfo(0);
     if (!info) throw new Error('no info');
-    const api: TonReadApi & TonWriteApi = {
+    const api: TonReadApi & TonWriteApi & TonSwapApi = {
       getPortfolio: () => Promise.resolve(portfolio()),
       getActivity: () => Promise.resolve([]),
       getWalletState: () =>
@@ -361,6 +367,8 @@ describe('Wallet home: live TON data', () => {
           willBounce: false,
         }),
       broadcast: () => Promise.resolve({ messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' } }),
+      getSwapAssets: () => Promise.reject(new Error('not used')),
+      getSwapQuote: () => Promise.reject(new Error('not used')),
     };
     renderShell({ ...makeVault(), manager }, api);
     await waitFor(() => {
