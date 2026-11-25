@@ -68,6 +68,21 @@ export function v5r1WalletAddress(publicKeyHex: string, network: TonNetwork): Wa
   };
 }
 
+/**
+ * Render a raw (`0:…`) address as the testnet user-friendly form (`0Q…`/`kQ…`) for display.
+ *
+ * The confirmation screen must show the same address a sender can verify in a TON explorer, so
+ * the review uses the user-friendly encoding, not the raw form decoded from the signed BoC.
+ * Returns the input unchanged when it cannot be parsed (the caller still fails closed upstream).
+ */
+export function toTestnetDisplayAddress(raw: string, bounceable: boolean): string {
+  try {
+    return Address.parse(raw).toString({ testOnly: true, bounceable, urlSafe: true });
+  } catch {
+    return raw;
+  }
+}
+
 /** True when the user-friendly prefix requires bounces (EQ/kQ) — false for UQ/0Q. */
 export function addressRequiresBounce(address: string): boolean {
   if (/^UQ/.test(address)) return false; // mainnet non-bounceable

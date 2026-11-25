@@ -36,6 +36,7 @@ export {
 export {
   v5r1WalletAddress,
   addressRequiresBounce,
+  toTestnetDisplayAddress,
   maxTonAmountRaw,
   buildTonTransfer,
   buildJettonTransfer,
