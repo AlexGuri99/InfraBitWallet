@@ -28,7 +28,7 @@ import { TxDetailScreen } from './tx-detail';
 import { MarketScreen } from './market';
 import { AssistantScreen } from './assistant';
 import { SettingsTab } from './wallet';
-import type { TonReadApi, TonSwapApi, TonWriteApi } from '../ton/api';
+import type { TonReadApi, TonStakeApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import type { BiometryApi } from '../adapters/biometry';
 import { useToast } from './toast';
 import { FullscreenProvider } from '../telegram/fullscreen';
@@ -98,7 +98,7 @@ function WalletShellContent({
   onWiped,
 }: {
   manager: VaultManager;
-  api: TonReadApi & TonWriteApi & TonSwapApi;
+  api: TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi;
   biometry: BiometryApi;
   tab: WalletTab;
   onTabChange: (tab: WalletTab) => void;
@@ -259,12 +259,17 @@ function WalletShellContent({
       />
     );
   }
-  if (route.kind === 'earn') {
+  if (route.kind === 'earn' && info && portfolioReady) {
     return (
       <EarnScreen
+        manager={manager}
+        info={info}
+        portfolio={portfolioReady}
+        api={api}
         onBack={() => {
           setRoute({ kind: 'root' });
         }}
+        onSubmitted={handleSubmitted}
       />
     );
   }

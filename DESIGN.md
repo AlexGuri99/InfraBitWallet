@@ -97,7 +97,7 @@ All colors are defined as semantic CSS custom properties so components transitio
 ### 5.2 Wallet Home Screen
 
 1. **Hero Balance Card**: Canary-yellow surface displaying a top currency pill (`USD ⌄` cycling display), oversized tabular balance from `/api/ton/portfolio`, and bottom 24h PnL pill (`↑ $421.03 (+1.59%)`). Truncated copyable `0Q...` address pill at bottom right.
-2. **4-Column Action Dock**: Connected directly beneath the hero card with four equal tap targets: **Deposit** (Receive), **Send** (P2b Live Send), **Trade** (P3 Swap Shell), and **Earn** (P3 Staking Shell).
+2. **4-Column Action Dock**: Connected directly beneath the hero card with four equal tap targets: **Deposit** (Receive), **Send** (P2b Live Send), **Trade** (P3 Swap Shell), and **Earn** (P3b live Tonstakers staking).
 3. **Available Funds List**: Single rounded card containing vertical token rows (`TON` + live Jettons). Multichain mode includes static `TRX` / `ETH` rows; `ton-native-only` filters strictly to TON assets. Tapping any row opens the **Coin Detail Screen**.
 4. **Activity / Transactions List**: Single rounded card with centered date pill dividers (`November 21`), circular directional status badges (`↗` Sent, `↙` Received, `⇄` Swapped, `Bounced`, `Pending`), counterparty address & timestamp (`to TB53…wKxS · 01:25`), and signed token + fiat amounts. Tapping any row opens the **Transaction Detail Screen**.
 
@@ -117,9 +117,11 @@ All secondary screens share a standardized top bar: `< Back` pill button on the 
   - Overlapping `40px` circular blue/accent **Flip (`↑↓`)** button centered between cards.
   - **You Buy** card with output calculation line and target token picker.
   - Expandable `Details >` accordion showing placeholder exchange rate, slippage tolerance (`0.5%`), route, and network fee, above a `"Coming in P3"` disabled CTA.
-- **Earn (`Add Stake`) Screen (UI Shell — P3 Placeholder)**:
-  - **Amount** input well with `Max` fill, fiat conversion line, and fee estimate (`Fee ~ 0.02`).
-  - **Staking Details** grouped card with `Current APY` green pill badge (`13.62%`), live `Est. Yearly Earnings`, `Total Staked`, `Total Stakers`, and an expandable `Why this is safe` explainer above a `"Coming in P3"` disabled CTA.
+- **Earn (`Add Stake`) Screen (Live P3b — Tonstakers tsTON)**:
+  - **Staking Overview** card: live APY pill badge, the user's `tsTON` balance and TON equivalent, `tsTON/TON` exchange rate, total staked, stakers, instant-unstake liquidity, and `Wallet fee 0%`.
+  - **Stake / Unstake** segmented toggle, amount input with a `Max` helper that keeps the `1.1 TON` stake reserve (unstake keeps `1.05 TON` for gas and caps at the `tsTON` balance), and a 1 TON minimum.
+  - **Unstake mode** segmented selector: `Standard`, `Instant`, `Best rate`, each with a one-line explainer.
+  - **Anti-drainer Review**: decoded signed BoC (pool or tsTON wallet, amount, reserve, mode, seqno), emulation fee and warnings, fail-closed `Confirm & Stake` / `Confirm & Unstake`, then broadcast and a Pending Activity row. When the network has no published Tonstakers metrics, the screen shows a clean unavailable notice and a disabled CTA.
 
 ### 5.4 Coin Detail Screen
 

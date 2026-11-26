@@ -8,7 +8,14 @@ import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import type { TonPortfolio } from '@onezerowallet/chain-ton';
 import { UI_TON_NETWORK } from '../ui/wallet-shell';
-import type { SwapQuotePayload, TonReadApi, TonSwapApi, TonWriteApi } from '../ton/api';
+import type {
+  StakingInfoPayload,
+  SwapQuotePayload,
+  TonReadApi,
+  TonStakeApi,
+  TonSwapApi,
+  TonWriteApi,
+} from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 import { makeVault, renderShell } from './ui-helpers';
 
@@ -59,6 +66,21 @@ function portfolio(): TonPortfolio {
   };
 }
 
+const STAKING_INFO: StakingInfoPayload = {
+  network: 'testnet',
+  poolAddress: '0:a45b17f28409229b78360e3290420f13e4fe20f90d7e2bf8c4ac6703259e22fa',
+  tsTonMasterAddress: '0:bdf3fa8098d129b54b4f73b5bac5d1e1fd91eb054169c3916dfc8ccd536d1000',
+  tsTonSymbol: 'tsTON',
+  tsTonDecimals: 9,
+  apy: 12.84,
+  tvlRaw: '150000000000000000',
+  stakers: 1000,
+  instantLiquidityRaw: '1000000000000000',
+  exchangeRate: 1.2,
+  verified: true,
+  updatedAt: 0,
+};
+
 const QUOTE: SwapQuotePayload = {
   network: 'testnet',
   offer: { address: NATIVE, units: '1000000000' },
@@ -88,7 +110,9 @@ const QUOTE: SwapQuotePayload = {
   quotedAt: 0,
 };
 
-function apiWith(quote: SwapQuotePayload = QUOTE): TonReadApi & TonWriteApi & TonSwapApi {
+function apiWith(
+  quote: SwapQuotePayload = QUOTE,
+): TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi {
   return {
     getPortfolio: () => Promise.resolve(portfolio()),
     getActivity: () => Promise.resolve([]),
@@ -134,6 +158,7 @@ function apiWith(quote: SwapQuotePayload = QUOTE): TonReadApi & TonWriteApi & To
         },
       ]),
     getSwapQuote: () => Promise.resolve(quote),
+    getStakingInfo: () => Promise.resolve(STAKING_INFO),
   };
 }
 

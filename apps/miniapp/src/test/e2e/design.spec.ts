@@ -86,6 +86,21 @@ const SWAP_QUOTE = {
   quotedAt: 0,
 };
 
+const STAKING_INFO = {
+  network: 'testnet',
+  poolAddress: '0:a45b17f28409229b78360e3290420f13e4fe20f90d7e2bf8c4ac6703259e22fa',
+  tsTonMasterAddress: '0:bdf3fa8098d129b54b4f73b5bac5d1e1fd91eb054169c3916dfc8ccd536d1000',
+  tsTonSymbol: 'tsTON',
+  tsTonDecimals: 9,
+  apy: 12.84,
+  tvlRaw: '153977655101523586',
+  stakers: 147970,
+  instantLiquidityRaw: '1006115160479073',
+  exchangeRate: 1.2,
+  verified: true,
+  updatedAt: 0,
+};
+
 async function mockTonApi(page: Page): Promise<void> {
   await page.route('**/api/ton/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -171,6 +186,14 @@ async function mockTonApi(page: Page): Promise<void> {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' } }),
+      });
+      return;
+    }
+    if (path.endsWith('/staking/info')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(STAKING_INFO),
       });
       return;
     }
@@ -278,7 +301,7 @@ test.describe('design system', () => {
     );
   });
 
-  test('Trade runs a mocked live swap in both themes; Earn is a labelled shell', async ({
+  test('Trade runs a mocked live swap in both themes; Earn shows live metrics', async ({
     page,
   }) => {
     const cspViolations: string[] = [];
@@ -305,8 +328,8 @@ test.describe('design system', () => {
 
     await page.getByRole('button', { name: 'Earn' }).click();
     await expect(page.getByRole('heading', { name: 'Add Stake' })).toBeVisible();
-    await expect(page.getByText('13.62% APY')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Coming in P3' })).toBeDisabled();
+    await expect(page.getByTestId('earn-apy')).toHaveText('12.84% APY');
+    await expect(page.getByRole('button', { name: 'Review stake' })).toBeDisabled();
   });
 
   test('Market and Assistant are clearly tagged preview shells', async ({ page }) => {

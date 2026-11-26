@@ -94,9 +94,28 @@ export interface SwapQuotePayload {
   quotedAt: number;
 }
 
+export interface StakingInfoPayload {
+  network: TonNetwork;
+  poolAddress: string;
+  tsTonMasterAddress: string;
+  tsTonSymbol: string;
+  tsTonDecimals: number;
+  apy: number;
+  tvlRaw: string;
+  stakers: number;
+  instantLiquidityRaw: string;
+  exchangeRate: number;
+  verified: boolean;
+  updatedAt: number;
+}
+
 export interface TonSwapApi {
   getSwapAssets(network: TonNetwork, signal?: AbortSignal): Promise<SwapAssetPayload[]>;
   getSwapQuote(request: SwapQuoteRequestPayload, signal?: AbortSignal): Promise<SwapQuotePayload>;
+}
+
+export interface TonStakeApi {
+  getStakingInfo(network: TonNetwork, signal?: AbortSignal): Promise<StakingInfoPayload>;
 }
 
 export interface TonWriteApi {
@@ -179,7 +198,7 @@ function isPortfolio(value: unknown): value is TonPortfolio {
 
 export function createTonReadApi(
   fetchImpl: FetchLike = fetch as unknown as FetchLike,
-): TonReadApi & TonWriteApi & TonSwapApi {
+): TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi {
   return {
     async getPortfolio(address, network, signal) {
       const query = new URLSearchParams({ address, network }).toString();
@@ -227,6 +246,14 @@ export function createTonReadApi(
         throw new TonApiError('bad_response');
       }
       return json as SwapQuotePayload;
+    },
+    async getStakingInfo(network, signal) {
+      const query = new URLSearchParams({ network }).toString();
+      const json = await readJson(`/api/ton/staking/info?${query}`, fetchImpl, signal);
+      if (typeof json !== 'object' || json === null || !('exchangeRate' in json)) {
+        throw new TonApiError('bad_response');
+      }
+      return json as StakingInfoPayload;
     },
   };
 }

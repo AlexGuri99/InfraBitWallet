@@ -149,6 +149,7 @@ const en = {
     'Send only the asset shown above on this network. Other assets may be lost permanently.',
   'trade.title': 'Trade',
   'earn.title': 'Add Stake',
+  'earn.minimum': 'Minimum stake is 1 TON',
   'tx.from': 'Sender',
   'tx.to': 'Recipient',
   'tx.hash': 'Transaction ID',

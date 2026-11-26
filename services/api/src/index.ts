@@ -9,3 +9,4 @@ export * from './ton/validation.js';
 export * from './ton/service.js';
 export * from './ton/write.js';
 export * from './ton/swap.js';
+export * from './ton/staking.js';

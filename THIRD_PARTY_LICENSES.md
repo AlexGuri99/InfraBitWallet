@@ -41,6 +41,7 @@ Last verified: 2026-11-25 (P3a) — `license-check: 145 package entries, all all
 | `react-web3-icons`                                   | MIT        | Inline branded coin SVGs (TON/USDT/TRX/ETH) |
 | `@ston-fi/sdk`                                       | MIT        | STON.fi DEX v2 swap payload builder         |
 | `@ston-fi/api`                                       | MIT        | Peer of @ston-fi/sdk (REST typings)         |
+| `@ton/core` (staking-ton)                            | MIT        | Tonstakers cell/address encoding (re-used)  |
 | `valibot` (override)                                 | MIT        | Transitive pin `>=1.4.2` for advisories     |
 
 ## Notes
@@ -48,5 +49,9 @@ Last verified: 2026-11-25 (P3a) — `license-check: 145 package entries, all all
 - `zod` is pinned through `pnpm-workspace.yaml` overrides to `>=4.6.6` to satisfy
   GHSA-mrhx-c7xc-m3w5 (memory-exhaustion in constrained collections). `abitype`'s zod peer is
   optional and accepts `^4.0.0`.
+- `tonstakers-sdk` (MIT, reviewed 2026-11-26) is **not** installed: it targets TonConnect and pins
+  `@ton/ton` 15, while this wallet signs through its own V5R1 closure. Only its documented, verified
+  message layouts and reviewed pool constants are re-implemented in `packages/staking-ton`
+  (clean-room, no code copied).
 - No copyleft (GPL/AGPL/LGPL/MPL) dependency is present.
 - MyTonWallet and any derived code remain prohibited; nothing here comes from that repository.
