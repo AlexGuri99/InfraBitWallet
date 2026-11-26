@@ -1,4 +1,4 @@
-# OneZeroWallet — Fee Architecture
+# InfraBitWallet — Fee Architecture
 
 ## 1. Fee Policy
 
@@ -41,7 +41,7 @@ are listed separately from the fee line.
    - Price impact
    - Minimum received (after slippage)
    - Provider/protocol fee (if any, e.g., 0x network fee)
-   - OneZeroWallet fee (0.35%)
+   - InfraBitWallet fee (0.35%)
    - Network fee (gas / bandwidth / energy)
    - Total deducted from sender
 

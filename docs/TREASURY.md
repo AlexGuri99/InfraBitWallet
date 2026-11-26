@@ -1,4 +1,4 @@
-# OneZeroWallet — Treasury Management
+# InfraBitWallet — Treasury Management
 
 ## 1. Overview
 

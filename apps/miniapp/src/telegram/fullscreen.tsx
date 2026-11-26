@@ -51,23 +51,15 @@ export interface FullscreenControl {
 
 const FullscreenContext = createContext<FullscreenControl | null>(null);
 
-function versionAllowsFullscreen(tg: FullscreenCapable): boolean {
-  if (typeof tg.isVersionAtLeast !== 'function') return true;
-  try {
-    return tg.isVersionAtLeast('8.0');
-  } catch {
-    return true;
-  }
-}
-
-/** True only when both Telegram fullscreen methods exist and Bot API 8.0+ is reported. */
+/**
+ * Object existence is the authoritative signal: Telegram only defines `requestFullscreen` /
+ * `exitFullscreen` on clients that implement Bot API 8.0+. The version string is treated as
+ * advisory (it can lag behind the injected object, especially on mobile clients); requiring it
+ * used to hide an otherwise working control.
+ */
 export function telegramFullscreenSupported(tg: FullscreenCapable | null | undefined): boolean {
   if (!tg) return false;
-  return (
-    typeof tg.requestFullscreen === 'function' &&
-    typeof tg.exitFullscreen === 'function' &&
-    versionAllowsFullscreen(tg)
-  );
+  return typeof tg.requestFullscreen === 'function' && typeof tg.exitFullscreen === 'function';
 }
 
 /** Browser fallback: standard Fullscreen API on the document element. */
@@ -160,9 +152,10 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   const { webApp } = useTelegram();
   const toast = useToast();
   const tg = webApp as unknown as FullscreenCapable | null;
-  // TelegramProvider resolves the WebApp in an effect, so support must follow the live value
-  // rather than being frozen at first render.
-  const tgSupported = telegramFullscreenSupported(tg);
+  // TelegramProvider resolves the WebApp (possibly after first paint), and some clients attach
+  // the fullscreen methods after the object exists. Re-check for a short window instead of
+  // freezing "unsupported" on the first render.
+  const [tgSupported, setTgSupported] = useState(() => telegramFullscreenSupported(tg));
   const browserSupported = browserFullscreenSupported();
   const [isFullscreen, setIsFullscreen] = useState(
     () => tg?.isFullscreen === true || (browserSupported && document.fullscreenElement !== null),
@@ -174,6 +167,26 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (tgSupported) setIsFullscreen(tg?.isFullscreen === true);
   }, [tg, tgSupported]);
+
+  // Follow the live object: false → true when Telegram (or a late script) attaches the methods.
+  useEffect(() => {
+    const supported = telegramFullscreenSupported(tg);
+    setTgSupported(supported);
+    if (supported || !tg) return undefined;
+    let attempts = 0;
+    const id = window.setInterval(() => {
+      attempts += 1;
+      if (telegramFullscreenSupported(tg)) {
+        setTgSupported(true);
+        window.clearInterval(id);
+        return;
+      }
+      if (attempts >= 25) window.clearInterval(id);
+    }, 200);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [tg]);
 
   const notifyUnavailable = useCallback(() => {
     toast.show(t('home.fullscreenUnavailable'));

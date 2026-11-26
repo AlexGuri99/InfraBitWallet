@@ -1,4 +1,4 @@
-# OneZeroWallet: Project Brief
+# InfraBitWallet: Project Brief
 
 (Working name. Keep it in one config constant.)
 
@@ -131,7 +131,7 @@ Feature flags per chain, feature and region. A geo/region-restriction hook. A sa
 
 ## 13. Key differentiators (why this wallet exists)
 
-What distinguishes OneZeroWallet from other self-custodial wallets:
+What distinguishes InfraBitWallet from other self-custodial wallets:
 
 | Differentiator                                                                                  | Where it's built                 | Phase |
 | ----------------------------------------------------------------------------------------------- | -------------------------------- | ----- |

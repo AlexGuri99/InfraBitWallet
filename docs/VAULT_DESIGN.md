@@ -1,4 +1,4 @@
-# OneZeroWallet — Vault Design
+# InfraBitWallet — Vault Design
 
 Last rewritten: 2026-11-21 (Stage A). Every statement here describes code in
 `packages/crypto-vault/src` as of that date; the named tests in `*.test.ts` prove the behaviours.

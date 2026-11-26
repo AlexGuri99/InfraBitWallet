@@ -270,7 +270,7 @@ test.describe('design system', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    const stored = await page.evaluate(() => localStorage.getItem('ozw.theme'));
+    const stored = await page.evaluate(() => localStorage.getItem('infrabit.theme'));
     expect(stored).toBe('dark');
     await page.getByRole('button', { name: 'Switch to light theme' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');

@@ -18,7 +18,7 @@ export interface IndexedDbAdapterOptions {
   factory?: IDBFactory;
 }
 
-const DEFAULT_DB = 'onezerowallet';
+const DEFAULT_DB = 'infrabitwallet';
 const DEFAULT_STORE = 'kv';
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {

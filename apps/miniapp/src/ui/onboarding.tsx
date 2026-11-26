@@ -85,16 +85,16 @@ function Emblem({ size = 88 }: { size?: number }) {
       height={size}
       viewBox="0 0 88 88"
       role="img"
-      aria-label="OneZeroWallet emblem"
+      aria-label="InfraBitWallet emblem"
       className="drop-shadow-[0_10px_24px_rgba(120,122,20,0.35)]"
     >
       <defs>
-        <linearGradient id="ozw-emblem" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id="infrabit-emblem" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="var(--hero-bg)" />
           <stop offset="100%" stopColor="var(--hero-bg-end)" />
         </linearGradient>
       </defs>
-      <circle cx="44" cy="44" r="44" fill="url(#ozw-emblem)" />
+      <circle cx="44" cy="44" r="44" fill="url(#infrabit-emblem)" />
       <text
         x="44"
         y="55"
@@ -104,7 +104,7 @@ function Emblem({ size = 88 }: { size?: number }) {
         letterSpacing="-1"
         fill="var(--hero-ink)"
       >
-        10
+        IB
       </text>
       <path
         d="M70 18l1.6 4.4L76 24l-4.4 1.6L70 30l-1.6-4.4L64 24l4.4-1.6L70 18Z"

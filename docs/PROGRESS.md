@@ -1,4 +1,4 @@
-# OneZeroWallet — Progress
+# InfraBitWallet — Progress
 
 Project start: 2026-11-20
 
@@ -403,3 +403,18 @@ deposit semantics), TonAPI OpenAPI + live mainnet `/v2/staking/pool`, `/v2/jetto
 **Untested / open:** live Tonstakers mainnet broadcast (mainnet remains gated behind owner
 sign-off, CLAUDE.md §6); TonAPI serializes `total_amount` as a JSON number (display-only), so
 TVL/rate above 2^53 are approximate — documented in DECISIONS.md.
+
+---
+
+### Chore: InfraBitWallet rebrand + fullscreen visibility (2026-11-26)
+
+Branch `chore/infrabitwallet-and-fullscreen`.
+
+| Area                                                                         | Status | Evidence                                                           |
+| ---------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------ |
+| All user-facing `OneZeroWallet` strings → `InfraBitWallet` (UI, docs, tests) | DONE   | `index.html`, `i18n.ts`, `onboarding.tsx`, `wallet.tsx`, docs      |
+| Monograms `10`/`OZ` → `IB`                                                   | DONE   | `onboarding.tsx`, `wallet.tsx`, `home.tsx`, `DESIGN.md`            |
+| `localStorage` `ozw.*` → `infrabit.*` with one-time migration                | DONE   | `ui/preferences.tsx`, `test/storage.test.ts`                       |
+| IndexedDB `onezerowallet` → `infrabitwallet` (Testnet data not carried)      | DONE   | `packages/crypto-vault/src/indexeddb.ts`, e2e                      |
+| Fullscreen: retry late WebApp injection + late method attach + Settings row  | DONE   | `TelegramProvider.tsx`, `telegram/fullscreen.tsx`, `ui/wallet.tsx` |
+| Component tests for late injection, late methods, Settings toggle            | DONE   | `test/ui-fullscreen.test.tsx`                                      |

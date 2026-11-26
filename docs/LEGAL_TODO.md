@@ -1,4 +1,4 @@
-# OneZeroWallet — Legal TODO
+# InfraBitWallet — Legal TODO
 
 Items needing legal review before they can go to production.
 
