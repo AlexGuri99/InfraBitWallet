@@ -310,6 +310,7 @@ export function WalletHome({
           {fullscreen.isSupported ? (
             <button
               type="button"
+              data-testid="fullscreen-toggle"
               onClick={fullscreen.toggle}
               aria-label={
                 fullscreen.isFullscreen ? t('home.fullscreenExit') : t('home.fullscreenEnter')
@@ -537,7 +538,7 @@ export function WalletHome({
         >
           <div className="flex items-center gap-3 rounded-[20px] bg-surface-secondary p-3.5">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-hero text-[12px] font-extrabold text-hero-ink">
-              OZ
+              IB
             </span>
             <span className="flex-1">
               <span className="block text-[15px] font-semibold text-ink">{t('app.name')}</span>

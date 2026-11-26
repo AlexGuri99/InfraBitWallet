@@ -1,4 +1,4 @@
-# OneZeroWallet — Architecture
+# InfraBitWallet — Architecture
 
 ## 1. Monorepo Layout
 

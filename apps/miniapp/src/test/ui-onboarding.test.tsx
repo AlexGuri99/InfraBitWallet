@@ -50,7 +50,7 @@ describe('Onboarding: create', () => {
   it('warns about local data, never asks for the phrase, and has no wallet-type selector', async () => {
     renderApp(makeVault());
     expect(await screen.findByText('Your keys, your coins')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('OneZeroWallet');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('InfraBitWallet');
     expect(screen.getByText(/self-custodial/)).toBeInTheDocument();
     expect(screen.getByText(/We will never ask for your recovery phrase/)).toBeInTheDocument();
     expect(screen.getByText(/may clear local data/)).toBeInTheDocument();

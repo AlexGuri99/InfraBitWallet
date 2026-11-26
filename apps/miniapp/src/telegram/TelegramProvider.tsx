@@ -169,33 +169,62 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    const webApp = window.Telegram?.WebApp ?? null;
-    const isTelegram = webApp !== null;
-    let theme: TelegramTheme | null = null;
-    let platform: string | null = null;
-    let hasSecureStorage = false;
-    let hasBiometrics = false;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    let installed = false;
 
-    if (webApp) {
-      theme = parseThemeParams(webApp.themeParams);
-      platform = webApp.platform;
-      hasSecureStorage = detectSecureStorage(webApp);
-      hasBiometrics = detectBiometrics(webApp);
+    // Some Telegram clients (notably mobile) inject `window.Telegram.WebApp` a few frames after
+    // the document scripts run. Sample for a short window instead of freezing "no Telegram" on
+    // the first render, which used to hide Bot API 8.0+ controls (e.g. fullscreen) entirely.
+    const MAX_ATTEMPTS = 50;
+    const RETRY_MS = 100;
 
-      // Signal Telegram that the app is ready
-      webApp.ready();
-      webApp.enableClosingConfirmation();
-    }
+    const install = (webApp: WebApp): void => {
+      if (cancelled || installed) return;
+      installed = true;
+      try {
+        webApp.ready();
+        webApp.enableClosingConfirmation();
+      } catch {
+        // Older clients may not implement these; the wallet still works.
+      }
+      setValue({
+        webApp,
+        theme: parseThemeParams(webApp.themeParams),
+        platform: webApp.platform,
+        isTelegram: true,
+        hasSecureStorage: detectSecureStorage(webApp),
+        hasBiometrics: detectBiometrics(webApp),
+        ready: true,
+      });
+    };
 
-    setValue({
-      webApp,
-      theme,
-      platform,
-      isTelegram,
-      hasSecureStorage,
-      hasBiometrics,
-      ready: true,
-    });
+    const attempt = (): void => {
+      if (cancelled) return;
+      const webApp = window.Telegram?.WebApp ?? null;
+      if (webApp) {
+        install(webApp);
+        return;
+      }
+      attempts += 1;
+      if (attempts < MAX_ATTEMPTS) timer = setTimeout(attempt, RETRY_MS);
+    };
+
+    attempt();
+    // A backgrounded Mini App can be resumed after the client injected the object.
+    const onVisible = (): void => {
+      if (!document.hidden) attempt();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
   }, []);
 
   return <TelegramContext.Provider value={value}>{children}</TelegramContext.Provider>;

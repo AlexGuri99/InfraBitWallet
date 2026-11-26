@@ -221,6 +221,65 @@ describe('fullscreen toggle', () => {
     }
   });
 
+  it('appears when Telegram injects WebApp after the first render', async () => {
+    const saved = window.Telegram;
+    const harness = installFullscreenMock();
+    try {
+      Reflect.deleteProperty(window, 'Telegram');
+      await renderHome();
+      // jsdom has no browser Fullscreen API, so nothing is shown before the injection.
+      expect(screen.queryByRole('button', { name: /fullscreen/i })).not.toBeInTheDocument();
+
+      act(() => {
+        if (saved) window.Telegram = saved;
+      });
+      const enter = await screen.findByRole(
+        'button',
+        { name: 'Enter fullscreen' },
+        { timeout: 3000 },
+      );
+      expect(enter).toBeInTheDocument();
+    } finally {
+      if (saved) window.Telegram = saved;
+      harness.restore();
+    }
+  });
+
+  it('appears when the fullscreen methods are attached after mount', async () => {
+    const tg = webAppRecord();
+    const harness = installFullscreenMock();
+    try {
+      Reflect.deleteProperty(tg, 'requestFullscreen');
+      Reflect.deleteProperty(tg, 'exitFullscreen');
+      await renderHome();
+      expect(screen.queryByRole('button', { name: /fullscreen/i })).not.toBeInTheDocument();
+
+      act(() => {
+        tg.requestFullscreen = harness.request;
+        tg.exitFullscreen = harness.exit;
+      });
+      expect(
+        await screen.findByRole('button', { name: 'Enter fullscreen' }, { timeout: 3000 }),
+      ).toBeInTheDocument();
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('renders a Fullscreen row in Settings → Preferences', async () => {
+    const harness = installFullscreenMock();
+    try {
+      const manager = await unlockedManager();
+      renderShell({ ...makeVault(), manager }, apiWith(), { tab: 'settings' });
+      const row = await screen.findByRole('button', { name: /^Fullscreen/ });
+      expect(row).toHaveTextContent('Off');
+      await userEvent.setup().click(row);
+      expect(harness.request).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.restore();
+    }
+  });
+
   it('hides the control when neither Telegram nor browser fullscreen is supported', async () => {
     const tg = webAppRecord();
     Reflect.deleteProperty(tg, 'requestFullscreen');

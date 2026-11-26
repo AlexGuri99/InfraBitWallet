@@ -1,4 +1,4 @@
-# OneZeroWallet — Claude Code rules
+# InfraBitWallet — Claude Code rules
 
 > Generated from `PROJECT_BRIEF.md` v2. Do not override; update from brief when brief changes.
 

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /*
- * OneZeroWallet design tokens (DESIGN.md §2).
+ * InfraBitWallet design tokens (DESIGN.md §2).
  * Semantic names only — components never hardcode a one-off hex value.
  * Mint Light is the default; Forest & Citron applies via [data-theme='dark'].
  */

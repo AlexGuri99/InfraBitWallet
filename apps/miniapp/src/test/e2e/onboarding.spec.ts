@@ -253,7 +253,7 @@ test.describe('onboarding and unlock', () => {
 
     const dump = await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const req = indexedDB.open('onezerowallet');
+        const req = indexedDB.open('infrabitwallet');
         req.onsuccess = () => {
           resolve(req.result);
         };

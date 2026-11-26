@@ -9,7 +9,7 @@ let dbCounter = 0;
 function freshAdapter(): IndexedDBAdapter {
   dbCounter += 1;
   // fake-indexeddb/auto (imported below) installs a global IDBFactory.
-  return new IndexedDBAdapter({ dbName: `ozw-test-${String(dbCounter)}`, storeName: 'kv' });
+  return new IndexedDBAdapter({ dbName: `infrabit-test-${String(dbCounter)}`, storeName: 'kv' });
 }
 
 describe('A9: IndexedDBAdapter', () => {
@@ -40,7 +40,7 @@ describe('A9: IndexedDBAdapter', () => {
   });
 
   it('persists across adapter instances that share a database', async () => {
-    const dbName = `ozw-shared-${String(dbCounter)}`;
+    const dbName = `infrabit-shared-${String(dbCounter)}`;
     const a = new IndexedDBAdapter({ dbName });
     const b = new IndexedDBAdapter({ dbName });
     await a.set('k', 'value');

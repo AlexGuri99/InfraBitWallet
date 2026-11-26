@@ -10,9 +10,39 @@ import type { ReactNode } from 'react';
 
 export type ThemeMode = 'light' | 'dark';
 
-const THEME_KEY = 'ozw.theme';
-const PRIVACY_KEY = 'ozw.privacy';
+const THEME_KEY = 'infrabit.theme';
+const PRIVACY_KEY = 'infrabit.privacy';
+/** Auto-lock preference, shared with App and the Settings tab. */
+export const AUTO_LOCK_KEY = 'infrabit.autoLockMs';
 const MASK = '••••';
+
+/**
+ * Old device-local keys (`ozw.*` — the pre-rename brand). Testnet-only data: the first read
+ * under the new key copies and removes the old one so the preferences carry over cleanly and
+ * Mainnet starts with only `infrabit.*` keys.
+ */
+const LEGACY_KEYS: Readonly<Record<string, string>> = {
+  'infrabit.theme': 'ozw.theme',
+  'infrabit.privacy': 'ozw.privacy',
+  'infrabit.autoLockMs': 'ozw.autoLockMs',
+};
+
+/** Read a preference, transparently migrating the legacy key on first access. */
+export function readPreference(key: string): string | null {
+  try {
+    const current = localStorage.getItem(key);
+    if (current !== null) return current;
+    const legacy = LEGACY_KEYS[key];
+    if (legacy === undefined) return null;
+    const previous = localStorage.getItem(legacy);
+    if (previous === null) return null;
+    localStorage.setItem(key, previous);
+    localStorage.removeItem(legacy);
+    return previous;
+  } catch {
+    return null;
+  }
+}
 
 export const THEME_CHROME: Record<ThemeMode, { background: string; header: string }> = {
   light: { background: '#DFF2E6', header: '#DFF2E6' },
@@ -35,11 +65,7 @@ interface PreferencesValue {
 const PreferencesContext = createContext<PreferencesValue | null>(null);
 
 function readStored(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
+  return readPreference(key);
 }
 
 function writeStored(key: string, value: string): void {

@@ -1,8 +1,8 @@
-# DESIGN.md — OneZeroWallet (Botanical Citron & Forest Crypto Wallet)
+# DESIGN.md — InfraBitWallet (Botanical Citron & Forest Crypto Wallet)
 
 ## 1. Design Philosophy & Aesthetic Direction
 
-**OneZeroWallet** combines a **soft botanical fintech palette** with the **high-density, list-driven information architecture** of modern mobile crypto wallets.
+**InfraBitWallet** combines a **soft botanical fintech palette** with the **high-density, list-driven information architecture** of modern mobile crypto wallets.
 
 - **Dual-Theme Polarity**:
   - **Mint Light Mode (Default)**: Soft sage-mint canvas (`#DFF2E6`), pure white elevated cards (`#FFFFFF`), high-contrast canary-yellow hero balance surfaces (`#FFF34C`), and deep obsidian ink (`#111814`).
@@ -87,7 +87,7 @@ All colors are defined as semantic CSS custom properties so components transitio
 
 ### 5.1 Top Bar (Persistent on Wallet Home)
 
-- **Left**: Wallet Selector Pill (`OneZeroWallet ⌄`) opening a bottom-sheet switcher (`OneZeroWallet`, `Vault Savings [Shell]`, `+ Add / Import Wallet [Shell]`). Shows an inline `Testnet` badge in Testnet mode.
+- **Left**: Wallet Selector Pill (`InfraBitWallet ⌄`) opening a bottom-sheet switcher (`InfraBitWallet`, `Vault Savings [Shell]`, `+ Add / Import Wallet [Shell]`). Shows an inline `Testnet` badge in Testnet mode.
 - **Right Utility Cluster**: Four `36px × 36px` circular icon buttons, `6px` apart, single-line down to a `360px` viewport (the left wallet-selector pill truncates gracefully):
   1. **Privacy Eye Toggle**: Masks/unmasks all balances and amounts across every screen with `••••`.
   2. **Fullscreen Toggle**: Expands to the 4-corner outward icon (`aria-label="Enter fullscreen"`, `aria-pressed="false"`) and compresses to the inward icon (`aria-label="Exit fullscreen"`, `aria-pressed="true"`). Uses Telegram Mini Apps Bot API 8.0+ `requestFullscreen` / `exitFullscreen` with `fullscreenChanged` / `fullscreenFailed` events, falls back to the standard browser Fullscreen API outside Telegram, and is hidden entirely when neither is supported. Entering fullscreen applies `--app-safe-top` = `max(env(safe-area-inset-top), safeAreaInset.top + contentSafeAreaInset.top)` so the top bar clears the device notch and Telegram's floating controls.
@@ -144,7 +144,7 @@ All secondary screens share a standardized top bar: `< Back` pill button on the 
 
 ### 5.6 Settings & Supporting Tabs
 
-- **Settings Screen**: Centered `64px` circular wallet monogram badge (`OZ`), wallet name + live balance (`OneZeroWallet · $26,887.09`), copyable address, `+ Add / Import Wallet` card shell, `Portfolio` analytics shell, and grouped settings list:
+- **Settings Screen**: Centered `64px` circular wallet monogram badge (`IB`), wallet name + live balance (`InfraBitWallet · $26,887.09`), copyable address, `+ Add / Import Wallet` card shell, `Portfolio` analytics shell, and grouped settings list:
   - **Working Items**: **Appearance** (Light/Dark toggle), **Security** (Change PIN, Biometrics toggle, Auto-Lock timer, Reveal Recovery Phrase, Test Backup, Wipe Wallet).
   - **UI Shell Items**: **Assets & Activity**, **Subwallets**, **Sounds**, **Language** (marked as `"Coming soon"` shells).
 - **Market Tab (UI Shell)**: Live search bar, category filter chips (`All`, `Top Gainers`, `Layer 1`, `DeFi`), and static preview coin rows clearly tagged `"Preview — live market data coming soon"` (tapping opens Coin Detail shell).
@@ -152,7 +152,7 @@ All secondary screens share a standardized top bar: `< Back` pill button on the 
 
 ### 5.7 Onboarding, Create Wallet & Import Wallet Flows
 
-- **Onboarding Screen**: Circular canary-citron `10` monogram emblem (inline SVG with subtle sparkles), **OneZeroWallet** title, _"More about OneZeroWallet ›"_ self-custody info modal (containing non-custodial risk disclosure & _"We will never ask for your recovery phrase."_), **Create New Wallet** primary pill CTA, and **Import Existing Wallet** bottom sheet trigger.
+- **Onboarding Screen**: Circular canary-citron `IB` monogram emblem (inline SVG with subtle sparkles), **InfraBitWallet** title, _"More about InfraBitWallet ›"_ self-custody info modal (containing non-custodial risk disclosure & _"We will never ask for your recovery phrase."_), **Create New Wallet** primary pill CTA, and **Import Existing Wallet** bottom sheet trigger.
 - **Create Wallet Flow (2 Steps — Security Precedence)**:
   1. **Recovery Phrase (Step 1 of 2)**: 24-word recovery phrase displayed in a 2-column numbered grid (`1–12` | `13–24`) with tap-to-reveal protection, auto-hide on window blur, **no copy-to-clipboard**, and required _"I've stored the seed phrase in a secure place."_ checkbox. No mandatory 3-word verification during creation (kept inside Settings → **Test backup**).
   2. **4-Digit PIN (Step 2 of 2)**: 4-digit numeric PIN setup + confirmation sealing the crypto-vault via uncontrolled inputs.

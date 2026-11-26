@@ -5,7 +5,7 @@
  * no component should hardcode user-facing copy. Accessibility labels are included here too.
  */
 const en = {
-  'app.name': 'OneZeroWallet',
+  'app.name': 'InfraBitWallet',
   'app.tagline': 'A self-custodial multi-chain wallet for Telegram',
   'welcome.title': 'Your keys, your coins',
   'welcome.body':
