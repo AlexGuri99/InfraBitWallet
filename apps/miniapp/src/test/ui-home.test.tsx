@@ -4,12 +4,18 @@
  * privacy masking and ton-native-only filtering.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import type { TonActivityItem, TonPortfolio } from '@onezerowallet/chain-ton';
 import { UI_TON_NETWORK } from '../ui/wallet-shell';
-import { TonApiError, type TonReadApi, type TonSwapApi, type TonWriteApi } from '../ton/api';
+import {
+  TonApiError,
+  type TonReadApi,
+  type TonStakeApi,
+  type TonSwapApi,
+  type TonWriteApi,
+} from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 import { makeVault, renderShell } from './ui-helpers';
 
@@ -102,7 +108,7 @@ const ACTIVITY: TonActivityItem[] = [
 function apiWith(
   value: TonPortfolio | (() => Promise<TonPortfolio>),
   activity: TonActivityItem[] = [],
-): TonReadApi & TonWriteApi & TonSwapApi {
+): TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi {
   return {
     getPortfolio: () => (typeof value === 'function' ? value() : Promise.resolve(value)),
     getActivity: () => Promise.resolve(activity),
@@ -111,6 +117,7 @@ function apiWith(
     broadcast: () => Promise.reject(new Error('not used')),
     getSwapAssets: () => Promise.reject(new Error('not used')),
     getSwapQuote: () => Promise.reject(new Error('not used')),
+    getStakingInfo: () => Promise.reject(new Error('not used')),
   };
 }
 
@@ -142,7 +149,7 @@ describe('Wallet home: live TON data', () => {
   it('queries the exact testnet address it displays (same 256-bit hash)', async () => {
     const user = userEvent.setup();
     const requested: string[] = [];
-    const api: TonReadApi & TonWriteApi & TonSwapApi = {
+    const api: TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi = {
       getPortfolio: (address) => {
         requested.push(address);
         return Promise.resolve(portfolio());
@@ -156,6 +163,7 @@ describe('Wallet home: live TON data', () => {
       broadcast: () => Promise.reject(new Error('not used')),
       getSwapAssets: () => Promise.reject(new Error('not used')),
       getSwapQuote: () => Promise.reject(new Error('not used')),
+      getStakingInfo: () => Promise.reject(new Error('not used')),
     };
     const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, api);
@@ -258,7 +266,7 @@ describe('Wallet home: live TON data', () => {
   it('shows an offline banner with Retry and no $0.00 on error', async () => {
     const user = userEvent.setup();
     let calls = 0;
-    const api: TonReadApi & TonWriteApi & TonSwapApi = {
+    const api: TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi = {
       getPortfolio: () => {
         calls += 1;
         if (calls === 1) return Promise.reject(new TonApiError('offline'));
@@ -270,6 +278,7 @@ describe('Wallet home: live TON data', () => {
       broadcast: () => Promise.reject(new Error('not used')),
       getSwapAssets: () => Promise.reject(new Error('not used')),
       getSwapQuote: () => Promise.reject(new Error('not used')),
+      getStakingInfo: () => Promise.reject(new Error('not used')),
     };
     const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, api);
@@ -317,6 +326,31 @@ describe('Wallet home: live TON data', () => {
     expect(document.querySelector('a[href*="testnet.tonviewer.com/transaction"]')).not.toBeNull();
   });
 
+  it('labels today as Today and keeps the time under the amount', async () => {
+    const manager = await unlockedManager();
+    renderShell({ ...makeVault(), manager }, apiWith(portfolio(), ACTIVITY));
+    await waitFor(() => {
+      expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');
+    });
+    const row = await screen.findByTestId('activity-tx-1');
+    // The date-group pill is relative for the current day.
+    expect(screen.getByText('Today')).toBeInTheDocument();
+
+    // Time sits in the right-hand column, directly under the amount.
+    const time = within(row).getByTestId('activity-time-tx-1');
+    expect(time).toHaveTextContent(/^([01]\d|2[0-3]):[0-5]\d$/);
+    const rightColumn = time.parentElement;
+    expect(rightColumn).not.toBeNull();
+    expect(rightColumn).toHaveTextContent('+2 TON');
+
+    // The counterparty line no longer carries a "· HH:MM" suffix (address keeps its room).
+    expect(within(row).getByText(/^from /)).not.toHaveTextContent(/\d{2}:\d{2}/);
+    // A comment is separated on the left, so it can never clip the time.
+    expect(within(row).getByTestId('activity-detail-tx-1')).toHaveTextContent(
+      'hello [link removed]',
+    );
+  });
+
   it('shows the empty activity state', async () => {
     const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, apiWith(portfolio(), []));
@@ -346,7 +380,7 @@ describe('Wallet home: live TON data', () => {
     const manager = await unlockedManager();
     const info = manager.getSession()?.getPublicInfo(0);
     if (!info) throw new Error('no info');
-    const api: TonReadApi & TonWriteApi & TonSwapApi = {
+    const api: TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi = {
       getPortfolio: () => Promise.resolve(portfolio()),
       getActivity: () => Promise.resolve([]),
       getWalletState: () =>
@@ -369,6 +403,7 @@ describe('Wallet home: live TON data', () => {
       broadcast: () => Promise.resolve({ messageHash: { hex: 'ab'.repeat(32), base64: 'qquq' } }),
       getSwapAssets: () => Promise.reject(new Error('not used')),
       getSwapQuote: () => Promise.reject(new Error('not used')),
+      getStakingInfo: () => Promise.reject(new Error('not used')),
     };
     renderShell({ ...makeVault(), manager }, api);
     await waitFor(() => {

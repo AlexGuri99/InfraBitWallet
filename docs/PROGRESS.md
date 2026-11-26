@@ -378,3 +378,28 @@ live P2a/P2b TON read/send behaviour.
 | Trade UI: selectors, flip, Max + gas reserve, slippage presets, debounced quote, decoded review, broadcast | DONE   | `apps/miniapp/src/ui/trade.tsx`, `ui-trade.test.tsx` |
 | Testnet: official v2.1 router/pTON documented, quotes require an operator endpoint; disabled otherwise     | DONE   | `services/api/README.md`, e2e                        |
 | Mainnet REST path kept behind the network switch (mainnet still requires owner sign-off)                   | DONE   | `SwapService`, config                                |
+
+---
+
+### P3b: Tonstakers liquid staking (tsTON) + Activity list polish (2026-11-26)
+
+Branch `feat/p3b-tonstakers-earn`. Sources verified 2026-11-26: `tonstakers/tonstakers-sdk`
+(constants + message layout, MIT), `ton-blockchain/liquid-staking-contract` (opcodes, pool.func
+deposit semantics), TonAPI OpenAPI + live mainnet `/v2/staking/pool`, `/v2/jettons`, `/v2/accounts`.
+
+| Area                                                                                                      | Status | Evidence                                                    |
+| --------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------- |
+| Tonstakers adapter: reviewed pools, `StakingFeePolicy = none`, 1 TON minimum, 1 / 1.05 / 1.1 TON reserves | DONE   | `packages/staking-ton/src/payload.ts`, `index.test.ts`      |
+| Offline stake (`pool::deposit` `0x47d54391`) and unstake (tsTON burn `0x595f07bc`, 3 modes) builders      | DONE   | `buildStakePayload`, `buildUnstakePayload`, tests           |
+| Decoder for the anti-drainer review (amount recovered from the signed value; mode/owner decoded)          | DONE   | `decodeStakingPayload`, tests                               |
+| Same-origin `GET /api/ton/staking/info` with fail-closed testnet, Tonstakers-only validation              | DONE   | `services/api/src/ton/staking.ts`, `staking.test.ts`, route |
+| Earn UI: live overview (APY, tsTON + TON value, rate, TVL, stakers, liquidity), Stake/Unstake, Max        | DONE   | `apps/miniapp/src/ui/earn.tsx`, `ui-earn.test.tsx`          |
+| Unstake mode selector (Standard / Instant / Best rate) with explainers                                    | DONE   | `earn.tsx`, component + e2e tests                           |
+| V5R1 signing → decoded BoC review → emulate (fail-closed) → broadcast → Pending Activity                  | DONE   | `earn.tsx`, `ui-earn.test.tsx`, `earn.spec.ts`              |
+| Earn Playwright E2E: stake, instant unstake, unavailable state, both themes, zero CSP violations          | DONE   | `apps/miniapp/src/test/e2e/earn.spec.ts`                    |
+| Activity date pills: local `Today` / `Yesterday`, older `Month D`                                         | DONE   | `ui/asset.ts`, `test/activity.test.ts`                      |
+| Activity rows: `HH:MM` under the amount, address line no longer carries the time; comments separated      | DONE   | `ui/home.tsx`, `ui-home.test.tsx`                           |
+
+**Untested / open:** live Tonstakers mainnet broadcast (mainnet remains gated behind owner
+sign-off, CLAUDE.md §6); TonAPI serializes `total_amount` as a JSON number (display-only), so
+TVL/rate above 2^53 are approximate — documented in DECISIONS.md.

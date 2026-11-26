@@ -100,6 +100,10 @@ function ActivityRow({
   const kind = activityKind(item);
   const sign = kind === 'in' || kind === 'bounce' ? '+' : '-';
   const amount = `${sign}${guard(item.amount)} ${item.symbol}`;
+  // Status and the optional comment live on the left; the time stays under the amount, unclipped.
+  const detail = [relativeStatus(item), item.comment ? `“${item.comment.slice(0, 22)}”` : '']
+    .filter((part) => part !== '')
+    .join(' · ');
   return (
     <button
       type="button"
@@ -116,19 +120,30 @@ function ActivityRow({
         </span>
         <span className="block truncate text-[12.5px] text-ink-2">
           {kind === 'in' ? 'from ' : 'to '}
-          {shortAddress(item.counterparty, 4, 4)} · {clockTime(item.timestamp)}
+          {shortAddress(item.counterparty, 4, 4)}
         </span>
+        {detail !== '' ? (
+          <span
+            data-testid={`activity-detail-${item.id}`}
+            className="block truncate text-[11.5px] text-ink-muted"
+          >
+            {detail}
+          </span>
+        ) : null}
       </span>
-      <span className="tabular shrink-0 text-right">
+      <span className="shrink-0 text-right">
         <span
-          className={`block text-[15px] font-semibold ${
+          className={`tabular block text-[15px] font-semibold ${
             kind === 'in' ? 'text-positive' : 'text-ink'
           }`}
         >
           {amount}
         </span>
-        <span className="block text-[12px] text-ink-muted">
-          {item.comment ? item.comment.slice(0, 22) : relativeStatus(item)}
+        <span
+          data-testid={`activity-time-${item.id}`}
+          className="tabular block text-[12px] text-ink-muted"
+        >
+          {clockTime(item.timestamp)}
         </span>
       </span>
     </button>

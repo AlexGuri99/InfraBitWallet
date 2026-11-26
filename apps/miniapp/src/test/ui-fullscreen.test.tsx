@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
 import type { TonPortfolio } from '@onezerowallet/chain-ton';
 import { UI_TON_NETWORK } from '../ui/wallet-shell';
-import type { TonReadApi, TonSwapApi, TonWriteApi } from '../ton/api';
+import type { TonReadApi, TonStakeApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 import { makeVault, renderShell } from './ui-helpers';
 
@@ -124,7 +124,7 @@ function portfolio(): TonPortfolio {
   };
 }
 
-function apiWith(): TonReadApi & TonWriteApi & TonSwapApi {
+function apiWith(): TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi {
   return {
     getPortfolio: () => Promise.resolve(portfolio()),
     getActivity: () => Promise.resolve([]),
@@ -133,6 +133,7 @@ function apiWith(): TonReadApi & TonWriteApi & TonSwapApi {
     broadcast: () => Promise.reject(new Error('not used')),
     getSwapAssets: () => Promise.reject(new Error('not used')),
     getSwapQuote: () => Promise.reject(new Error('not used')),
+    getStakingInfo: () => Promise.reject(new Error('not used')),
   };
 }
 

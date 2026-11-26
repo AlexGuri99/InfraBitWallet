@@ -657,3 +657,47 @@ decodes the _actual_ body (`decodeSwapPayload`) rather than showing form state.
 **Routers.** The quote must report DEX major version 2; an optional `STON_ALLOWED_ROUTERS`
 allowlist (reviewed config) rejects any other router. Tokens are never fetched from remote logos:
 swap assets carry metadata from the quote API and the UI renders the existing inline icon set.
+
+---
+
+## Decision: Tonstakers liquid staking — reviewed protocol constants, no SDK dependency, fail-closed testnet (P3b)
+
+**Protocol and pools.** Tonstakers is the reviewed liquid-staking provider for v1. The pool
+addresses (`EQCkWxfy…` mainnet, `kQANFsYy…` testnet) and the message opcodes come from the MIT
+`tonstakers/tonstakers-sdk` constants file and `ton-blockchain/liquid-staking-contract`
+(`contracts/op-codes.func`), and were re-checked against live TonAPI on 2026-11-26
+(`GET /v2/staking/pool/<pool>` → implementation "Tonstakers", `verified: true`, tsTON master
+`0:bdf3fa…`). `@onezerowallet/staking-ton` refuses any destination that is not one of those two
+pools, so a provider or config error cannot redirect a deposit.
+
+**Why not the Tonstakers SDK.** `tonstakers-sdk` is MIT and documented, but it drives a
+TonConnect connector and pins `@ton/ton` 15; this wallet signs through its own V5R1 closure. The
+package therefore re-implements only the documented cell layouts (clean-room): stake is
+`op:32 0x47d54391, query_id:64 = 1, partner_code:64` sent to the pool with `amount + 1 TON`
+attached (the pool derives the deposit from the message value and refunds unused gas); unstake is
+the tsTON burn `op:32 0x595f07bc, query_id:64 = 0, amount, owner, maybe_ref{wait_till_round_end,
+fill_or_kill}` sent to the user's own tsTON jetton wallet with `1.05 TON` attached. Modes map to
+Standard `(false,false)`, Instant `(false,true)`, Best rate `(true,false)`. `partner_code` is 0
+because the wallet has no Tonstakers partner agreement.
+
+**Fees and reserves.** `StakingFeePolicy = none`; the review screen shows `Wallet fee 0%`. The
+1 TON deposit gas and 1.05 TON unstake gas are protocol reserves, not fees, and are shown as
+separate rows. The client enforces the 1 TON minimum in both the UI and the builder, and derives
+Max from the 1.1 TON reserve on a stake; an unstake requires at least 1.05 TON in the wallet for
+gas. Review decodes the exact body being signed, and for a stake recovers the amount as
+`value − 1 TON`, rejecting anything below 1 TON.
+
+**Metrics and network switch.** TonAPI is the only documented source used
+(`/v2/staking/pool`, `/v2/jettons/<tsTON>`, `/v2/accounts/<pool>` for instant liquidity), always
+through the same-origin proxy, never from the Mini App. No testnet metrics API is documented for
+the pool, so `network=testnet` returns `staking_unavailable` without calling upstream rather than
+inventing numbers; mainnet stays behind `TON_NETWORK=mainnet` (owner sign-off still required to
+enable). The service fails closed on a non-Tonstakers implementation, an unverified pool, a jetton
+whose address does not match the pool's `liquid_jetton_master`, zero supply, or an upstream error.
+TonAPI serializes `total_amount` as a JSON number, which is imprecise above 2^53, so TVL and the
+exchange rate are display-only and approximate; no message is ever built from them.
+
+**Activity list polish.** Date-group pills are computed on local calendar days (`Today`,
+`Yesterday`, then `November 23`), and the per-row `HH:MM` moved from the counterparty line to a
+right-aligned line directly under the amount. Comments and Failed/Pending status moved to a
+third left line, so a comment can no longer clip the time and the address keeps its width.

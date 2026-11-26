@@ -221,6 +221,9 @@ importers:
       '@onezerowallet/crypto-vault':
         specifier: workspace:*
         version: link:../../packages/crypto-vault
+      '@onezerowallet/staking-ton':
+        specifier: workspace:*
+        version: link:../../packages/staking-ton
       '@onezerowallet/swap-ton':
         specifier: workspace:*
         version: link:../../packages/swap-ton
@@ -388,6 +391,13 @@ importers:
         version: 5.1.1(@types/node@22.20.5)(jsdom@31.0.1(@noble/hashes@1.8.0))(vite@8.3.8(@types/node@22.20.5)(esbuild@0.28.2)(jiti@1.21.7))
 
   packages/staking-ton:
+    dependencies:
+      '@ton/core':
+        specifier: ^0.63.1
+        version: 0.63.1(@ton/crypto@3.3.0)
+      buffer:
+        specifier: ^6.0.3
+        version: 6.0.3
     devDependencies:
       vitest:
         specifier: ^5.1.1
@@ -426,6 +436,9 @@ importers:
       '@onezerowallet/chain-ton':
         specifier: workspace:*
         version: link:../../packages/chain-ton
+      '@onezerowallet/staking-ton':
+        specifier: workspace:*
+        version: link:../../packages/staking-ton
       '@onezerowallet/swap-ton':
         specifier: workspace:*
         version: link:../../packages/swap-ton

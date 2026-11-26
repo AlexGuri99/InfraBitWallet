@@ -24,6 +24,11 @@ type StakingFeePolicy = 'none' | 'provider_revenue_share' | 'explicit_fee';
 
 Default is `'none'` for v1. The enum is plumbed through so a future config change can switch the model without refactoring staking code paths.
 
+P3b ships `STAKING_FEE_POLICY = 'none'` in `@onezerowallet/staking-ton`; the staking and unstaking
+review cards show `Wallet fee 0%`. The Tonstakers deposit (1 TON) and unstake (1.05 TON) attached
+gas are **protocol gas reserves, not wallet fees** — unused gas is refunded by the pool, and they
+are listed separately from the fee line.
+
 ## 2. Fee Rules (enforced in client code)
 
 1. **Every fee is shown as a line item** on the confirmation screen BEFORE the user signs.

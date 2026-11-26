@@ -119,11 +119,29 @@ export function clockTime(timestamp: number): string {
   });
 }
 
-export function dateLabel(timestamp: number): string {
-  return new Date(timestamp * 1000).toLocaleDateString('en-US', {
+/**
+ * Date-group header label. Local calendar days: today's group reads `Today`, yesterday's
+ * `Yesterday`, and anything older keeps the month/day form (`November 23`).
+ * `now` is injectable so tests do not depend on the wall clock.
+ */
+export function dateLabel(timestamp: number, now: Date = new Date()): string {
+  const date = new Date(timestamp * 1000);
+  if (sameLocalDay(date, now)) return 'Today';
+  const yesterday = new Date(now.getTime());
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (sameLocalDay(date, yesterday)) return 'Yesterday';
+  return date.toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
   });
+}
+
+function sameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
 }
 
 export function fullTimestamp(timestamp: number): string {
@@ -143,10 +161,10 @@ export interface ActivityGroup {
 }
 
 /** Most-recent-first grouping with a centred date label. */
-export function groupActivity(items: TonActivityItem[]): ActivityGroup[] {
+export function groupActivity(items: TonActivityItem[], now: Date = new Date()): ActivityGroup[] {
   const groups: ActivityGroup[] = [];
   for (const item of items) {
-    const label = dateLabel(item.timestamp);
+    const label = dateLabel(item.timestamp, now);
     const last = groups[groups.length - 1];
     if (last && last.label === label) last.items.push(item);
     else groups.push({ label, items: [item] });
