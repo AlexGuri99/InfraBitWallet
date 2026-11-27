@@ -22,7 +22,12 @@ import {
 import { t } from '../i18n';
 import { useToast } from '../ui/toast';
 import { useTelegram } from './TelegramProvider';
-import { installTelegramNativeEventBridge, subscribeTelegramNativeEvents } from './native-events';
+import {
+  installTelegramNativeEventBridge,
+  subscribeTelegramNativeEvents,
+  telegramWebviewProxy,
+} from './native-events';
+import { lockVerticalSwipes } from './bridge';
 
 export interface SafeAreaInset {
   top: number;
@@ -43,7 +48,11 @@ export interface FullscreenCapable {
   offEvent?: ((event: string, callback: (...args: any[]) => void) => void) | undefined;
   safeAreaInset?: Partial<SafeAreaInset> | undefined;
   contentSafeAreaInset?: Partial<SafeAreaInset> | undefined;
+  disableVerticalSwipes?: (() => unknown) | undefined;
 }
+
+export { telegramWebviewProxy } from './native-events';
+export type { TelegramWebviewProxy } from './native-events';
 
 export interface FullscreenControl {
   isSupported: boolean;
@@ -64,15 +73,6 @@ export function telegramFullscreenSupported(tg: FullscreenCapable | null | undef
   return typeof tg.requestFullscreen === 'function' && typeof tg.exitFullscreen === 'function';
 }
 
-/**
- * The raw Telegram WebView bridge. Inside the mobile clients this object exists synchronously,
- * before (or even without) the injected `window.Telegram.WebApp` exposing the high-level methods.
- * It is a function-only surface: `postEvent('web_app_<method>', data)`.
- */
-export interface TelegramWebviewProxy {
-  postEvent?: (eventType: string, eventData?: string) => void;
-}
-
 export const FULLSCREEN_BRIDGE_EVENTS = {
   enter: 'web_app_request_fullscreen',
   exit: 'web_app_exit_fullscreen',
@@ -90,12 +90,6 @@ export const SAFE_AREA_BRIDGE_EVENTS = {
  * start at 0 there.
  */
 export const FULLSCREEN_CONTENT_TOP_FALLBACK = 48;
-
-export function telegramWebviewProxy(): TelegramWebviewProxy | null {
-  if (typeof window === 'undefined') return null;
-  const proxy = (window as { TelegramWebviewProxy?: TelegramWebviewProxy }).TelegramWebviewProxy;
-  return typeof proxy?.postEvent === 'function' ? proxy : null;
-}
 
 /**
  * Bridge fallback support: a WebView proxy exists AND the client advertises Bot API 8.0+ (older
@@ -376,6 +370,8 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
         clearConfirmTimer();
         setFullscreen(event.isFullscreen);
         syncInsets();
+        // iOS can re-enable vertical swipes across a fullscreen transition; re-assert the lock.
+        lockVerticalSwipes(tg);
         if (event.isFullscreen) {
           // Replace the 48px fallback with the exact iOS insets as soon as possible.
           requestBridgeSafeArea('safe');
@@ -390,7 +386,7 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
       }
       applyBridgeInset(event.type === 'safe_area_changed' ? 'safe' : 'content', event.inset);
     });
-  }, [applyBridgeInset, clearConfirmTimer, notifyUnavailable, setFullscreen, syncInsets]);
+  }, [applyBridgeInset, clearConfirmTimer, notifyUnavailable, setFullscreen, syncInsets, tg]);
 
   // Telegram events: fullscreen state, failures and safe-area changes. The bridge path needs the
   // fullscreenChanged event even when the high-level methods are missing.
@@ -400,6 +396,7 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
       clearConfirmTimer();
       setFullscreen(boolFromPayload(payload));
       syncInsets();
+      lockVerticalSwipes(tg);
     };
     const onFailed = (): void => {
       notifyUnavailable();

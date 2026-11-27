@@ -145,8 +145,12 @@ async function createWallet(page: Page): Promise<void> {
 async function installMobileTelegramBridge(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const posts: string[] = [];
+    const calls: Array<{ event: string; data?: string | undefined }> = [];
     const handlers = new Map<string, Array<(payload?: unknown) => void>>();
     (window as unknown as { __tgPosts: string[] }).__tgPosts = posts;
+    (
+      window as unknown as { __tgCalls: Array<{ event: string; data?: string | undefined }> }
+    ).__tgCalls = calls;
     (window as unknown as { __emitTg: (event: string, payload?: unknown) => void }).__emitTg = (
       event,
       payload,
@@ -154,8 +158,9 @@ async function installMobileTelegramBridge(page: Page): Promise<void> {
       for (const handler of handlers.get(event) ?? []) handler(payload);
     };
     (window as unknown as { TelegramWebviewProxy: unknown }).TelegramWebviewProxy = {
-      postEvent: (event: string) => {
+      postEvent: (event: string, data?: string) => {
         posts.push(event);
+        calls.push({ event, data });
       },
     };
     const webApp = {
@@ -261,6 +266,20 @@ test.describe('fullscreen control', () => {
     await mockTonApi(page);
     await createWallet(page);
 
+    // Mount: vertical swipes are locked and the native bar matches Mint Light.
+    const chromeCalls = await page.evaluate(
+      () => (window as unknown as { __tgCalls: Array<{ event: string; data?: string }> }).__tgCalls,
+    );
+    const payloadOf = (event: string): Array<string> =>
+      chromeCalls.filter((call) => call.event === event).map((call) => call.data ?? '');
+    expect(payloadOf('web_app_setup_swipe_behavior')).toContain(
+      JSON.stringify({ allow_vertical_swipe: false }),
+    );
+    expect(payloadOf('web_app_set_header_color')).toContain(JSON.stringify({ color: '#DFF2E6' }));
+    expect(payloadOf('web_app_set_background_color')).toContain(
+      JSON.stringify({ color: '#DFF2E6' }),
+    );
+
     const enter = page.getByTestId('fullscreen-toggle');
     await expect(enter).toBeVisible();
     await expect(enter).toHaveAttribute('aria-label', 'Enter fullscreen');
@@ -293,6 +312,15 @@ test.describe('fullscreen control', () => {
     // No false "unavailable" toast once the native confirmation arrives.
     await page.waitForTimeout(1700);
     await expect(page.getByText("Fullscreen isn't available on this device")).toHaveCount(0);
+
+    // fullscreen_changed re-asserts the vertical swipe lock.
+    const swipeLocks = await page.evaluate(
+      () =>
+        (window as unknown as { __tgCalls: Array<{ event: string }> }).__tgCalls.filter(
+          (call) => call.event === 'web_app_setup_swipe_behavior',
+        ).length,
+    );
+    expect(swipeLocks).toBeGreaterThan(1);
 
     // Native safe-area events clear Telegram's floating bar above our header. One payload is a
     // JSON string, the other an object, to cover both shapes iOS sends.
@@ -337,6 +365,18 @@ test.describe('fullscreen control', () => {
         ),
       )
       .toBe('0px');
+
+    // Toggling the theme syncs the native bar with Forest Dark.
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as unknown as { __tgCalls: Array<{ event: string; data?: string }> }).__tgCalls
+            .filter((call) => call.event === 'web_app_set_header_color')
+            .map((call) => call.data ?? ''),
+        ),
+      )
+      .toContain(JSON.stringify({ color: '#0A0F0D' }));
 
     // Never clipped at the narrowest supported viewport, and Settings exposes the same control.
     await page.setViewportSize({ width: 360, height: 780 });

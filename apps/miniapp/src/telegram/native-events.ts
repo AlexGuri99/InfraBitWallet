@@ -18,6 +18,21 @@
  * only the four documented event names are accepted.
  */
 
+/**
+ * The raw Telegram WebView bridge (`window.TelegramWebviewProxy`). Present inside the mobile
+ * clients before (or even without) the injected `window.Telegram.WebApp` high-level methods.
+ * Function-only surface: `postEvent('web_app_<method>', data)`.
+ */
+export interface TelegramWebviewProxy {
+  postEvent?: (eventType: string, eventData?: string) => void;
+}
+
+export function telegramWebviewProxy(): TelegramWebviewProxy | null {
+  if (typeof window === 'undefined') return null;
+  const proxy = (window as { TelegramWebviewProxy?: TelegramWebviewProxy }).TelegramWebviewProxy;
+  return typeof proxy?.postEvent === 'function' ? proxy : null;
+}
+
 export interface NativeInset {
   top: number;
   bottom: number;

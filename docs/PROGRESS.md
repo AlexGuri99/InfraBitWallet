@@ -495,3 +495,20 @@ Branch `fix/ios-telegram-game-proxy-events`.
 
 **Untested:** real iOS hardware; verified against the documented wire format and simulated native
 events on both Playwright engines.
+
+---
+
+### P8: Telegram swipe lock + native chrome colours (2026-11-27)
+
+Branch `feat/telegram-swipe-lock-and-chrome`.
+
+| Area                                                                                                   | Status | Evidence                                        |
+| ------------------------------------------------------------------------------------------------------ | ------ | ----------------------------------------------- |
+| `disableVerticalSwipes` + `web_app_setup_swipe_behavior { allow_vertical_swipe: false }` on ready      | DONE   | `telegram/bridge.ts`, `TelegramProvider`, tests |
+| Swipe lock re-asserted on every `fullscreen_changed` (native + WebApp events)                          | DONE   | `fullscreen.tsx`, `ui-telegram-chrome.test.tsx` |
+| `overscroll-behavior-y: none` on html/body/#root and the phone frame                                   | DONE   | `index.css`, `ui/common.tsx`                    |
+| `web_app_set_header_color` / `web_app_set_background_color` + WebApp methods on mount and theme toggle | DONE   | `telegram/bridge.ts`, `ui/preferences.tsx`      |
+| Exact DESIGN.md canvas hexes (`#DFF2E6` / `#0A0F0D`, dark header no longer `bg_color`)                 | DONE   | `ui/preferences.tsx`, `bridge.ts`               |
+
+**Untested:** real iOS hardware; verified through the bridge recorder in unit tests and the
+mobile Playwright flow.

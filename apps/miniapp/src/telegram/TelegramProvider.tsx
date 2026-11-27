@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { lockVerticalSwipes } from './bridge';
 
 export interface TelegramTheme {
   backgroundColor: string;
@@ -121,6 +122,8 @@ declare global {
         disableClosingConfirmation: () => void;
         // Bot API 8.0+ fullscreen (feature-detect before use).
         requestFullscreen?: () => unknown;
+        /** Bot API 7.7+; feature-detect before use. */
+        disableVerticalSwipes?: () => unknown;
         exitFullscreen?: () => unknown;
         isFullscreen?: boolean;
         safeAreaInset?: { top: number; bottom: number; left: number; right: number };
@@ -196,6 +199,8 @@ export function TelegramProvider({ children }: { children: ReactNode }) {
       } catch {
         // Older clients may not implement these; the wallet still works.
       }
+      // A downward swipe must never collapse or close the wallet (web + native bridge).
+      lockVerticalSwipes(webApp);
       setValue({
         webApp,
         theme: parseThemeParams(webApp.themeParams),
