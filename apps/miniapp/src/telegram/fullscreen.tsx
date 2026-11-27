@@ -22,6 +22,7 @@ import {
 import { t } from '../i18n';
 import { useToast } from '../ui/toast';
 import { useTelegram } from './TelegramProvider';
+import { installTelegramNativeEventBridge, subscribeTelegramNativeEvents } from './native-events';
 
 export interface SafeAreaInset {
   top: number;
@@ -90,20 +91,6 @@ export const SAFE_AREA_BRIDGE_EVENTS = {
  */
 export const FULLSCREEN_CONTENT_TOP_FALLBACK = 48;
 
-/**
- * Native WebView bridge iOS uses to deliver responses: `Telegram.WebView.receiveEvent(name, data)`
- * with snake_case names. It is separate from the camelCase `WebApp.onEvent` surface.
- */
-export interface TelegramWebViewBridge {
-  receiveEvent?: (eventType: string, eventData?: string | Record<string, unknown>) => void;
-}
-
-export type NativeFullscreenEvent =
-  | { type: 'fullscreen_changed'; isFullscreen: boolean }
-  | { type: 'fullscreen_failed'; error: string }
-  | { type: 'safe_area_changed'; inset: Partial<SafeAreaInset> }
-  | { type: 'content_safe_area_changed'; inset: Partial<SafeAreaInset> };
-
 export function telegramWebviewProxy(): TelegramWebviewProxy | null {
   if (typeof window === 'undefined') return null;
   const proxy = (window as { TelegramWebviewProxy?: TelegramWebviewProxy }).TelegramWebviewProxy;
@@ -157,106 +144,6 @@ export function requestBridgeSafeArea(which: 'safe' | 'content'): boolean {
   } catch {
     return false;
   }
-}
-
-/** Parses the `eventData` an iOS client passes to `Telegram.WebView.receiveEvent`. */
-export function parseWebviewEvent(
-  eventType: string,
-  eventData: unknown,
-): NativeFullscreenEvent | null {
-  let data: unknown = eventData;
-  if (typeof data === 'string') {
-    try {
-      data = JSON.parse(data);
-    } catch {
-      data = undefined;
-    }
-  }
-  const record = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : {};
-  if (eventType === 'fullscreen_changed') {
-    const value = record['is_fullscreen'];
-    return { type: 'fullscreen_changed', isFullscreen: value === true || value === 'true' };
-  }
-  if (eventType === 'fullscreen_failed') {
-    return {
-      type: 'fullscreen_failed',
-      error: typeof record['error'] === 'string' ? record['error'] : '',
-    };
-  }
-  if (eventType === 'safe_area_changed' || eventType === 'content_safe_area_changed') {
-    return {
-      type: eventType,
-      inset: {
-        top: numberOrZero(record['top']),
-        bottom: numberOrZero(record['bottom']),
-        left: numberOrZero(record['left']),
-        right: numberOrZero(record['right']),
-      },
-    };
-  }
-  return null;
-}
-
-interface TelegramGlobalWithWebView {
-  WebApp?: unknown;
-  WebView?: TelegramWebViewBridge;
-}
-
-function telegramGlobal(): TelegramGlobalWithWebView | undefined {
-  if (typeof window === 'undefined') return undefined;
-  return (window as { Telegram?: TelegramGlobalWithWebView }).Telegram;
-}
-
-/**
- * Intercepts `window.Telegram.WebView.receiveEvent`, preserving any handler the injected SDK
- * installed. Only acts inside Telegram (a WebView bridge or proxy must exist); returns a cleanup
- * that restores the previous state exactly.
- */
-export function installWebViewReceiveEvent(
-  handler: (event: NativeFullscreenEvent) => void,
-): () => void {
-  if (typeof window === 'undefined') return () => {};
-  const existingGlobal = telegramGlobal();
-  const proxy = telegramWebviewProxy();
-  if (!existingGlobal && !proxy) return () => {};
-
-  const win = window as { Telegram?: TelegramGlobalWithWebView };
-  const telegram = win.Telegram ?? {};
-  const webView = telegram.WebView ?? {};
-  const previous = webView.receiveEvent;
-
-  const receiveEvent = (eventType: string, eventData?: string | Record<string, unknown>): void => {
-    if (previous) {
-      try {
-        previous(eventType, eventData);
-      } catch {
-        // A broken third-party handler must not suppress our own state updates.
-      }
-    }
-    const parsed = parseWebviewEvent(eventType, eventData);
-    if (parsed) handler(parsed);
-  };
-
-  // Some clients expose `window.Telegram` as a read-only property; never assign over it.
-  try {
-    webView.receiveEvent = receiveEvent;
-    telegram.WebView = webView;
-    if (!win.Telegram) win.Telegram = telegram;
-  } catch {
-    return () => {};
-  }
-
-  return () => {
-    try {
-      if (webView.receiveEvent !== receiveEvent) return; // someone else replaced it later
-      if (previous) webView.receiveEvent = previous;
-      else delete webView.receiveEvent;
-      if (!telegram.WebApp && Object.keys(webView).length === 0) delete telegram.WebView;
-      if (!telegram.WebApp && Object.keys(telegram).length === 0 && !proxy) delete win.Telegram;
-    } catch {
-      // Restoration is best-effort; a frozen global is not worth crashing the app over.
-    }
-  };
 }
 
 /** Browser fallback: standard Fullscreen API on the document element. */
@@ -479,14 +366,21 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
     [applyInsets],
   );
 
-  // iOS delivers responses through Telegram.WebView.receiveEvent (snake_case), not only through
-  // WebApp.onEvent. Intercept it so a successful request clears the optimistic timer immediately.
+  // Native Telegram events arrive through the early-boot dispatcher (TelegramGameProxy.
+  // receiveEvent on iOS, Telegram.WebView.receiveEvent elsewhere, iframe messages on Web).
+  // `fullscreen_changed` is authoritative evidence: clear the optimistic timer immediately.
   useEffect(() => {
-    return installWebViewReceiveEvent((event) => {
+    installTelegramNativeEventBridge();
+    return subscribeTelegramNativeEvents((event) => {
       if (event.type === 'fullscreen_changed') {
         clearConfirmTimer();
         setFullscreen(event.isFullscreen);
         syncInsets();
+        if (event.isFullscreen) {
+          // Replace the 48px fallback with the exact iOS insets as soon as possible.
+          requestBridgeSafeArea('safe');
+          requestBridgeSafeArea('content');
+        }
         return;
       }
       if (event.type === 'fullscreen_failed') {

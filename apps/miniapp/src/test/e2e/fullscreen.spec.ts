@@ -276,13 +276,13 @@ test.describe('fullscreen control', () => {
         expect.arrayContaining(['web_app_request_safe_area', 'web_app_request_content_safe_area']),
       );
 
-    // iOS confirms via Telegram.WebView.receiveEvent (snake_case), not WebApp.onEvent.
+    // iOS confirms via TelegramGameProxy.receiveEvent (snake_case), not WebApp.onEvent.
     await page.evaluate(() => {
       (
         window as unknown as {
-          Telegram: { WebView: { receiveEvent: (event: string, data: string) => void } };
+          TelegramGameProxy: { receiveEvent: (event: string, data: string) => void };
         }
-      ).Telegram.WebView.receiveEvent(
+      ).TelegramGameProxy.receiveEvent(
         'fullscreen_changed',
         JSON.stringify({ is_fullscreen: true }),
       );
@@ -294,21 +294,19 @@ test.describe('fullscreen control', () => {
     await page.waitForTimeout(1700);
     await expect(page.getByText("Fullscreen isn't available on this device")).toHaveCount(0);
 
-    // Native safe-area events clear Telegram's floating bar above our header.
+    // Native safe-area events clear Telegram's floating bar above our header. One payload is a
+    // JSON string, the other an object, to cover both shapes iOS sends.
     await page.evaluate(() => {
       const bridge = (
         window as unknown as {
-          Telegram: { WebView: { receiveEvent: (event: string, data: string) => void } };
+          TelegramGameProxy: { receiveEvent: (event: string, data: unknown) => void };
         }
-      ).Telegram.WebView;
+      ).TelegramGameProxy;
       bridge.receiveEvent(
         'safe_area_changed',
         JSON.stringify({ top: 59, bottom: 34, left: 0, right: 0 }),
       );
-      bridge.receiveEvent(
-        'content_safe_area_changed',
-        JSON.stringify({ top: 52, bottom: 0, left: 0, right: 0 }),
-      );
+      bridge.receiveEvent('content_safe_area_changed', { top: 52, bottom: 0, left: 0, right: 0 });
     });
     const fullscreenPadding = await page.evaluate(() => {
       const frame = document.querySelector('[data-testid="phone-frame"]');
@@ -325,9 +323,9 @@ test.describe('fullscreen control', () => {
     await page.evaluate(() => {
       (
         window as unknown as {
-          Telegram: { WebView: { receiveEvent: (event: string, data: string) => void } };
+          TelegramGameProxy: { receiveEvent: (event: string, data: string) => void };
         }
-      ).Telegram.WebView.receiveEvent(
+      ).TelegramGameProxy.receiveEvent(
         'fullscreen_changed',
         JSON.stringify({ is_fullscreen: false }),
       );

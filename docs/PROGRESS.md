@@ -478,3 +478,20 @@ Branch `fix/ios-fullscreen-insets-and-events`.
 
 **Untested:** real iOS hardware; verified against the documented wire format and simulated native
 events. See DECISIONS.md for the root cause.
+
+---
+
+### P7: TelegramGameProxy native events (iOS) (2026-11-27)
+
+Branch `fix/ios-telegram-game-proxy-events`.
+
+| Area                                                                                                                     | Status | Evidence                                           |
+| ------------------------------------------------------------------------------------------------------------------------ | ------ | -------------------------------------------------- |
+| Early-boot dispatcher installed from `main.tsx` (no inline script) across TelegramGameProxy / legacy / WebView / message | DONE   | `telegram/native-events.ts`, `main.tsx`            |
+| Pre-subscribe event buffer (max 32), microtask flush safe under StrictMode remounts                                      | DONE   | `native-events.ts`, `ui-fullscreen.test.tsx`       |
+| Object AND JSON-string `eventData` parsing, unknown events ignored, read-only globals tolerated                          | DONE   | `parseNativeTelegramEvent`, unit + e2e tests       |
+| `fullscreen_changed` cancels the 1.5 s timer, re-requests both safe areas, keeps collapse icon + clearance               | DONE   | `fullscreen.tsx`, unit + Playwright mobile test    |
+| Safe-area events via TelegramGameProxy update computed top padding; content inset resets to 0px on exit                  | DONE   | `ui-fullscreen.test.tsx`, `e2e/fullscreen.spec.ts` |
+
+**Untested:** real iOS hardware; verified against the documented wire format and simulated native
+events on both Playwright engines.
