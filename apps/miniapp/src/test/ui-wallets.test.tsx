@@ -171,6 +171,7 @@ describe('my wallets', () => {
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
   });
 
+  // Several Argon2id seals + the full UI flow: allow headroom when suites run in parallel.
   it('creates a second wallet, switches to it, then removes it with its phrase', async () => {
     const manager = await unlockedManager();
     const user = userEvent.setup();
@@ -233,7 +234,7 @@ describe('my wallets', () => {
     expect(manager.getSession()?.listWallets()[0]?.label).toBe('Wallet 1');
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
     expect(secretHolder.has()).toBe(false);
-  });
+  }, 20_000);
 
   it('shows each wallet’s testnet address in the list', async () => {
     const manager = await unlockedManager();

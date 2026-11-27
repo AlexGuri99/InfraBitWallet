@@ -154,6 +154,21 @@ async function renderHome(): Promise<void> {
   await screen.findByTestId('hero-balance');
 }
 
+/** iOS delivers responses through Telegram.WebView.receiveEvent (snake_case names). */
+function receiveNative(event: string, data?: unknown): void {
+  const handler = (
+    window.Telegram as unknown as {
+      WebView?: { receiveEvent?: (eventType: string, eventData?: unknown) => void };
+    }
+  ).WebView?.receiveEvent;
+  if (!handler) throw new Error('Telegram.WebView.receiveEvent was not installed');
+  handler(event, typeof data === 'string' ? data : JSON.stringify(data));
+}
+
+function iconPath(button: HTMLElement): string | null {
+  return button.querySelector('svg path')?.getAttribute('d') ?? null;
+}
+
 /** Mobile fallback: the WebView bridge exists, the high-level SDK methods do not. */
 function installBridgeMock(): { postEvent: ReturnType<typeof vi.fn>; restore: () => void } {
   const postEvent = vi.fn();
@@ -198,23 +213,57 @@ describe('fullscreen toggle', () => {
     }
   });
 
-  it('applies combined safeAreaInset + contentSafeAreaInset padding', async () => {
+  it('applies the content inset only in fullscreen and sums both insets on the shell', async () => {
     const harness = installFullscreenMock();
     try {
       await renderHome();
       const root = document.documentElement.style;
+      // Normal sheet mode: status-bar inset only, no extra content band.
       expect(root.getPropertyValue('--tg-safe-area-inset-top')).toBe('24px');
-      expect(root.getPropertyValue('--tg-content-safe-area-inset-top')).toBe('8px');
-      expect(root.getPropertyValue('--app-safe-top')).toContain('32px');
-      expect(root.getPropertyValue('--app-safe-bottom')).toContain('20px');
+      expect(root.getPropertyValue('--tg-content-safe-area-inset-top')).toBe('0px');
+      expect(root.getPropertyValue('--app-safe-top')).toContain('+ 0px');
 
       const frame = screen.getByTestId('phone-frame');
-      expect(frame.style.paddingTop).toBe('var(--app-safe-top, env(safe-area-inset-top))');
+      expect(frame.style.paddingTop).toBe(
+        'calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px))',
+      );
 
       act(() => {
-        harness.setInsets({ top: 40, bottom: 0 }, { top: 0, bottom: 0 });
+        harness.emit('fullscreenChanged', { isFullscreen: true });
       });
-      expect(root.getPropertyValue('--app-safe-top')).toContain('40px');
+      expect(root.getPropertyValue('--tg-content-safe-area-inset-top')).toBe('8px');
+      expect(root.getPropertyValue('--app-safe-top')).toContain('+ 8px');
+
+      act(() => {
+        harness.setInsets({ top: 40, bottom: 0 }, { top: 12, bottom: 0 });
+      });
+      expect(root.getPropertyValue('--tg-safe-area-inset-top')).toBe('40px');
+      expect(root.getPropertyValue('--tg-content-safe-area-inset-top')).toBe('12px');
+    } finally {
+      harness.restore();
+    }
+  });
+
+  it('uses a 48px content clearance in fullscreen when Telegram reports none yet', async () => {
+    const harness = installFullscreenMock();
+    try {
+      await renderHome();
+      act(() => {
+        harness.emit('fullscreenChanged', { isFullscreen: true });
+      });
+      act(() => {
+        harness.setInsets({ top: 24, bottom: 0 }, { top: 0, bottom: 0 });
+      });
+      expect(
+        document.documentElement.style.getPropertyValue('--tg-content-safe-area-inset-top'),
+      ).toBe('48px');
+
+      act(() => {
+        harness.emit('fullscreenChanged', { isFullscreen: false });
+      });
+      expect(
+        document.documentElement.style.getPropertyValue('--tg-content-safe-area-inset-top'),
+      ).toBe('0px');
     } finally {
       harness.restore();
     }
@@ -318,7 +367,8 @@ describe('fullscreen toggle', () => {
       });
       const exit = await screen.findByRole('button', { name: 'Exit fullscreen' });
       await user.click(exit);
-      expect(bridge.postEvent).toHaveBeenLastCalledWith('web_app_exit_fullscreen');
+      const posted = (bridge.postEvent.mock.calls as unknown[][]).map((call) => call[0]);
+      expect(posted).toContain('web_app_exit_fullscreen');
     } finally {
       bridge.restore();
       harness.restore();
@@ -343,6 +393,79 @@ describe('fullscreen toggle', () => {
       expect(
         await screen.findByRole('button', { name: 'Enter fullscreen' }, { timeout: 3000 }),
       ).toHaveAttribute('aria-pressed', 'false');
+    } finally {
+      bridge.restore();
+      harness.restore();
+    }
+  });
+
+  it('iOS native fullscreen_changed confirms the request, clears the timer and flips the icon', async () => {
+    const harness = installFullscreenMock();
+    const bridge = installBridgeMock();
+    const tg = webAppRecord();
+    try {
+      Reflect.deleteProperty(tg, 'requestFullscreen');
+      Reflect.deleteProperty(tg, 'exitFullscreen');
+      const user = userEvent.setup();
+      await renderHome();
+
+      const enter = await screen.findByRole('button', { name: 'Enter fullscreen' });
+      // Sheet mode → outward expand arrows.
+      expect(iconPath(enter)).toBe('M9 4H4v5');
+      await user.click(enter);
+      expect(bridge.postEvent).toHaveBeenCalledWith('web_app_request_fullscreen');
+
+      act(() => {
+        receiveNative('fullscreen_changed', { is_fullscreen: true });
+      });
+      const exit = await screen.findByRole('button', { name: 'Exit fullscreen' });
+      expect(exit).toHaveAttribute('aria-pressed', 'true');
+      // Fullscreen → inward collapse arrows.
+      expect(iconPath(exit)).toBe('M4 9h5V4');
+
+      // The optimistic 1.5s timer must have been cleared: no false "unavailable" toast.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 1700);
+      });
+      expect(
+        screen.queryByText("Fullscreen isn't available on this device"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeInTheDocument();
+    } finally {
+      bridge.restore();
+      harness.restore();
+    }
+  });
+
+  it('native safe-area events clear the floating Telegram controls in fullscreen and reset on exit', async () => {
+    const harness = installFullscreenMock();
+    const bridge = installBridgeMock();
+    try {
+      await renderHome();
+      const root = document.documentElement.style;
+
+      act(() => {
+        receiveNative('fullscreen_changed', { is_fullscreen: true });
+        receiveNative('safe_area_changed', { top: 59, bottom: 34, left: 0, right: 0 });
+        receiveNative('content_safe_area_changed', {
+          top: 52,
+          bottom: 0,
+          left: 0,
+          right: 0,
+        });
+      });
+      expect(root.getPropertyValue('--tg-safe-area-inset-top')).toBe('59px');
+      expect(root.getPropertyValue('--tg-safe-area-inset-bottom')).toBe('34px');
+      expect(root.getPropertyValue('--tg-content-safe-area-inset-top')).toBe('52px');
+      expect(root.getPropertyValue('--app-safe-top')).toContain('+ 52px');
+
+      act(() => {
+        receiveNative('fullscreen_changed', { is_fullscreen: false });
+      });
+      // Back to normal sheet mode: no extra content clearance.
+      expect(root.getPropertyValue('--tg-content-safe-area-inset-top')).toBe('0px');
+      expect(root.getPropertyValue('--tg-content-safe-area-inset-bottom')).toBe('0px');
+      expect(root.getPropertyValue('--app-safe-top')).toContain('+ 0px');
     } finally {
       bridge.restore();
       harness.restore();

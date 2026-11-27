@@ -797,3 +797,28 @@ We still do **not** load `https://telegram.org/js/telegram-web-app.js`: it is a 
 and `script-src 'self'` forbids it (CLAUDE.md §4). Mobile clients inject their own SDK; Telegram
 Web uses the browser API fallback. No CSP change was needed — `postEvent` is a JS bridge call, not
 a network request, so `connect-src 'self'` still holds.
+
+---
+
+## Decision: iOS native fullscreen events and two-part safe-area clearance (2026-11-27)
+
+**Why the optimistic timer still fired on device.** The WebView bridge answers through
+`window.Telegram.WebView.receiveEvent(name, data)` with snake_case names
+(`fullscreen_changed`, `fullscreen_failed`, `safe_area_changed`, `content_safe_area_changed`),
+not only through `WebApp.onEvent` camelCase. On iOS the high-level methods are missing, so the
+bridge path was used, but nothing consumed `receiveEvent`: the 1.5 s optimistic timer expired and
+showed "Fullscreen isn't available on this device" even though the transition succeeded. The
+provider now wraps `Telegram.WebView.receiveEvent` (preserving any existing handler, tolerating a
+read-only `window.Telegram`) and treats `fullscreen_changed` as authoritative evidence.
+
+**Two-part top clearance.** The status-bar notch (`safeAreaInset`) and Telegram's floating
+fullscreen controls (`contentSafeAreaInset`, the `X InfraBitWallet` / `v` band) are separate
+insets. Only the first was applied, so the header sat under the floating controls. The shell now
+pads with `--tg-safe-area-inset-top + --tg-content-safe-area-inset-top`, sticky headers pin below
+the same band, and the provider requests fresh values via `web_app_request_safe_area` /
+`web_app_request_content_safe_area` on mount and on every fullscreen change. While fullscreen is on
+and the client has not reported a content inset yet, a 48 px fallback keeps the header clear; in
+normal sheet mode the content inset is reset to 0 so there is no extra gap.
+
+Event data is untrusted: every value is number-coerced, unknown event names are ignored, and the
+injected handler never throws into Telegram's engine.
