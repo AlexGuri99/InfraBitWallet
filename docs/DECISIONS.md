@@ -822,3 +822,38 @@ normal sheet mode the content inset is reset to 0 so there is no extra gap.
 
 Event data is untrusted: every value is number-coerced, unknown event names are ignored, and the
 injected handler never throws into Telegram's engine.
+
+---
+
+## Decision: one early-boot native event dispatcher across all Telegram receive surfaces (2026-11-27)
+
+**Why the iOS fix still failed on hardware.** Telegram for iOS delivers native method responses
+through `window.TelegramGameProxy.receiveEvent(eventType, eventData)`, not
+`window.Telegram.WebView.receiveEvent`. Last iteration hooked only the WebView surface, so on a
+real iPhone (or macOS WKWebView) a successful `web_app_request_fullscreen` still ended with the
+1.5 s optimistic timeout, a false "Fullscreen isn't available on this device", the icon flipping
+back and the content inset resetting to 0.
+
+**One dispatcher, installed before React.** `telegram/native-events.ts` is imported and executed
+as the first statement of `main.tsx` (no inline `<script>`, so `script-src 'self'` holds). It wraps
+every official surface with a single dispatcher:
+
+1. `window.TelegramGameProxy.receiveEvent` (initialized when absent) — primary iOS/macOS receiver.
+2. `window.TelegramGameProxy_receiveEvent` — legacy fallback.
+3. `window.Telegram.WebView.receiveEvent` — Android/Desktop (never creates `window.Telegram`).
+4. `window.addEventListener('message')` for `{ eventType, eventData }` iframe messages (Telegram Web).
+
+Wrapping preserves any handler already present, marks its wrapper so a function shared between
+surfaces is not wrapped twice, and tolerates frozen/read-only globals by skipping that surface.
+Payloads are accepted as objects or JSON strings and parsed defensively; only the four documented
+event names are dispatched.
+
+**Before-subscribe buffer.** Native events can arrive before React mounts `FullscreenProvider`, so
+unsubscribed events are queued (max 32) and flushed on subscribe. The flush runs in a microtask and
+delivers to whoever is subscribed at that point — React StrictMode mounts/unmounts/remounts effects,
+and keying on the original handler identity dropped the queue in dev.
+
+**Consumption.** `FullscreenProvider` no longer installs its own receiver; it subscribes. A
+`fullscreen_changed` event cancels the optimistic timer and immediately re-requests
+`web_app_request_safe_area` / `web_app_request_content_safe_area` when entering fullscreen, so the
+exact iOS insets replace the 48 px content fallback.

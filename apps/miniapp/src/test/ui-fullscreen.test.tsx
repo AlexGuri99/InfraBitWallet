@@ -2,7 +2,7 @@
  * Fullscreen toggle: Telegram Bot API 8.0+ behaviour, safe-area vars, failure toast, and the
  * unsupported-environment case (button hidden).
  */
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { InMemoryStorage, VaultManager } from '@onezerowallet/crypto-vault';
@@ -11,6 +11,10 @@ import { UI_TON_NETWORK } from '../ui/wallet-shell';
 import type { TonReadApi, TonStakeApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import { MNEMONIC_12_HARDHAT, PASS } from './fixtures';
 import { makeVault, renderShell } from './ui-helpers';
+import {
+  installTelegramNativeEventBridge,
+  resetTelegramNativeEvents,
+} from '../telegram/native-events';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
 
@@ -154,15 +158,33 @@ async function renderHome(): Promise<void> {
   await screen.findByTestId('hero-balance');
 }
 
-/** iOS delivers responses through Telegram.WebView.receiveEvent (snake_case names). */
-function receiveNative(event: string, data?: unknown): void {
-  const handler = (
+/**
+ * iOS delivers responses through window.TelegramGameProxy.receiveEvent (the primary native
+ * receiver); Android/Desktop use Telegram.WebView.receiveEvent. Prefer the former here.
+ */
+function nativeReceiver(): (eventType: string, eventData?: unknown) => void {
+  const gameProxy = (
+    window as unknown as {
+      TelegramGameProxy?: { receiveEvent?: (eventType: string, eventData?: unknown) => void };
+      TelegramGameProxy_receiveEvent?: (eventType: string, eventData?: unknown) => void;
+    }
+  ).TelegramGameProxy?.receiveEvent;
+  if (typeof gameProxy === 'function') return gameProxy;
+  const legacy = (
+    window as unknown as { TelegramGameProxy_receiveEvent?: (e: string, d?: unknown) => void }
+  ).TelegramGameProxy_receiveEvent;
+  if (typeof legacy === 'function') return legacy;
+  const webView = (
     window.Telegram as unknown as {
       WebView?: { receiveEvent?: (eventType: string, eventData?: unknown) => void };
     }
   ).WebView?.receiveEvent;
-  if (!handler) throw new Error('Telegram.WebView.receiveEvent was not installed');
-  handler(event, typeof data === 'string' ? data : JSON.stringify(data));
+  if (typeof webView === 'function') return webView;
+  throw new Error('no Telegram native receiveEvent surface was installed');
+}
+
+function receiveNative(event: string, data?: unknown): void {
+  nativeReceiver()(event, typeof data === 'string' ? data : JSON.stringify(data));
 }
 
 function iconPath(button: HTMLElement): string | null {
@@ -180,6 +202,10 @@ function installBridgeMock(): { postEvent: ReturnType<typeof vi.fn>; restore: ()
     },
   };
 }
+
+afterEach(() => {
+  resetTelegramNativeEvents();
+});
 
 describe('fullscreen toggle', () => {
   it('calls requestFullscreen/exitFullscreen and follows fullscreenChanged', async () => {
@@ -433,6 +459,62 @@ describe('fullscreen toggle', () => {
       expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toBeInTheDocument();
     } finally {
       bridge.restore();
+      harness.restore();
+    }
+  });
+
+  it('accepts both object and JSON-string payloads from TelegramGameProxy.receiveEvent', async () => {
+    const harness = installFullscreenMock();
+    const bridge = installBridgeMock();
+    const tg = webAppRecord();
+    try {
+      Reflect.deleteProperty(tg, 'requestFullscreen');
+      Reflect.deleteProperty(tg, 'exitFullscreen');
+      await renderHome();
+
+      // Object payload (iOS passes a decoded object).
+      act(() => {
+        receiveNative('fullscreen_changed', { is_fullscreen: true });
+      });
+      expect(await screen.findByRole('button', { name: 'Exit fullscreen' })).toBeInTheDocument();
+
+      // JSON-encoded string payload (some clients stringify eventData).
+      act(() => {
+        receiveNative('fullscreen_changed', JSON.stringify({ is_fullscreen: false }));
+      });
+      expect(await screen.findByRole('button', { name: 'Enter fullscreen' })).toBeInTheDocument();
+      expect(
+        document.documentElement.style.getPropertyValue('--tg-content-safe-area-inset-top'),
+      ).toBe('0px');
+    } finally {
+      bridge.restore();
+      harness.restore();
+    }
+  });
+
+  it('flushes native events that arrive before the provider mounts (early-boot buffer)', async () => {
+    const harness = installFullscreenMock();
+    try {
+      // main.tsx installs the dispatcher before React; iOS can answer before the first render.
+      installTelegramNativeEventBridge();
+      act(() => {
+        receiveNative('fullscreen_changed', JSON.stringify({ is_fullscreen: true }));
+      });
+
+      await renderHome();
+      // The queued event was flushed on subscribe: collapse icon and content clearance applied.
+      expect(await screen.findByRole('button', { name: 'Exit fullscreen' })).toBeInTheDocument();
+      expect(
+        document.documentElement.style.getPropertyValue('--tg-content-safe-area-inset-top'),
+      ).toBe('8px');
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 1700);
+      });
+      expect(
+        screen.queryByText("Fullscreen isn't available on this device"),
+      ).not.toBeInTheDocument();
+    } finally {
       harness.restore();
     }
   });
