@@ -1,47 +1,50 @@
 /**
- * A7 passcode policy — temporarily a 4-digit numeric PIN in every environment.
+ * A7 passcode policy — 6-digit numeric PIN (mainnet hardening, 2026-11-27).
  *
- * The relaxation is recorded in docs/DECISIONS.md / THREAT_MODEL.md / UNVERIFIED.md: a 4-digit
- * PIN without a device secret is brute-forceable offline if the envelope is copied.
+ * Deployments with a device secret use the PIN as an on-device factor; without one the copied
+ * envelope remains offline-attackable, so Argon2id + backoff + six digits are the defence.
  */
 import { describe, it, expect } from 'vitest';
 import { evaluatePasscodeStrength, measureKdf, KDF_BOUNDS } from './vault';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
 
-describe('A7: 4-digit PIN policy', () => {
-  it.each([true, false])('accepts a non-trivial 4-digit PIN (deviceSecret=%s)', (hasSecret) => {
-    const result = evaluatePasscodeStrength('2580', hasSecret);
+describe('A7: 6-digit PIN policy', () => {
+  it.each([true, false])('accepts a non-trivial 6-digit PIN (deviceSecret=%s)', (hasSecret) => {
+    const result = evaluatePasscodeStrength('258036', hasSecret);
     expect(result).toMatchObject({
       ok: true,
       kind: 'pin',
-      minLength: 4,
+      minLength: 6,
       unprotectedByDeviceSecret: !hasSecret,
     });
     expect(result.error).toBeUndefined();
   });
 
-  it.each(['1234', '4321', '2345', '0123', '0000', '9999'])('rejects weak PIN %s', (pin) => {
-    for (const hasSecret of [true, false]) {
-      const r = evaluatePasscodeStrength(pin, hasSecret);
-      expect(r.ok).toBe(false);
-      expect(r.error).toMatch(/too easy to guess/);
-      expect(r.error).not.toContain(pin);
-    }
-  });
+  it.each(['123456', '654321', '234567', '012345', '000000', '999999'])(
+    'rejects weak PIN %s',
+    (pin) => {
+      for (const hasSecret of [true, false]) {
+        const r = evaluatePasscodeStrength(pin, hasSecret);
+        expect(r.ok).toBe(false);
+        expect(r.error).toMatch(/too easy to guess/);
+        expect(r.error).not.toContain(pin);
+      }
+    },
+  );
 
-  it.each(['123', '12345', 'abcd', '12a4', '', '2580 '])(
-    'rejects non-4-digit input %j',
+  it.each(['123', '12345', '1234567', 'abcd', '12a4', '', '258036 '])(
+    'rejects non-6-digit input %j',
     (value) => {
       const r = evaluatePasscodeStrength(value, true);
       expect(r.ok).toBe(false);
-      expect(r.error).toMatch(/4-digit PIN/);
+      expect(r.error).toMatch(/6-digit PIN/);
     },
   );
 
   it('reports unprotectedByDeviceSecret so the UI can warn', () => {
-    expect(evaluatePasscodeStrength('2580', false).unprotectedByDeviceSecret).toBe(true);
-    expect(evaluatePasscodeStrength('2580', true).unprotectedByDeviceSecret).toBe(false);
+    expect(evaluatePasscodeStrength('258036', false).unprotectedByDeviceSecret).toBe(true);
+    expect(evaluatePasscodeStrength('258036', true).unprotectedByDeviceSecret).toBe(false);
   });
 });
 

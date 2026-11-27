@@ -148,10 +148,22 @@ type FetchLike = (
   },
 ) => Promise<Response>;
 
+/** Telegram `initData` header value, or nothing outside Telegram / before injection. */
+function telegramInitData(): Record<string, string> {
+  const initData = window.Telegram?.WebApp.initData;
+  return typeof initData === 'string' && initData.length > 0
+    ? { 'x-telegram-init-data': initData }
+    : {};
+}
+
 async function readJson(url: string, fetchImpl: FetchLike, signal?: AbortSignal): Promise<unknown> {
   let response: Response;
+  const headers = telegramInitData();
   try {
-    response = await fetchImpl(url, signal ? { signal } : {});
+    response = await fetchImpl(url, {
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      ...(signal ? { signal } : {}),
+    });
   } catch {
     throw new TonApiError('offline');
   }
@@ -173,7 +185,7 @@ async function postJson(
   try {
     response = await fetchImpl(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...telegramInitData() },
       body: JSON.stringify(body),
       ...(signal ? { signal } : {}),
     });

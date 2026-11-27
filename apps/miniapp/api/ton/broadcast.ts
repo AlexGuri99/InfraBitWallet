@@ -4,6 +4,7 @@
  * Submits the client-signed external message. The service cannot sign anything.
  */
 import {
+  guardTonRequest,
   broadcastBoc,
   loadServerConfig,
   ProviderError,
@@ -12,6 +13,7 @@ import {
 } from '@onezerowallet/api';
 
 interface ApiRequest {
+  headers?: Record<string, string | string[] | undefined> | undefined;
   method?: string | undefined;
   body?: unknown;
 }
@@ -54,6 +56,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     send(res, 500, { error: 'server_misconfigured' });
     return;
   }
+  if (!guardTonRequest(req, res, loaded.config, 'heavy').ok) return;
   const body = readBody(req.body);
   const boc = validateBocBase64(body?.['boc']);
   if (!boc) {

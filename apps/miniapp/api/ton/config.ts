@@ -7,6 +7,7 @@
  */
 import {
   collectableSwapFeeBps,
+  guardTonRequest,
   isReferralConfigured,
   loadServerConfig,
   stakingEnabledFor,
@@ -15,6 +16,7 @@ import {
 
 interface ApiRequest {
   method?: string | undefined;
+  headers?: Record<string, string | string[] | undefined> | undefined;
 }
 
 interface ApiResponse {
@@ -42,6 +44,8 @@ export default function handler(req: ApiRequest, res: ApiResponse): void {
     return;
   }
   const { config } = loaded;
+  // Public: the Mini App must be able to render a clean state outside Telegram.
+  if (!guardTonRequest(req, res, config, 'read', { skipAuth: true }).ok) return;
   send(res, 200, {
     network: config.network,
     swapEnabled: swapEnabledFor(config),

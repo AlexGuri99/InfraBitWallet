@@ -185,8 +185,16 @@ describe('my wallets', () => {
       expect(phraseWordsInDom()).toHaveLength(24);
     });
     const newWords = phraseWordsInDom();
-    await user.click(screen.getByLabelText("I've stored the seed phrase in a secure place."));
     await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    // Mandatory backup quiz for the new wallet.
+    await screen.findByRole('heading', { name: 'Check your backup' });
+    for (const input of screen.getAllByRole('textbox')) {
+      const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
+      const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
+      await user.type(input, newWords[position] ?? '');
+    }
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
 
     await screen.findByRole('heading', { name: 'Confirm your PIN' });
     await user.type(screen.getByLabelText('Current PIN'), PASS);

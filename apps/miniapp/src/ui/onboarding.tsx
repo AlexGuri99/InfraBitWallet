@@ -15,6 +15,7 @@ import { ChevronDownIcon, ChevronRightIcon, CloseIcon, CopyIcon, ShieldIcon } fr
 import { InfraBitLogo } from './logo';
 import { copyPhraseToClipboard } from './clipboard';
 import { useToast } from './toast';
+import { LegalLinks } from './legal';
 
 type Step = { current: number; total: number };
 
@@ -167,6 +168,7 @@ export function WelcomeScreen({
           <p className="max-w-[320px] text-[12px] font-semibold text-ink-2">
             {t('welcome.never.ask')}
           </p>
+          <LegalLinks />
         </div>
 
         <div className="flex w-full flex-col gap-2.5 pt-8">
@@ -251,7 +253,6 @@ export function CreatePhraseScreen({
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const [revealed, setRevealed] = useState(false);
-  const [checked, setChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasPhrase = secretHolder.has();
 
@@ -327,19 +328,10 @@ export function CreatePhraseScreen({
           {hasPhrase ? t('phrase.reveal') : t('phrase.revealAgain')}
         </Button>
       )}
-      <label className="flex items-start gap-3 rounded-2xl bg-surface px-4 py-3 text-[13px] leading-relaxed text-ink">
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={!revealed}
-          onChange={(event) => {
-            setChecked(event.target.checked);
-          }}
-          className="mt-0.5 h-4 w-4 accent-[color:var(--accent-primary)]"
-        />
-        <span>{t('phrase.checkbox')}</span>
-      </label>
-      <Button onClick={onDone} disabled={!revealed || !checked || !hasPhrase}>
+      <Notice>
+        You will be asked to confirm three words from this phrase before the wallet is sealed.
+      </Notice>
+      <Button onClick={onDone} disabled={!revealed || !hasPhrase}>
         {t('phrase.next')}
       </Button>
     </ScreenShell>
@@ -433,10 +425,13 @@ export function VerifyScreen({
   onVerified,
   onCancel,
   step,
+  keepPhrase = false,
 }: {
   onVerified: () => void;
   onCancel: () => void;
   step?: Step;
+  /** Creation flow: keep the phrase in the holder so the passcode step can seal it. */
+  keepPhrase?: boolean;
 }) {
   const words = secretHolder.words();
   const positions = useMemo(() => pickPositions(words.length, 3), [words.length]);
@@ -455,7 +450,8 @@ export function VerifyScreen({
       return;
     }
     setError(null);
-    secretHolder.clear();
+    // Backup-test mode clears the temporary phrase immediately; creation keeps it for sealing.
+    if (!keepPhrase) secretHolder.clear();
     setDone(true);
     onVerified();
   };

@@ -14,8 +14,8 @@ import { deriveEvmKey } from './derivation';
 import { MNEMONIC_12_HARDHAT, MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
 
 const FAST = { argon2TimeCost: 2, argon2MemoryCost: 19456, argon2Parallelism: 1 };
-const PASS = '2580';
-const PASS2 = '3691';
+const PASS = '258036';
+const PASS2 = '369147';
 
 function makeManager(secure = false): {
   manager: VaultManager;
@@ -152,7 +152,7 @@ describe('add / import additional wallets', () => {
     await manager.importWallet(MNEMONIC_12_HARDHAT, PASS);
     expect((await manager.unlock(PASS)).success).toBe(true);
     expect(
-      await manager.addWallet({ passcode: '1357', mnemonic: MNEMONIC_24_ABANDON }),
+      await manager.addWallet({ passcode: '135790', mnemonic: MNEMONIC_24_ABANDON }),
     ).toMatchObject({ ok: false, error: 'wrong_passcode' });
     expect(
       await manager.addWallet({ passcode: PASS, mnemonic: MNEMONIC_12_HARDHAT }),

@@ -4,7 +4,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 
-const PASS = '2580';
+const PASS = '258036';
 
 const PORTFOLIO = {
   address: '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287',
@@ -227,8 +227,17 @@ async function createWallet(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: 'Create a wallet' }).click();
   await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-  await page.getByLabel("I've stored the seed phrase in a secure place.").check();
+  const quizWords = await page.locator('[data-role="word"]').allTextContents();
   await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+  for (let i = 0; i < 3; i += 1) {
+    const input = page.locator('input[id^="word-"]').nth(i);
+    const id = await input.getAttribute('id');
+    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+    await input.fill(quizWords[position] ?? '');
+  }
+  await page.getByRole('button', { name: 'Verify' }).click();
+
   await page.getByLabel('PIN', { exact: true }).fill(PASS);
   await page.getByLabel('Confirm PIN').fill(PASS);
   await page.getByRole('button', { name: 'Continue' }).click();

@@ -19,7 +19,7 @@ import { secretHolder } from '../vault/secret-holder';
 import { detectAccountType } from '../vault/detect';
 import { Button, Card, ErrorText, Field, Notice, ScreenShell, Sheet } from './common';
 import { InfraBitLogo } from './logo';
-import { CreatePhraseScreen } from './onboarding';
+import { CreatePhraseScreen, VerifyScreen } from './onboarding';
 import { DisambiguateScreen, ImportPhraseScreen } from './import';
 import { useToast } from './toast';
 import { PlusIcon, TrashIcon } from './icons';
@@ -29,6 +29,7 @@ import type { BiometryApi } from '../adapters/biometry';
 type Mode =
   | { kind: 'list' }
   | { kind: 'create-phrase' }
+  | { kind: 'create-verify' }
   | { kind: 'import-phrase' }
   | { kind: 'disambiguate' }
   | { kind: 'passcode'; accountType: AccountType; source: 'create' | 'import' }
@@ -149,7 +150,7 @@ function WalletPasscodePrompt({
         type="password"
         inputMode="numeric"
         pattern="[0-9]*"
-        maxLength={4}
+        maxLength={6}
         autoComplete="current-password"
         autoFocus
         className="text-center font-mono text-[22px] tracking-[0.5em]"
@@ -360,6 +361,22 @@ export function WalletManagerScreen({
           setMode({ kind: 'list' });
         }}
         onDone={() => {
+          // Mandatory 3-word verification before the new wallet is sealed.
+          setMode({ kind: 'create-verify' });
+        }}
+      />
+    );
+  }
+
+  if (mode.kind === 'create-verify') {
+    return (
+      <VerifyScreen
+        step={{ current: 1, total: 2 }}
+        keepPhrase
+        onCancel={() => {
+          setMode({ kind: 'create-phrase' });
+        }}
+        onVerified={() => {
           setMode({ kind: 'passcode', accountType: 'bip39-multichain', source: 'create' });
         }}
       />

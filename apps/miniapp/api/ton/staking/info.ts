@@ -5,9 +5,16 @@
  * (CSP `connect-src 'self'`). Testnet has no published Tonstakers metrics and fails closed with
  * `staking_unavailable`; mainnet is served only when the server runs with `TON_NETWORK=mainnet`.
  */
-import { loadServerConfig, readTonNetwork, StakingError, StakingService } from '@onezerowallet/api';
+import {
+  guardTonRequest,
+  loadServerConfig,
+  readTonNetwork,
+  StakingError,
+  StakingService,
+} from '@onezerowallet/api';
 
 interface ApiRequest {
+  headers?: Record<string, string | string[] | undefined> | undefined;
   method?: string | undefined;
   query?: Record<string, string | string[] | undefined>;
 }
@@ -39,6 +46,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     send(res, 500, { error: 'server_misconfigured' });
     return;
   }
+  if (!guardTonRequest(req, res, loaded.config, 'read').ok) return;
   const network = readTonNetwork(first(req.query?.['network']) ?? loaded.config.network);
   if (!network || network !== loaded.config.network) {
     send(res, 400, { error: 'invalid_network' });

@@ -22,9 +22,9 @@ const en = {
   'onboarding.continue': 'I understand, continue',
   'step.of': 'Step {current} of {total}',
   'passcode.title': 'Set a passcode',
-  'passcode.requirements.device': 'Enter a 4-digit PIN (avoid simple patterns like 0000 or 1234).',
+  'passcode.requirements.device': 'Enter a 6-digit PIN (avoid simple patterns like 0000 or 1234).',
   'passcode.requirements.noDevice':
-    'Enter a 4-digit PIN (avoid simple patterns like 0000 or 1234).',
+    'Enter a 6-digit PIN (avoid simple patterns like 0000 or 1234).',
   'passcode.requirements.offline':
     'No device secret is available here, so the vault can be attacked offline if its data is copied.',
   'passcode.show': 'Show',

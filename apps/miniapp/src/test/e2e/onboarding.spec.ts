@@ -8,7 +8,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 
-const PASS = '2580';
+const PASS = '258036';
 
 function wordLocator(page: Page) {
   return page.locator('[data-role="word"]');
@@ -24,10 +24,18 @@ async function createToPasscode(page: Page): Promise<string[]> {
   const words = await wordLocator(page).allTextContents();
 
   const next = page.getByRole('button', { name: 'Next' });
-  await expect(next).toBeDisabled();
-  await page.getByLabel("I've stored the seed phrase in a secure place.").check();
   await expect(next).toBeEnabled();
   await next.click();
+
+  // Mandatory 3-word backup verification before the vault is sealed.
+  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+  for (let i = 0; i < 3; i += 1) {
+    const input = page.locator('input[id^="word-"]').nth(i);
+    const id = await input.getAttribute('id');
+    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+    await input.fill(words[position] ?? '');
+  }
+  await page.getByRole('button', { name: 'Verify' }).click();
 
   await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
   return words;
@@ -518,6 +526,26 @@ test.describe('onboarding and unlock', () => {
     }
     await page.getByRole('button', { name: 'Verify' }).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  });
+
+  test('Terms of Use and Privacy Policy are self-hosted sheets', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Your keys, your coins' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Terms of Use' }).click();
+    const terms = page.getByRole('dialog', { name: 'Terms of Use' });
+    await expect(terms).toBeVisible();
+    await expect(terms).toContainText(/self-custodial/);
+    await expect(terms).toContainText(/0\.35%/);
+    await expect(terms).toContainText(/permanently lost/);
+    await page.getByRole('button', { name: 'Close' }).click();
+
+    await page.getByRole('button', { name: 'Privacy Policy' }).click();
+    const privacy = page.getByRole('dialog', { name: 'Privacy Policy' });
+    await expect(privacy).toBeVisible();
+    await expect(privacy).toContainText(/never leave your device/);
+    await expect(privacy).toContainText(/zero third-party advertising or tracking SDKs/);
+    await expect(privacy.getByRole('link')).toHaveCount(0);
   });
 
   test('phrase hides when the app is backgrounded', async ({ page }) => {
