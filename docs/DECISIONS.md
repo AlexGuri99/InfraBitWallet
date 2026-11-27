@@ -857,3 +857,26 @@ and keying on the original handler identity dropped the queue in dev.
 `fullscreen_changed` event cancels the optimistic timer and immediately re-requests
 `web_app_request_safe_area` / `web_app_request_content_safe_area` when entering fullscreen, so the
 exact iOS insets replace the 48 px content fallback.
+
+---
+
+## Decision: lock vertical swipes and sync native chrome through both Telegram paths (2026-11-27)
+
+**Swipe-to-close.** A downward flick could collapse the Mini App mid-flow. Telegram exposes
+`WebApp.disableVerticalSwipes()` (Bot API 7.7+) on some clients only, so `lockVerticalSwipes()`
+also posts the raw bridge event `web_app_setup_swipe_behavior` with
+`{ allow_vertical_swipe: false }`. It runs once when the WebApp is ready (app-wide, before
+onboarding) and is re-asserted on every `fullscreen_changed` — iOS re-enables the gesture around
+fullscreen transitions. `html`, `body` and the phone frame also set `overscroll-behavior-y: none`
+so WKWebView rubber-banding cannot be mistaken for Telegram's edge gesture.
+
+**Native bar colours.** Header/background colours are applied through `WebApp.setHeaderColor` /
+`setBackgroundColor` where present AND the bridge events `web_app_set_header_color` /
+`web_app_set_background_color` (iOS only reacts to the events). Both use the DESIGN.md canvas
+tokens verbatim: `#DFF2E6` (Mint Light) and `#0A0F0D` (Forest Dark). Dark previously passed
+Telegram's `bg_color` alias for the header; the explicit hex is required so the native
+`X InfraBitWallet` / `v` bar matches our own surface exactly.
+
+**Why bridge helpers moved.** `telegramWebviewProxy()` now lives in `native-events.ts` (which has
+no imports) so `bridge.ts` can use it without an import cycle
+(`TelegramProvider → bridge → fullscreen → TelegramProvider`).

@@ -7,6 +7,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { syncTelegramChromeColors } from '../telegram/bridge';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -45,9 +46,9 @@ export function readPreference(key: string): string | null {
 }
 
 export const THEME_CHROME: Record<ThemeMode, { background: string; header: string }> = {
+  // DESIGN.md canvas tokens, used verbatim so Telegram's native bar blends with our UI.
   light: { background: '#DFF2E6', header: '#DFF2E6' },
-  // In dark mode the header follows Telegram's own background so iOS keeps its clean buttons.
-  dark: { background: '#0A0F0D', header: 'bg_color' },
+  dark: { background: '#0A0F0D', header: '#0A0F0D' },
 };
 
 interface PreferencesValue {
@@ -81,19 +82,9 @@ function initialTheme(): ThemeMode {
 }
 
 function syncTelegramChrome(theme: ThemeMode): void {
-  const webApp = window.Telegram?.WebApp;
-  if (!webApp) return;
-  const chrome = THEME_CHROME[theme];
-  try {
-    if (typeof webApp.setBackgroundColor === 'function') {
-      webApp.setBackgroundColor(chrome.background);
-    }
-    if (typeof webApp.setHeaderColor === 'function') {
-      webApp.setHeaderColor(chrome.header);
-    }
-  } catch {
-    // Older clients may reject colours; the in-app theme still applies.
-  }
+  // Both the WebApp methods (Android/Desktop/Web) and the raw bridge events (iOS) are used;
+  // missing surfaces are no-ops. Colours come from the DESIGN.md canvas tokens.
+  syncTelegramChromeColors(theme, window.Telegram?.WebApp ?? null);
 }
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {

@@ -30,7 +30,7 @@ export function StepIndicator({ current, total }: { current: number; total: numb
 /** Centred mobile viewport frame with Telegram safe-area insets. */
 export function PhoneFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-[100dvh] w-full justify-center bg-canvas text-ink">
+    <div className="overscroll-none flex min-h-[100dvh] w-full justify-center bg-canvas text-ink">
       <div
         data-testid="phone-frame"
         className="flex min-h-[100dvh] w-full max-w-[430px] flex-col"

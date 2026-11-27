@@ -91,6 +91,8 @@ html,
 body,
 #root {
   min-height: 100%;
+  /* iOS WKWebView rubber-band must not fight Telegram's edge-swipe / fullscreen gestures. */
+  overscroll-behavior-y: none;
 }
 
 body {
