@@ -723,6 +723,27 @@ export async function enableBiometric(
   passcode: string,
   deviceSecret?: Uint8Array,
 ): Promise<EnableBiometricResult> {
+  const token = globalThis.crypto.getRandomValues(new Uint8Array(BIOMETRIC_TOKEN_BYTES));
+  const tokenHex = bytesToHex(token);
+  token.fill(0);
+  const wrapped = await enableBiometricWithToken(seal, passcode, tokenHex, deviceSecret);
+  return wrapped.ok ? { ok: true, seal: wrapped.seal, token: tokenHex } : wrapped;
+}
+
+/**
+ * Add a biometric wrap using a caller-supplied token. A single token can wrap several sealing
+ * wallets (the wrap key is HKDF(token) with a fixed domain salt, so every envelope gets the same
+ * key but its own IV). INTERNAL: not exported from index.ts — callers get tokens from
+ * enableBiometric only.
+ */
+export async function enableBiometricWithToken(
+  seal: VaultSeal,
+  passcode: string,
+  tokenHex: string,
+  deviceSecret?: Uint8Array,
+): Promise<{ ok: true; seal: VaultSeal } | { ok: false; error: VaultUnsealError }> {
+  const token = parseHex(tokenHex, BIOMETRIC_TOKEN_BYTES);
+  if (token === null) return { ok: false, error: 'invalid_biometric_token' };
   const parsed = parseSeal(seal);
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const p = parsed.seal;
@@ -755,7 +776,6 @@ export async function enableBiometric(
       return { ok: false, error: 'wrong_passcode' };
     }
 
-    const token = globalThis.crypto.getRandomValues(new Uint8Array(BIOMETRIC_TOKEN_BYTES));
     bioKey = biometricWrapKeyFromToken(token, p.hasDeviceSecret ? deviceSecret : undefined);
     const wrapEnc = await aesEncrypt(
       vaultKey,
@@ -765,7 +785,6 @@ export async function enableBiometric(
     return {
       ok: true,
       seal: { ...seal, biometricWrappedKey: bytesToHex(concat(wrapEnc.iv, wrapEnc.ciphertext)) },
-      token: bytesToHex(token),
     };
   } finally {
     wrappingKey?.fill(0);

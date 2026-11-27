@@ -3,14 +3,18 @@
  *
  * Security precedence is unchanged: the phrase lives only in the module-scoped holder. It is
  * written into the DOM imperatively after an explicit tap (two numbered columns of pills) and
- * removed when hidden or unmounted. No word or passcode is ever React state, and there is no
- * copy-to-clipboard affordance for the phrase.
+ * removed when hidden or unmounted. No word or passcode is ever React state. An explicit
+ * "Copy phrase" action (next to "Hide phrase") copies the words TAB-separated and arms a
+ * 60-second clipboard clear; the phrase is never auto-copied.
  */
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { t } from '../i18n';
 import { secretHolder } from '../vault/secret-holder';
 import { Button, ErrorText, Field, Notice, PhoneFrame, ScreenShell, Sheet } from './common';
-import { ChevronDownIcon, ChevronRightIcon, CloseIcon, ShieldIcon } from './icons';
+import { ChevronDownIcon, ChevronRightIcon, CloseIcon, CopyIcon, ShieldIcon } from './icons';
+import { InfraBitLogo } from './logo';
+import { copyPhraseToClipboard } from './clipboard';
+import { useToast } from './toast';
 
 type Step = { current: number; total: number };
 
@@ -78,45 +82,31 @@ function pickPositions(count: number, take: number): number[] {
   return positions.slice(0, Math.min(take, count)).sort((a, b) => a - b);
 }
 
+/** Brand mark: the InfraBit logo replaces the rounded monogram emblem. */
 function Emblem({ size = 88 }: { size?: number }) {
+  return <InfraBitLogo size={size} className="shadow-card" />;
+}
+
+/** Recovery-phrase copy control (tab-separated words, one-minute clipboard auto-clear). */
+function CopyPhraseButton() {
+  const toast = useToast();
+  const copy = async (): Promise<void> => {
+    const words = secretHolder.words();
+    if (words.length === 0) return;
+    const copied = await copyPhraseToClipboard(words);
+    toast.show(copied ? t('phrase.copied') : t('phrase.copyFailed'));
+  };
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 88 88"
-      role="img"
-      aria-label="OneZeroWallet emblem"
-      className="drop-shadow-[0_10px_24px_rgba(120,122,20,0.35)]"
-    >
-      <defs>
-        <linearGradient id="ozw-emblem" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--hero-bg)" />
-          <stop offset="100%" stopColor="var(--hero-bg-end)" />
-        </linearGradient>
-      </defs>
-      <circle cx="44" cy="44" r="44" fill="url(#ozw-emblem)" />
-      <text
-        x="44"
-        y="55"
-        textAnchor="middle"
-        fontSize="30"
-        fontWeight="800"
-        letterSpacing="-1"
-        fill="var(--hero-ink)"
-      >
-        10
-      </text>
-      <path
-        d="M70 18l1.6 4.4L76 24l-4.4 1.6L70 30l-1.6-4.4L64 24l4.4-1.6L70 18Z"
-        fill="var(--hero-ink)"
-        opacity="0.85"
-      />
-      <path
-        d="M17 24l1.1 3L21 28l-2.9 1L17 32l-1.1-3L13 28l2.9-1L17 24Z"
-        fill="var(--hero-ink)"
-        opacity="0.6"
-      />
-    </svg>
+    <Button variant="secondary" onClick={() => void copy()} data-testid="copy-phrase">
+      <CopyIcon size={15} />
+      {t('phrase.copy')}
+    </Button>
+  );
+}
+
+function PhraseCopyReminder() {
+  return (
+    <p className="px-1 text-[11.5px] leading-relaxed text-ink-muted">{t('phrase.copyHint')}</p>
   );
 }
 
@@ -314,14 +304,20 @@ export function CreatePhraseScreen({
       </div>
       {error ? <ErrorText>{error}</ErrorText> : null}
       {revealed ? (
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setRevealed(false);
-          }}
-        >
-          {t('phrase.hide')}
-        </Button>
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRevealed(false);
+              }}
+            >
+              {t('phrase.hide')}
+            </Button>
+            <CopyPhraseButton />
+          </div>
+          <PhraseCopyReminder />
+        </>
       ) : (
         <Button
           onClick={() => {
@@ -404,14 +400,20 @@ export function PhraseScreen({
       </div>
       {empty ? <ErrorText>{t('settings.error')}</ErrorText> : null}
       {revealed ? (
-        <Button
-          variant="secondary"
-          onClick={() => {
-            setRevealed(false);
-          }}
-        >
-          {t('phrase.hide')}
-        </Button>
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setRevealed(false);
+              }}
+            >
+              {t('phrase.hide')}
+            </Button>
+            <CopyPhraseButton />
+          </div>
+          <PhraseCopyReminder />
+        </>
       ) : (
         <Button
           onClick={() => {

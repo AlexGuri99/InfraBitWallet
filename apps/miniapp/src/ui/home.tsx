@@ -6,7 +6,6 @@
  * upstream failure shows Offline + Retry — never a fabricated $0.00.
  */
 import { useMemo, useState } from 'react';
-import type { PublicAccountInfo } from '@onezerowallet/crypto-vault';
 import {
   formatChange,
   formatDecimalShort,
@@ -48,6 +47,7 @@ export interface HomeActions {
   onOpenEarn: () => void;
   onOpenCoin: (asset: AssetView) => void;
   onOpenTx: (item: TonActivityItem) => void;
+  onOpenWallets: () => void;
   onLock: () => void;
   onTabChange: (tab: WalletTab) => void;
 }
@@ -195,25 +195,25 @@ function AssetRowView({
 }
 
 export interface WalletHomeProps extends HomeActions {
-  info: PublicAccountInfo | null;
   tonAddress: string;
+  /** Label of the active wallet (shown in the top-left selector). */
+  walletLabel: string;
   portfolio: Load<TonPortfolio>;
   activity: Load<TonActivityItem[]>;
   pending: TonActivityItem | null;
   assets: AssetView[];
   onRefresh: () => void;
-  onOpenSettings: () => void;
 }
 
 export function WalletHome({
-  info,
   tonAddress,
+  walletLabel,
   portfolio,
   activity,
   pending,
   assets,
   onRefresh,
-  onOpenSettings,
+  onOpenWallets,
   onOpenDeposit,
   onOpenSend,
   onOpenTrade,
@@ -225,7 +225,7 @@ export function WalletHome({
   const fullscreen = useFullscreenControl();
   const toast = useToast();
   const [currency, setCurrency] = useState<'USD' | 'TON'>('USD');
-  const [sheet, setSheet] = useState<'wallet' | 'qr' | null>(null);
+  const [sheet, setSheet] = useState<'qr' | null>(null);
   const [copied, setCopied] = useState(false);
 
   const portfolioReady = portfolio.state === 'ready' ? portfolio.value : null;
@@ -285,13 +285,12 @@ export function WalletHome({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <button
             type="button"
-            onClick={() => {
-              setSheet('wallet');
-            }}
+            onClick={onOpenWallets}
+            data-testid="wallet-switcher"
             className="pressable flex min-w-0 items-center gap-1.5 rounded-full bg-surface px-3 py-2 text-[14px] font-bold tracking-[-0.01em] text-ink shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
-            aria-label={`${t('app.name')} wallet switcher`}
+            aria-label={`${t('home.wallets')} — ${walletLabel}`}
           >
-            <span className="truncate">{t('app.name')}</span>
+            <span className="truncate">{walletLabel}</span>
             <ChevronDownIcon size={15} className="shrink-0 text-ink-2" />
           </button>
           <span className="shrink-0 rounded-full bg-positive-bg px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.04em] text-positive">
@@ -528,52 +527,6 @@ export function WalletHome({
         {t('home.notice')}
       </p>
 
-      {sheet === 'wallet' ? (
-        <Sheet
-          title={t('home.wallets')}
-          onClose={() => {
-            setSheet(null);
-          }}
-        >
-          <div className="flex items-center gap-3 rounded-[20px] bg-surface-secondary p-3.5">
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-hero text-[12px] font-extrabold text-hero-ink">
-              OZ
-            </span>
-            <span className="flex-1">
-              <span className="block text-[15px] font-semibold text-ink">{t('app.name')}</span>
-              <span className="block text-[12px] text-ink-2">
-                {info ? shortAddress(tonAddress, 6, 4) : '—'}
-              </span>
-            </span>
-            <span className="rounded-full bg-positive-bg px-2 py-1 text-[10px] font-bold uppercase tracking-[0.04em] text-positive">
-              {t('home.testnet')}
-            </span>
-          </div>
-          <SheetRow
-            title="Vault Savings"
-            subtitle="Grow idle balances"
-            badge="Coming soon"
-            disabled
-          />
-          <SheetRow
-            title="+ Add / Import Wallet"
-            subtitle="Another wallet"
-            badge="Coming soon"
-            disabled
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setSheet(null);
-              onOpenSettings();
-            }}
-            className="pressable rounded-full bg-surface-secondary py-3 text-[13px] font-semibold text-ink"
-          >
-            Open settings
-          </button>
-        </Sheet>
-      ) : null}
-
       {sheet === 'qr' ? (
         <Sheet
           title={t('receive.title')}
@@ -603,36 +556,4 @@ export function WalletHome({
 function prefixArrow(change: number | null): string {
   if (change === null) return '';
   return change >= 0 ? '↑' : '↓';
-}
-
-function SheetRow({
-  title,
-  subtitle,
-  badge,
-  disabled = false,
-}: {
-  title: string;
-  subtitle: string;
-  badge: string;
-  disabled?: boolean;
-}) {
-  return (
-    <div
-      aria-disabled={disabled}
-      className={`flex items-center gap-3 rounded-[20px] bg-surface-secondary p-3.5 ${
-        disabled ? 'opacity-60' : ''
-      }`}
-    >
-      <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-elevated text-ink-2">
-        <span className="text-[12px] font-bold">+</span>
-      </span>
-      <span className="flex-1">
-        <span className="block text-[15px] font-semibold text-ink">{title}</span>
-        <span className="block text-[12px] text-ink-2">{subtitle}</span>
-      </span>
-      <span className="rounded-full bg-surface-elevated px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
-        {badge}
-      </span>
-    </div>
-  );
 }

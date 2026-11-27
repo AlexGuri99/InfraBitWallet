@@ -78,7 +78,20 @@ describe('A2: the session object does not expose secrets', () => {
   it('exposes exactly the documented functions and nothing else', async () => {
     const s = await open();
     expect(Object.keys(s).sort()).toEqual(
-      ['getPublicInfo', 'lock', 'reauthenticate', 'revealMnemonic', 'signDigest'].sort(),
+      [
+        'addWallet',
+        'getActiveWalletId',
+        'getPublicInfo',
+        'listWallets',
+        'lock',
+        'reauthenticate',
+        'removeWallet',
+        'renameWallet',
+        'revealMnemonic',
+        'signDigest',
+        'switchWallet',
+        'walletMatchesPhrase',
+      ].sort(),
     );
     for (const v of Object.values(s)) expect(typeof v).toBe('function');
     expect(Object.isFrozen(s)).toBe(true);

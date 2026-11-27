@@ -285,7 +285,8 @@ test.describe('onboarding and unlock', () => {
       return { keys: keys.map(String), values: JSON.stringify(values) };
     });
 
-    expect(dump.keys.sort()).toEqual(['vault_seal']);
+    // One key: the wallet set (labels + one sealed envelope per wallet). No legacy `vault_seal`.
+    expect(dump.keys.sort()).toEqual(['vault_wallets']);
     expect(dump.values).not.toContain(words.join(' '));
     expect(dump.values).toContain('passcodeWrappedKey');
     expect(dump.values).toContain('accountType');
