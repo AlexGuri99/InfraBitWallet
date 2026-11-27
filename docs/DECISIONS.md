@@ -738,3 +738,38 @@ the methods. Now:
   browser Fullscreen API fallback. The toggle remains hidden only when neither path exists.
 - The top-bar button keeps `--app-safe-top` padding and surface/ink tokens in both themes, gains a
   `fullscreen-toggle` test id, and Settings → Preferences now exposes the same action as a row.
+
+---
+
+## Decision: multi-wallet as one wallet set of independent seals; tab-separated phrase copy (P4)
+
+**Storage layout.** A wallet is one existing v5 envelope (`VaultSeal`) plus non-secret metadata
+(`id`, `label`, `accountType`, `createdAt`). All of them live in a single `vault_wallets` record
+`{ version, activeId, wallets[] }`, validated with zod before any crypto runs. IndexedDB still
+holds **ciphertext only** — no plaintext phrase, seed, key or vault key. A pre-existing
+single-wallet `vault_seal` is wrapped into slot 1 unchanged (same salt, same wrapped key) and the
+legacy key is deleted, so existing vaults unlock with the same passcode and no re-encryption.
+
+**Why not one master seal holding every phrase.** A bundled payload would either change the seal
+format (v6) and its AAD, or hold several seeds under one vault key. Reusing one envelope per
+wallet keeps the audited unseal path, per-wallet salts and the existing tamper/auth checks
+untouched. The cost is one Argon2id derivation per wallet at unlock (default: one per wallet) —
+accepted for ≤10 wallets, documented here, and switch-free afterwards because every wallet is
+opened by the same passcode at unlock time. This is why switching does not prompt for a PIN.
+
+**Passcode invariant.** Every wallet is sealed under the same passcode; changing it re-seals all
+envelopes. Adding a wallet verifies the current PIN against the active envelope and seals the new
+one with it. Removing a wallet requires retyping **that wallet's** recovery phrase; the comparison
+happens inside the session closure (`walletMatchesPhrase`), never in React. The last wallet cannot
+be removed (use Wipe).
+
+**Biometrics.** One biometric token wraps every envelope (same HKDF token key, per-envelope IV),
+so biometric unlock opens the whole set. Adding or removing a wallet drops all wraps because the
+vault deliberately never stores the token; the UI turns biometrics off and asks the user to
+re-enable them.
+
+**Phrase copy exception.** DESIGN.md previously forbade copying the phrase. The owner asked for
+an explicit button: it copies `words.join('\t')` only after the user reveals the phrase, shows
+`Copied`, clears the clipboard after 60 seconds when the browser permits a programmatic write, and
+falls back to `execCommand('copy')` in webviews without the async Clipboard API. The phrase stays
+in the module holder (never React state) and no copy ever happens automatically.

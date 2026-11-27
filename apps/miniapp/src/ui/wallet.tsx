@@ -14,6 +14,7 @@ import { t } from '../i18n';
 import { secretHolder } from '../vault/secret-holder';
 import { useFullscreenControl } from '../telegram/fullscreen';
 import { Button, Card, ErrorText, Field, Notice, PhoneFrame, Sheet } from './common';
+import { InfraBitLogo } from './logo';
 import { AUTO_LOCK_KEY, readPreference, usePreferences } from './preferences';
 import { useToast } from './toast';
 import {
@@ -150,9 +151,7 @@ export function UnlockScreen({
     <PhoneFrame>
       <main className="flex flex-1 flex-col justify-center gap-5 px-6 pb-10">
         <div className="flex flex-col items-center gap-3 text-center">
-          <span className="flex h-20 w-20 items-center justify-center rounded-full bg-hero shadow-hero">
-            <span className="text-[26px] font-extrabold tracking-[-0.03em] text-hero-ink">IB</span>
-          </span>
+          <InfraBitLogo size={80} className="shadow-hero" />
           <div>
             <h1 className="text-[22px] font-extrabold tracking-[-0.02em] text-ink">
               {t('unlock.title')}
@@ -209,6 +208,9 @@ export interface SettingsTabProps {
   info: PublicAccountInfo | null;
   tonAddress: string;
   balanceUsd: number | null;
+  /** Label of the active wallet. */
+  walletLabel: string;
+  onManageWallets: () => void;
   onLock: () => void;
   onReveal: () => void;
   onTestBackup: () => void;
@@ -221,6 +223,8 @@ export function SettingsTab({
   info,
   tonAddress,
   balanceUsd,
+  walletLabel,
+  onManageWallets,
   onLock,
   onReveal,
   onTestBackup,
@@ -411,10 +415,8 @@ export function SettingsTab({
         <h1 className="text-[22px] font-extrabold tracking-[-0.02em] text-ink">Settings</h1>
 
         <section className="flex flex-col items-center gap-2 rounded-[24px] bg-surface px-5 py-5 text-center shadow-card">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-hero text-[20px] font-extrabold tracking-[-0.02em] text-hero-ink shadow-hero">
-            IB
-          </span>
-          <p className="text-[17px] font-bold tracking-[-0.01em] text-ink">{t('app.name')}</p>
+          <InfraBitLogo size={64} className="shadow-hero" />
+          <p className="text-[17px] font-bold tracking-[-0.01em] text-ink">{walletLabel}</p>
           <p className="tabular text-[13px] font-medium text-ink-2">
             {guard(balanceUsd === null ? '—' : formatUsd(balanceUsd))}
           </p>
@@ -433,15 +435,14 @@ export function SettingsTab({
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => {
-              comingSoon('Add / Import Wallet');
-            }}
-            className="pressable flex items-center gap-2 rounded-[20px] bg-surface px-3.5 py-3 text-left shadow-card"
+            onClick={onManageWallets}
+            data-testid="manage-wallets"
+            className="pressable flex items-center gap-2 rounded-[20px] bg-surface px-3.5 py-3 text-left shadow-card focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-link)]"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface-secondary text-[16px] font-bold text-ink">
-              +
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-surface-secondary text-ink">
+              <LayersIcon size={16} />
             </span>
-            <span className="text-[12.5px] font-semibold text-ink">Add / Import</span>
+            <span className="text-[12.5px] font-semibold text-ink">{t('home.wallets')}</span>
           </button>
           <button
             type="button"
@@ -567,13 +568,6 @@ export function SettingsTab({
             icon={<LayersIcon size={15} />}
             iconTone="bg-swap-bg text-swap"
             title="Assets & Activity"
-            badge="Coming soon"
-            disabled
-          />
-          <SettingsRow
-            icon={<GridIcon size={15} />}
-            iconTone="bg-positive-bg text-positive"
-            title="Subwallets"
             badge="Coming soon"
             disabled
           />

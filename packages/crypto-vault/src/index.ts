@@ -41,6 +41,8 @@ export type {
 export {
   unlockSession,
   unlockSessionWithBiometric,
+  unlockWalletSet,
+  unlockWalletSetWithBiometric,
   lockSession,
   touchSession,
   getSession,
@@ -55,6 +57,8 @@ export type {
   RevealResult,
   PublicAccountInfo,
   SigningRequest,
+  WalletSessionEntry,
+  WalletSummary,
 } from './session';
 
 export {
@@ -91,4 +95,10 @@ export type { SaveSealResult, LoadSealResult, MigrateStoredResult } from './seal
 export { isValidDeviceSecretHex } from './device-secret';
 
 export { VaultManager } from './vault-manager';
-export type { VaultManagerOptions, CreateWalletResult } from './vault-manager';
+export type {
+  VaultManagerOptions,
+  CreateWalletResult,
+  AddWalletOptions,
+  AddWalletResult,
+  RemoveWalletResult,
+} from './vault-manager';

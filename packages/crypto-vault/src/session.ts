@@ -33,6 +33,14 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import { unsealVault, unlockWithBiometric } from './vault';
 import type { VaultSeal, VaultUnsealError } from './vault';
 import { isBackoffActive, recordFailedAttempt, resetBackoff } from './backoff';
+import {
+  mnemonicToSeed,
+  normalizeMnemonic,
+  tonNativeMnemonicToSeed,
+  validateMnemonicPhrase,
+  validateTonMnemonicPhrase,
+} from './mnemonic';
+import { MAX_WALLETS } from './wallets';
 
 // ---------------------------------------------------------------------------
 // Session types
@@ -95,6 +103,24 @@ export interface SigningRequest {
   summary: string;
 }
 
+/** One wallet handed to an unlock call. Contains only the sealed envelope and public metadata. */
+export interface WalletSessionEntry {
+  id: string;
+  label: string;
+  accountType: AccountType;
+  seal: VaultSeal;
+}
+
+/** Public wallet summary for the switcher. Never contains a phrase, seed or key. */
+export interface WalletSummary {
+  id: string;
+  label: string;
+  accountType: AccountType;
+  active: boolean;
+  /** Wallet V5R1 testnet non-bounceable address (what the UI displays). */
+  tonAddress: string;
+}
+
 export interface VaultSession {
   getPublicInfo(accountIndex?: number): PublicAccountInfo | null;
   /** Ed25519 (TON, 64-byte signature) or recoverable secp256k1 (TRON/EVM, r||s||recovery = 65 bytes). */
@@ -103,6 +129,20 @@ export interface VaultSession {
   reauthenticate(passcode: string): Promise<ReauthResult>;
   /** Returns the phrase once per successful reauthenticate(), then clears the window. */
   revealMnemonic(): RevealResult;
+  /** Public summaries of every loaded wallet, in storage order. */
+  listWallets(): WalletSummary[];
+  /** Id of the wallet whose keys sign and whose address the UI shows. */
+  getActiveWalletId(): string;
+  /** Switch the active wallet. False when locked or unknown (all loaded wallets are switchable). */
+  switchWallet(id: string): boolean;
+  /** Relabel a wallet in memory. Persisting the label is the manager's job. */
+  renameWallet(id: string, label: string): void;
+  /** Add an already-opened wallet to the session. False when locked, duplicate or over the cap. */
+  addWallet(entry: WalletSessionEntry, seed: Uint8Array): boolean;
+  /** Zero and drop a wallet. Returns the new active id, or null when none remain. */
+  removeWallet(id: string): string | null;
+  /** True when `phrase` regenerates this wallet's seed (used to confirm removal). */
+  walletMatchesPhrase(id: string, phrase: string): Promise<boolean>;
   lock(): void;
 }
 
@@ -185,6 +225,7 @@ async function loadDeviceSecret(
 /** Delete everything the vault persists. Called only when the user (or a wipe threshold) asks. */
 export async function wipeStoredVault(storage: StorageAdapter): Promise<void> {
   await storage.delete(STORAGE_KEYS.SEAL);
+  await storage.delete(STORAGE_KEYS.WALLETS);
   await storage.delete(STORAGE_KEYS.DEVICE_SECRET);
   await resetBackoff(storage);
 }
@@ -234,9 +275,24 @@ function publicInfoFor(
   return info;
 }
 
+interface LoadedWallet extends WalletSessionEntry {
+  seed: Uint8Array;
+}
+
+function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return diff === 0;
+}
+
+function normalizeLabel(label: string): string {
+  return label.trim().slice(0, 40);
+}
+
 function createSession(
-  seed: Uint8Array,
-  seal: VaultSeal,
+  wallets: LoadedWallet[],
+  activeId: string,
   storage: StorageAdapter,
   reauthWindowMs: number,
   wipeAfterFailures: number,
@@ -245,15 +301,31 @@ function createSession(
   // A function call (not a property read) so the type checker does not narrow the flag across awaits.
   const isLocked = (): boolean => state.locked;
   let revealable: { mnemonic: string; expiresAt: number } | null = null;
-  const publicCache = new Map<number, PublicAccountInfo>();
+  const publicCache = new Map<string, PublicAccountInfo>();
+  let activeWalletId = activeId;
 
   const validAccount = (i: unknown): i is number =>
     typeof i === 'number' && Number.isInteger(i) && i >= 0 && i <= MAX_ACCOUNT_INDEX;
 
+  const findWallet = (id: string): LoadedWallet | undefined =>
+    wallets.find((wallet) => wallet.id === id);
+  const activeWallet = (): LoadedWallet | undefined => findWallet(activeWalletId);
+
+  const infoFor = (wallet: LoadedWallet, accountIndex: number): PublicAccountInfo => {
+    const key = `${wallet.id}:${String(accountIndex)}`;
+    let info = publicCache.get(key);
+    if (!info) {
+      info = publicInfoFor(wallet.seed, accountIndex, wallet.accountType);
+      publicCache.set(key, info);
+    }
+    return info;
+  };
+
   const lock = (): void => {
     if (state.locked) return;
     state.locked = true;
-    seed.fill(0);
+    for (const wallet of wallets) wallet.seed.fill(0);
+    wallets = [];
     revealable = null;
     publicCache.clear();
     if (activeLock === lock) {
@@ -280,25 +352,24 @@ function createSession(
   const session: VaultSession = {
     getPublicInfo(accountIndex = 0) {
       if (isLocked() || !validAccount(accountIndex)) return null;
-      if (seal.accountType === 'ton-native-only' && accountIndex !== 0) return null;
-      let info = publicCache.get(accountIndex);
-      if (!info) {
-        info = publicInfoFor(seed, accountIndex, seal.accountType);
-        publicCache.set(accountIndex, info);
-      }
-      return structuredClone(info);
+      const wallet = activeWallet();
+      if (!wallet) return null;
+      if (wallet.accountType === 'ton-native-only' && accountIndex !== 0) return null;
+      return structuredClone(infoFor(wallet, accountIndex));
     },
 
     signDigest(chain, accountIndex, digest) {
       if (isLocked()) return { ok: false, error: 'locked' };
+      const wallet = activeWallet();
+      if (!wallet) return { ok: false, error: 'locked' };
       if (!(CHAINS as readonly string[]).includes(chain)) {
         return { ok: false, error: 'invalid_chain' };
       }
-      if (seal.accountType === 'ton-native-only' && chain !== 'ton') {
+      if (wallet.accountType === 'ton-native-only' && chain !== 'ton') {
         return { ok: false, error: 'invalid_chain' };
       }
       if (!validAccount(accountIndex)) return { ok: false, error: 'invalid_account' };
-      if (seal.accountType === 'ton-native-only' && accountIndex !== 0) {
+      if (wallet.accountType === 'ton-native-only' && accountIndex !== 0) {
         return { ok: false, error: 'invalid_account' };
       }
       if (!(digest instanceof Uint8Array) || digest.length !== 32) {
@@ -307,10 +378,10 @@ function createSession(
       touchSession();
       const key =
         chain === 'ton'
-          ? deriveTonKey(seed, accountIndex, seal.accountType)
+          ? deriveTonKey(wallet.seed, accountIndex, wallet.accountType)
           : chain === 'tron'
-            ? deriveTronKey(seed, accountIndex)
-            : deriveEvmKey(seed, accountIndex);
+            ? deriveTronKey(wallet.seed, accountIndex)
+            : deriveEvmKey(wallet.seed, accountIndex);
       try {
         if (chain === 'ton') {
           return { ok: true, signature: ed25519.sign(digest, key.privateKey) };
@@ -327,11 +398,13 @@ function createSession(
 
     async reauthenticate(passcode) {
       if (isLocked()) return { ok: false, error: 'locked' };
+      const wallet = activeWallet();
+      if (!wallet) return { ok: false, error: 'locked' };
       revealable = null;
       const remaining = await isBackoffActive(storage);
       if (remaining > 0) return { ok: false, error: 'rate_limited', retryAfterMs: remaining };
-      const deviceSecret = await loadDeviceSecret(seal, storage);
-      const result = await unsealVault(seal, passcode, deviceSecret);
+      const deviceSecret = await loadDeviceSecret(wallet.seal, storage);
+      const result = await unsealVault(wallet.seal, passcode, deviceSecret);
       if (isLocked()) {
         if (result.success) result.seed.fill(0);
         return { ok: false, error: 'locked' };
@@ -359,6 +432,77 @@ function createSession(
       return { ok: true, mnemonic: window.mnemonic };
     },
 
+    listWallets() {
+      if (isLocked()) return [];
+      return wallets.map((wallet) => ({
+        id: wallet.id,
+        label: wallet.label,
+        accountType: wallet.accountType,
+        active: wallet.id === activeWalletId,
+        tonAddress: infoFor(wallet, 0).ton.addressTestnetNonBounceable,
+      }));
+    },
+
+    getActiveWalletId() {
+      return isLocked() ? '' : activeWalletId;
+    },
+
+    switchWallet(id) {
+      if (isLocked() || !findWallet(id)) return false;
+      activeWalletId = id;
+      touchSession();
+      return true;
+    },
+
+    renameWallet(id, label) {
+      if (isLocked()) return;
+      const wallet = findWallet(id);
+      const next = normalizeLabel(label);
+      if (!wallet || next === '') return;
+      wallet.label = next;
+    },
+
+    addWallet(entry, seed) {
+      if (isLocked() || findWallet(entry.id) || wallets.length >= MAX_WALLETS) return false;
+      if (!(seed instanceof Uint8Array) || seed.length !== 64) return false;
+      wallets.push({ ...entry, label: normalizeLabel(entry.label), seed });
+      return true;
+    },
+
+    removeWallet(id) {
+      if (isLocked()) return null;
+      const index = wallets.findIndex((wallet) => wallet.id === id);
+      if (index === -1) return activeWalletId;
+      const [removed] = wallets.splice(index, 1);
+      removed?.seed.fill(0);
+      revealable = null;
+      publicCache.clear();
+      if (activeWalletId === id) {
+        activeWalletId = wallets[0]?.id ?? '';
+      }
+      return activeWalletId === '' ? null : activeWalletId;
+    },
+
+    async walletMatchesPhrase(id, phrase) {
+      if (isLocked()) return false;
+      const wallet = findWallet(id);
+      if (!wallet) return false;
+      const normalized = normalizeMnemonic(phrase);
+      let derived: Uint8Array;
+      if (wallet.accountType === 'ton-native-only') {
+        if (!(await validateTonMnemonicPhrase(normalized))) return false;
+        derived = await tonNativeMnemonicToSeed(normalized);
+      } else {
+        if (!validateMnemonicPhrase(normalized).valid) return false;
+        derived = mnemonicToSeed(normalized);
+      }
+      try {
+        return constantTimeEqual(derived, wallet.seed);
+      } finally {
+        derived.fill(0);
+      }
+    },
+
     lock,
   };
 
@@ -368,15 +512,15 @@ function createSession(
 
 /** Guard the active session so re-auth cannot proceed across a lock. */
 function openSession(
-  seed: Uint8Array,
-  seal: VaultSeal,
+  wallets: LoadedWallet[],
+  activeId: string,
   storage: StorageAdapter,
   options: UnlockOptions,
 ): UnlockResult {
   lockSession();
   const session = createSession(
-    seed,
-    seal,
+    wallets,
+    activeId,
     storage,
     options.reauthWindowMs ?? DEFAULT_REAUTH_WINDOW_MS,
     options.wipeAfterFailures ?? 0,
@@ -397,24 +541,67 @@ export async function unlockSession(
   storage: StorageAdapter | undefined,
   options: UnlockOptions = {},
 ): Promise<UnlockResult> {
+  return unlockWalletSet(
+    [{ id: 'default', label: 'Wallet 1', accountType: seal.accountType, seal }],
+    'default',
+    passcode,
+    storage,
+    options,
+  );
+}
+
+/**
+ * Unlock every wallet in a set with one passcode. Each envelope is opened independently (its own
+ * Argon2id salt), so a wrong passcode costs N derivations once and counts as ONE failed attempt.
+ * Any non-passcode failure (tampered data, missing device secret) fails the whole unlock closed.
+ */
+export async function unlockWalletSet(
+  entries: readonly WalletSessionEntry[],
+  activeId: string,
+  passcode: string,
+  storage: StorageAdapter | undefined,
+  options: UnlockOptions = {},
+): Promise<UnlockResult> {
   if (!storage) return { success: false, error: 'storage_required' }; // fail closed
+  if (entries.length === 0) return { success: false, error: 'malformed_seal' };
   const remaining = await isBackoffActive(storage);
   if (remaining > 0) return { success: false, error: 'rate_limited', retryAfterMs: remaining };
 
-  const deviceSecret = await loadDeviceSecret(seal, storage);
-  const result = await unsealVault(seal, passcode, deviceSecret);
-  if (!result.success) {
-    if (result.error === 'wrong_passcode') {
-      const { count } = await recordFailedAttempt(storage);
-      if ((options.wipeAfterFailures ?? 0) > 0 && count >= (options.wipeAfterFailures ?? 0)) {
-        await wipeStoredVault(storage);
-        return { success: false, error: 'wiped' };
+  const opened: LoadedWallet[] = [];
+  const fail = (error: VaultUnsealError): UnlockResult => {
+    for (const wallet of opened) wallet.seed.fill(0);
+    return { success: false, error };
+  };
+
+  for (const entry of entries) {
+    const deviceSecret = await loadDeviceSecret(entry.seal, storage);
+    const result = await unsealVault(entry.seal, passcode, deviceSecret);
+    if (!result.success) {
+      if (result.error === 'wrong_passcode') {
+        const { count } = await recordFailedAttempt(storage);
+        for (const wallet of opened) wallet.seed.fill(0);
+        if ((options.wipeAfterFailures ?? 0) > 0 && count >= (options.wipeAfterFailures ?? 0)) {
+          await wipeStoredVault(storage);
+          return { success: false, error: 'wiped' };
+        }
+        return { success: false, error: 'wrong_passcode' };
       }
+      return fail(result.error);
     }
-    return { success: false, error: result.error };
+    opened.push({
+      id: entry.id,
+      label: entry.label,
+      accountType: entry.accountType,
+      seal: entry.seal,
+      seed: result.seed,
+    });
   }
+
   await resetBackoff(storage);
-  return openSession(result.seed, seal, storage, options);
+  const active = opened.some((wallet) => wallet.id === activeId)
+    ? activeId
+    : (opened[0]?.id ?? activeId);
+  return openSession(opened, active, storage, options);
 }
 
 /**
@@ -434,7 +621,65 @@ export async function unlockSessionWithBiometric(
   const result = await unlockWithBiometric(seal, token, deviceSecret);
   if (!result.success) return { success: false, error: result.error };
   await resetBackoff(storage);
-  return openSession(result.seed, seal, storage, options);
+  return openSession(
+    [
+      {
+        id: 'default',
+        label: 'Wallet 1',
+        accountType: seal.accountType,
+        seal,
+        seed: result.seed,
+      },
+    ],
+    'default',
+    storage,
+    options,
+  );
+}
+
+/**
+ * Biometric unlock for a wallet set. All-or-nothing: every envelope must carry a biometric wrap
+ * made with the same token (the manager wraps all wallets with one token when biometrics are
+ * enabled, and drops the wraps when the set changes).
+ */
+export async function unlockWalletSetWithBiometric(
+  entries: readonly WalletSessionEntry[],
+  activeId: string,
+  token: string,
+  storage: StorageAdapter | undefined,
+  options: UnlockOptions = {},
+): Promise<UnlockResult> {
+  if (!storage) return { success: false, error: 'storage_required' };
+  if (entries.length === 0) return { success: false, error: 'malformed_seal' };
+  for (const entry of entries) {
+    if (entry.seal.biometricWrappedKey === undefined) {
+      return { success: false, error: 'biometric_not_enabled' };
+    }
+  }
+  const remaining = await isBackoffActive(storage);
+  if (remaining > 0) return { success: false, error: 'rate_limited', retryAfterMs: remaining };
+
+  const opened: LoadedWallet[] = [];
+  for (const entry of entries) {
+    const deviceSecret = await loadDeviceSecret(entry.seal, storage);
+    const result = await unlockWithBiometric(entry.seal, token, deviceSecret);
+    if (!result.success) {
+      for (const wallet of opened) wallet.seed.fill(0);
+      return { success: false, error: result.error };
+    }
+    opened.push({
+      id: entry.id,
+      label: entry.label,
+      accountType: entry.accountType,
+      seal: entry.seal,
+      seed: result.seed,
+    });
+  }
+  await resetBackoff(storage);
+  const active = opened.some((wallet) => wallet.id === activeId)
+    ? activeId
+    : (opened[0]?.id ?? activeId);
+  return openSession(opened, active, storage, options);
 }
 
 /** Lock the active session (zero-fills the seed, clears the re-auth window). */

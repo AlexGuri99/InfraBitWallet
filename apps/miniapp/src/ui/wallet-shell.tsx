@@ -28,6 +28,7 @@ import { TxDetailScreen } from './tx-detail';
 import { MarketScreen } from './market';
 import { AssistantScreen } from './assistant';
 import { SettingsTab } from './wallet';
+import { WalletManagerScreen } from './wallets';
 import type { TonReadApi, TonStakeApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import type { BiometryApi } from '../adapters/biometry';
 import { useToast } from './toast';
@@ -38,6 +39,7 @@ export const UI_TON_NETWORK = 'testnet' as const;
 
 type Route =
   | { kind: 'root' }
+  | { kind: 'wallets' }
   | { kind: 'deposit' }
   | { kind: 'send'; prefill: SendPrefill }
   | { kind: 'trade' }
@@ -107,9 +109,12 @@ function WalletShellContent({
   onTestBackup: () => void;
   onWiped: () => void;
 }) {
+  const [, setWalletVersion] = useState(0);
   const session = manager.getSession();
   const info = session?.getPublicInfo(0) ?? null;
   const tonAddress = info?.ton.addressTestnetNonBounceable ?? '';
+  const activeWalletLabel =
+    session?.listWallets().find((wallet) => wallet.active)?.label ?? t('home.wallets');
   const toast = useToast();
   const [route, setRoute] = useState<Route>({ kind: 'root' });
   const [portfolio, setPortfolio] = useState<Load<TonPortfolio>>({ state: 'loading' });
@@ -219,6 +224,20 @@ function WalletShellContent({
         (item.standard === 'native' ? asset.standard === 'native' : asset.standard === 'jetton'),
     );
 
+  if (route.kind === 'wallets') {
+    return (
+      <WalletManagerScreen
+        manager={manager}
+        biometry={biometry}
+        onBack={() => {
+          setRoute({ kind: 'root' });
+        }}
+        onChanged={() => {
+          setWalletVersion((value) => value + 1);
+        }}
+      />
+    );
+  }
   if (route.kind === 'deposit' && info) {
     return (
       <DepositScreen
@@ -315,8 +334,8 @@ function WalletShellContent({
         <PhoneFrame>
           <main className="flex-1">
             <WalletHome
-              info={info}
               tonAddress={tonAddress}
+              walletLabel={activeWalletLabel}
               portfolio={portfolio}
               activity={activity}
               pending={pending}
@@ -324,8 +343,8 @@ function WalletShellContent({
               onRefresh={() => {
                 void refresh();
               }}
-              onOpenSettings={() => {
-                onTabChange('settings');
+              onOpenWallets={() => {
+                setRoute({ kind: 'wallets' });
               }}
               onOpenDeposit={() => {
                 setRoute({ kind: 'deposit' });
@@ -361,6 +380,10 @@ function WalletShellContent({
           info={info}
           tonAddress={tonAddress}
           balanceUsd={portfolioReady?.totalUsd ?? null}
+          walletLabel={activeWalletLabel}
+          onManageWallets={() => {
+            setRoute({ kind: 'wallets' });
+          }}
           onLock={onLock}
           onReveal={onRevealPhrase}
           onTestBackup={onTestBackup}

@@ -92,6 +92,8 @@ describe('A3: public API surface', () => {
     'touchSession',
     'unlockSession',
     'unlockSessionWithBiometric',
+    'unlockWalletSet',
+    'unlockWalletSetWithBiometric',
     'validateMnemonicPhrase',
     'validateTonAddress',
     'validateTonMnemonicPhrase',

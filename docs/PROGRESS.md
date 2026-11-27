@@ -418,3 +418,26 @@ Branch `chore/infrabitwallet-and-fullscreen`.
 | IndexedDB `onezerowallet` → `infrabitwallet` (Testnet data not carried)      | DONE   | `packages/crypto-vault/src/indexeddb.ts`, e2e                      |
 | Fullscreen: retry late WebApp injection + late method attach + Settings row  | DONE   | `TelegramProvider.tsx`, `telegram/fullscreen.tsx`, `ui/wallet.tsx` |
 | Component tests for late injection, late methods, Settings toggle            | DONE   | `test/ui-fullscreen.test.tsx`                                      |
+
+---
+
+### P4: InfraBit logo, phrase copy and multi-wallet (2026-11-27)
+
+Branch `feat/logo-copy-multiwallet`.
+
+| Area                                                                                                                                          | Status | Evidence                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| InfraBit logo replaces the rounded monogram (welcome, unlock, settings card); favicon/apple-touch-icon                                        | DONE   | `ui/logo.tsx`, `src/assets/infrabit-logo-512.png`, `public/favicon.png`, `index.html` |
+| "Copy phrase" beside "Hide phrase" on both phrase screens: tab-separated words, `Copied` toast, 60s clipboard clear, security reminder        | DONE   | `ui/clipboard.ts`, `ui/onboarding.tsx`, `ui-wallets.test.tsx`                         |
+| Top-left pill renamed from the app name to the active wallet label; opens **My Wallets**                                                      | DONE   | `ui/home.tsx`, `ui/wallet-shell.tsx`                                                  |
+| Settings: logo + active wallet label card, **My Wallets** entry; `COMING SOON` Add/Import removed                                             | DONE   | `ui/wallet.tsx`                                                                       |
+| Multi-wallet storage: one sealed v5 envelope per wallet under `vault_wallets`; legacy `vault_seal` migrated into slot 1 without re-encryption | DONE   | `packages/crypto-vault/src/wallets.ts`, `wallets.test.ts`                             |
+| Create / import (12 & 24 words) / switch / rename / remove a wallet; remove needs that wallet's phrase                                        | DONE   | `VaultManager.addWallet/switchWallet/renameWallet/removeWallet`, `ui/wallets.tsx`     |
+| One unlock opens every wallet (one Argon2id run per wallet) so switching is passcode-free                                                     | DONE   | `unlockWalletSet`, `wallets.test.ts`                                                  |
+| Passcode rotation, biometric enable/disable and wipe cover every wallet                                                                       | DONE   | `VaultManager.changePasscode/enableBiometric/disableBiometric/wipe`                   |
+| Unit + component + Playwright tests for logo, copy and multi-wallet                                                                           | DONE   | `crypto-vault/wallets.test.ts`, `ui-wallets.test.tsx`, `e2e/wallets.spec.ts`          |
+
+**Untested / open:** switching a large wallet set costs one Argon2id derivation per wallet at
+unlock (see DECISIONS.md); adding or removing a wallet drops biometric wraps and the user must
+re-enable biometrics; the copy fallback (`execCommand`) is best-effort and cannot always clear the
+clipboard on browsers that deny programmatic writes.

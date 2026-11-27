@@ -6,7 +6,6 @@ import { VaultManager } from './vault-manager';
 import { InMemoryStorage, STORAGE_KEYS } from './storage';
 import { mnemonicToSeed } from './mnemonic';
 import { deriveEvmKey } from './derivation';
-import { loadSeal } from './seal-store';
 import { lockSession } from './session';
 import { MNEMONIC_12_HARDHAT, MNEMONIC_24_ABANDON } from './fixtures/mnemonics';
 
@@ -93,8 +92,11 @@ describe('A9: device secret placement and loss', () => {
     expect(created.ok).toBe(true);
     expect(await secure.get(STORAGE_KEYS.DEVICE_SECRET)).toMatch(/^[0-9a-f]{64}$/);
     expect(await bulk.get(STORAGE_KEYS.DEVICE_SECRET)).toBeNull();
-    const sealed = await loadSeal(bulk);
-    expect(sealed.ok && sealed.seal.hasDeviceSecret).toBe(true);
+    const stored = JSON.parse((await bulk.get(STORAGE_KEYS.WALLETS)) ?? '{}') as {
+      wallets?: Array<{ seal?: { hasDeviceSecret?: boolean } }>;
+    };
+    expect(stored.wallets?.[0]?.seal?.hasDeviceSecret).toBe(true);
+    expect(await bulk.get(STORAGE_KEYS.SEAL)).toBeNull();
   });
 
   it('cannot open the seal if the device secret is lost; only re-import recovers', async () => {

@@ -85,8 +85,11 @@ export class CompositeStorage implements StorageAdapter {
  * an additional thing to validate and wipe.
  */
 export const STORAGE_KEYS = {
-  /** Sealed vault envelope (ciphertext) in IndexedDB/DeviceStorage. */
+  /** Sealed vault envelope (ciphertext) in IndexedDB/DeviceStorage. Legacy single-wallet slot; */
+  /** migrated into WALLETS on first read. */
   SEAL: 'vault_seal',
+  /** Wallet set: labels + one sealed envelope per wallet (ciphertext only, no key material). */
+  WALLETS: 'vault_wallets',
   /** Device secret (32 bytes, 64 hex chars) in the secure adapter only. */
   DEVICE_SECRET: 'device_secret',
   /** Consecutive failed passcode attempts. */
