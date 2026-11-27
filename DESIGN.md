@@ -1,8 +1,8 @@
-# DESIGN.md — OneZeroWallet (Botanical Citron & Forest Crypto Wallet)
+# DESIGN.md — InfraBitWallet (Botanical Citron & Forest Crypto Wallet)
 
 ## 1. Design Philosophy & Aesthetic Direction
 
-**OneZeroWallet** combines a **soft botanical fintech palette** with the **high-density, list-driven information architecture** of modern mobile crypto wallets.
+**InfraBitWallet** combines a **soft botanical fintech palette** with the **high-density, list-driven information architecture** of modern mobile crypto wallets.
 
 - **Dual-Theme Polarity**:
   - **Mint Light Mode (Default)**: Soft sage-mint canvas (`#DFF2E6`), pure white elevated cards (`#FFFFFF`), high-contrast canary-yellow hero balance surfaces (`#FFF34C`), and deep obsidian ink (`#111814`).
@@ -144,7 +144,7 @@ All secondary screens share a standardized top bar: `< Back` pill button on the 
 
 ### 5.6 Settings & Supporting Tabs
 
-- **Settings Screen**: Centered `64px` **InfraBit logo**, active wallet label + live balance, copyable address, **My Wallets** card, `Portfolio` analytics shell, and grouped settings list:
+- **Settings Screen**: Centered `64px` **InfraBit logo**, active wallet label + live balance (`Wallet 1 · $26,887.09`), copyable address, **My Wallets** card, `Portfolio` analytics shell, and grouped settings list:
   - **Working Items**: **Appearance** (Light/Dark toggle), **Security** (Change PIN, Biometrics toggle, Auto-Lock timer, Reveal Recovery Phrase, Test Backup, Wipe Wallet).
   - **UI Shell Items**: **Assets & Activity**, **Sounds**, **Language** (marked as `"Coming soon"` shells).
 - **My Wallets Screen** (`< Back` header): list of wallets (InfraBit logo, label, truncated testnet address, `Active` pill). Tapping a row switches the active wallet; every row offers **Rename** and **Remove** (remove is hidden for the last wallet). Bottom actions: **Create new wallet** and **Import existing wallet** (12 or 24 words, existing smart-paste grid). Adding requires the current PIN (it seals the new envelope); removing requires retyping that wallet's own recovery phrase. Switching needs no passcode because all wallets are opened by the single unlock.
@@ -153,7 +153,7 @@ All secondary screens share a standardized top bar: `< Back` pill button on the 
 
 ### 5.7 Onboarding, Create Wallet & Import Wallet Flows
 
-- **Onboarding Screen**: The self-hosted **InfraBit logo** (square PNG, `22%` corner radius) replaces the old canary-citron monogram everywhere it appeared (welcome, unlock, settings card). **OneZeroWallet** title, _"More about OneZeroWallet ›"_ self-custody info modal (containing non-custodial risk disclosure & _"We will never ask for your recovery phrase."_), **Create New Wallet** primary pill CTA, and **Import Existing Wallet** bottom sheet trigger.
+- **Onboarding Screen**: The self-hosted **InfraBit logo** (square PNG, `22%` corner radius) replaces the old canary-citron monogram everywhere it appeared (welcome, unlock, settings card). **InfraBitWallet** title, _"More about InfraBitWallet ›"_ self-custody info modal (containing non-custodial risk disclosure & _"We will never ask for your recovery phrase."_), **Create New Wallet** primary pill CTA, and **Import Existing Wallet** bottom sheet trigger.
 - **Create Wallet Flow (2 Steps — Security Precedence)**:
   1. **Recovery Phrase (Step 1 of 2)**: 24-word recovery phrase displayed in a 2-column numbered grid (`1–12` | `13–24`) with tap-to-reveal protection and auto-hide on window blur. While revealed, a **Copy phrase** button (next to **Hide phrase**) copies every word in order, **tab-separated** (`words.join('\t')`), shows `Copied`, and clears the clipboard after 60 seconds where the browser allows it; a security reminder sits under the buttons. Required _"I've stored the seed phrase in a secure place."_ checkbox. No mandatory 3-word verification during creation (kept inside Settings → **Test backup**).
   2. **4-Digit PIN (Step 2 of 2)**: 4-digit numeric PIN setup + confirmation sealing the crypto-vault via uncontrolled inputs.

@@ -10,7 +10,7 @@ const CSP = [
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https:",
-  "connect-src 'self' https:",
+  "connect-src 'self'",
   "font-src 'self'",
   "frame-ancestors 'self' https://web.telegram.org https://t.me",
   "base-uri 'self'",

@@ -26,7 +26,7 @@ import { DisambiguateScreen, ImportPhraseScreen } from './ui/import';
 import { PasscodeScreen } from './ui/passcode';
 import { UnlockScreen } from './ui/wallet';
 import { WalletShell } from './ui/wallet-shell';
-import { PreferencesProvider } from './ui/preferences';
+import { AUTO_LOCK_KEY, PreferencesProvider, readPreference } from './ui/preferences';
 import { ToastProvider } from './ui/toast';
 import { Notice, PhoneFrame, ScreenShell } from './ui/common';
 import {
@@ -50,8 +50,6 @@ type Screen =
   | 'home'
   | 'settings-phrase'
   | 'settings-verify';
-
-const AUTO_LOCK_KEY = 'ozw.autoLockMs';
 
 const ONBOARDING_SECRET_SCREENS: Screen[] = [
   'create-phrase',
@@ -85,7 +83,7 @@ export function App() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(AUTO_LOCK_KEY);
+      const raw = readPreference(AUTO_LOCK_KEY);
       const parsed = raw ? Number.parseInt(raw, 10) : NaN;
       if (Number.isFinite(parsed) && parsed > 0) setInactivityTimeout(parsed);
     } catch {

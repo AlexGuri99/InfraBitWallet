@@ -309,6 +309,7 @@ export function WalletHome({
           {fullscreen.isSupported ? (
             <button
               type="button"
+              data-testid="fullscreen-toggle"
               onClick={fullscreen.toggle}
               aria-label={
                 fullscreen.isFullscreen ? t('home.fullscreenExit') : t('home.fullscreenEnter')

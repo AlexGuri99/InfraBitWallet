@@ -1,4 +1,4 @@
-# OneZeroWallet — Decisions
+# InfraBitWallet — Decisions
 
 ## Decision: TON Swap Provider → STON.fi (direct DEX v2 SDK)
 
@@ -701,6 +701,43 @@ exchange rate are display-only and approximate; no message is ever built from th
 `Yesterday`, then `November 23`), and the per-row `HH:MM` moved from the counterparty line to a
 right-aligned line directly under the amount. Comments and Failed/Pending status moved to a
 third left line, so a comment can no longer clip the time and the address keeps its width.
+
+---
+
+## Decision: Rebrand to InfraBitWallet, reset storage prefixes, and re-detect fullscreen (2026-11-26)
+
+**Brand.** Every user-facing string (page title, `app.name`, monograms, docs, tests) now reads
+**InfraBitWallet**, with the `IB` monogram replacing the old `10`/`OZ` mark. The `@onezerowallet/*`
+workspace package names are intentionally unchanged: they are an internal namespace, not UI, and
+renaming them would touch every import and lockfile entry without user-visible benefit.
+
+**Storage prefixes.** While still on Testnet we renamed the device-local identifiers so Mainnet
+starts clean:
+
+- `localStorage`: `ozw.theme` / `ozw.privacy` / `ozw.autoLockMs` → `infrabit.theme` /
+  `infrabit.privacy` / `infrabit.autoLockMs`. On first read the old value is copied to the new key
+  and the old key removed, so preferences carry over.
+- IndexedDB: `onezerowallet` → `infrabitwallet` (the sealed vault envelope). Existing Testnet vault
+  databases are **not** auto-copied; those wallets must be re-imported from their recovery phrase.
+  This is deliberate: it is Testnet-only data and the rename guarantees no legacy prefix survives
+  into Mainnet.
+- The HKDF domain separator `onezerowallet-vault-combined` is intentionally **unchanged**. It is
+  not user-visible, and altering it would change the wrapping key and invalidate device-secret
+  unlocks of existing vaults. New vaults use the same separator.
+
+**Fullscreen toggle.** The control could disappear for two timing reasons: `TelegramProvider`
+sampled `window.Telegram.WebApp` exactly once at mount (mobile clients sometimes inject it a few
+frames later), and support required an advisory `isVersionAtLeast('8.0')` result in addition to
+the methods. Now:
+
+- `TelegramProvider` samples immediately and retries every 100 ms for up to 5 s, and again on
+  `visibilitychange`/`focus`.
+- `telegramFullscreenSupported` trusts object existence (`requestFullscreen` + `exitFullscreen`
+  are only defined on Bot API 8.0+ clients); the version string is no longer a gate.
+- `FullscreenProvider` polls for late-attached methods (200 ms, up to 5 s) and keeps the plain
+  browser Fullscreen API fallback. The toggle remains hidden only when neither path exists.
+- The top-bar button keeps `--app-safe-top` padding and surface/ink tokens in both themes, gains a
+  `fullscreen-toggle` test id, and Settings → Preferences now exposes the same action as a row.
 
 ---
 

@@ -1,4 +1,4 @@
-# OneZeroWallet — Security Headers
+# InfraBitWallet — Security Headers
 
 ## Content-Security-Policy (CSP)
 
@@ -7,7 +7,7 @@ default-src 'self';
 script-src 'self' 'wasm-unsafe-eval';
 style-src 'self' 'unsafe-inline';
 img-src 'self' data: https:;
-connect-src 'self' https:;
+connect-src 'self';
 font-src 'self';
 frame-ancestors 'self' https://web.telegram.org https://t.me;
 base-uri 'self';
@@ -22,7 +22,7 @@ form-action 'self';
 | `script-src`      | `'self' 'wasm-unsafe-eval'`                    | Only scripts from our own origin. No `unsafe-inline` (blocks `<script>` tags with inline code) and no `unsafe-eval` (blocks `eval()`, `setTimeout(string)`, etc.). `wasm-unsafe-eval` is required because hash-wasm (Argon2id passcode KDF) uses `WebAssembly.compile()` and `WebAssembly.instantiate()` to load a hand-tuned WASM binary for Argon2id. This is much safer than `unsafe-eval` — it only allows compiling WebAssembly modules, not arbitrary JavaScript execution. |
 | `style-src`       | `'self' 'unsafe-inline'`                       | Allows loading stylesheets from our own origin plus inline styles. `unsafe-inline` is required because Tailwind generates inline styles and Telegram theme parameters are applied via inline style attributes. This is an accepted risk — style injection cannot leak secrets.                                                                                                                                                                                                    |
 | `img-src`         | `'self' data: https:`                          | Allows images from our origin, inline data URIs (for QR codes, icons), and HTTPS sources (for token logos, user avatars).                                                                                                                                                                                                                                                                                                                                                         |
-| `connect-src`     | `'self' https:`                                | Allows fetch/WebSocket to our origin and any HTTPS endpoint. Required for RPC calls to external providers (TON Center, TronGrid, Alchemy, etc.).                                                                                                                                                                                                                                                                                                                                  |
+| `connect-src`     | `'self'`                                       | The Mini App fetches only its own `/api/ton/*` same-origin proxy; all provider (TON Center, TonAPI, STON.fi) calls happen server-side, so no external connection is needed. Tightening this from `'self' https:` removes a data-exfiltration path for any injected script.                                                                                                                                                                                                        |
 | `font-src`        | `'self'`                                       | Only fonts served from our origin. No Google Fonts or external font services.                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `frame-ancestors` | `'self' https://web.telegram.org https://t.me` | **Crucial for Telegram Mini Apps.** We must allow Telegram to embed the app in iframes. `web.telegram.org` is the Telegram Web client. `t.me` hosts Telegram instant-view pages and some Telegram WebK content. **Cannot use `DENY`** or `'none'` — that would break the Mini App entirely.                                                                                                                                                                                       |
 | `base-uri`        | `'self'`                                       | Prevents injection of `<base>` tags that could hijack relative URLs.                                                                                                                                                                                                                                                                                                                                                                                                              |

@@ -1,6 +1,6 @@
 # @onezerowallet/api
 
-Stateless API service for OneZeroWallet. Not deployed yet; the P2 TON read proxy lands here.
+Stateless API service for InfraBitWallet. Not deployed yet; the P2 TON read proxy lands here.
 
 ## Environment variables (server-only)
 

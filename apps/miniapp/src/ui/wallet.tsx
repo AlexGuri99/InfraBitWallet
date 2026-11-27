@@ -12,9 +12,10 @@ import { formatUsd } from '@onezerowallet/chain-ton';
 import type { BiometryApi } from '../adapters/biometry';
 import { t } from '../i18n';
 import { secretHolder } from '../vault/secret-holder';
+import { useFullscreenControl } from '../telegram/fullscreen';
 import { Button, Card, ErrorText, Field, Notice, PhoneFrame, Sheet } from './common';
 import { InfraBitLogo } from './logo';
-import { usePreferences } from './preferences';
+import { AUTO_LOCK_KEY, readPreference, usePreferences } from './preferences';
 import { useToast } from './toast';
 import {
   ChevronRightIcon,
@@ -22,6 +23,7 @@ import {
   CopyIcon,
   EyeIcon,
   FingerprintIcon,
+  FullscreenEnterIcon,
   GridIcon,
   KeyIcon,
   LayersIcon,
@@ -32,8 +34,6 @@ import {
   BellIcon,
   GlobeIcon,
 } from './icons';
-
-const AUTO_LOCK_KEY = 'ozw.autoLockMs';
 
 function rateLimitedText(ms: number): string {
   return `${t('unlock.rateLimited')} ${String(Math.ceil(ms / 1000))}s`;
@@ -231,6 +231,7 @@ export function SettingsTab({
   onWiped,
 }: SettingsTabProps) {
   const { theme, setTheme, guard } = usePreferences();
+  const fullscreen = useFullscreenControl();
   const toast = useToast();
   const [sheet, setSheet] = useState<SettingsSheet>(null);
   const [copied, setCopied] = useState(false);
@@ -247,7 +248,7 @@ export function SettingsTab({
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
   const [autoLockMs, setAutoLockMs] = useState<number>(() => {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(AUTO_LOCK_KEY) : null;
+    const raw = typeof localStorage !== 'undefined' ? readPreference(AUTO_LOCK_KEY) : null;
     const parsed = raw ? Number.parseInt(raw, 10) : NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 300_000;
   });
@@ -471,6 +472,15 @@ export function SettingsTab({
               setSheet('appearance');
             }}
           />
+          {fullscreen.isSupported ? (
+            <SettingsRow
+              icon={<FullscreenEnterIcon size={15} />}
+              iconTone="bg-surface-elevated text-ink-2"
+              title="Fullscreen"
+              value={fullscreen.isFullscreen ? 'On' : 'Off'}
+              onClick={fullscreen.toggle}
+            />
+          ) : null}
           <SettingsRow
             icon={<BellIcon size={15} />}
             iconTone="bg-swap-bg text-swap"

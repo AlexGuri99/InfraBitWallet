@@ -1,4 +1,4 @@
-# OneZeroWallet — UNVERIFIED Items
+# InfraBitWallet — UNVERIFIED Items
 
 Items in the docs or code that are **not** confirmed by a source fetch or a measurement. Do not
 state them as fact. Updated 2026-11-21 (Stage B).

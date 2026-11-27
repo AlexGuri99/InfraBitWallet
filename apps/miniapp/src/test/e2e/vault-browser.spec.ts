@@ -106,7 +106,7 @@ test.describe('Production CSP', () => {
   test('production CSP allows app to load with no CSP violations', async ({ page }) => {
     const violations = await applyProductionCsp(page, csp);
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'OneZeroWallet' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'InfraBitWallet' })).toBeVisible();
     expect(violations).toEqual([]);
   });
 
