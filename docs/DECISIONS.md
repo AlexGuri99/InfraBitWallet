@@ -880,3 +880,31 @@ Telegram's `bg_color` alias for the header; the explicit hex is required so the 
 **Why bridge helpers moved.** `telegramWebviewProxy()` now lives in `native-events.ts` (which has
 no imports) so `bridge.ts` can use it without an import cycle
 (`TelegramProvider → bridge → fullscreen → TelegramProvider`).
+
+---
+
+## Decision: server-driven network config and TON-only v1 surfaces (2026-11-27)
+
+**One source of truth.** The static bundle cannot know whether a deployment is mainnet or testnet.
+`GET /api/ton/config` now returns `{ network, swapEnabled, stakingEnabled, swapFeeBps,
+referralConfigured }` from the same env the data handlers enforce, and the Mini App fetches it on
+startup. The response contains no address, key or provider URL — only the boolean that revenue is
+configured. Any failure (offline, 5xx, malformed body) falls back to **testnet with swaps and
+staking disabled**, so a network hiccup can never make the app build a mainnet transaction from a
+guess. Existing E2E suites mock this endpoint explicitly.
+
+**Address forms follow the server.** Queries, receive/QR, Send source, Swap user and Staking owner
+use `addressNonBounceable` (UQ) on mainnet and `addressTestnetNonBounceable` (0Q) on testnet;
+explorer links use `tonviewer.com` vs `testnet.tonviewer.com`; Send validates against the active
+network (testnet rejects UQ/EQ, mainnet rejects 0Q/kQ). The TESTNET pill and "TON Testnet" label
+render only on testnet.
+
+**Fee policy is explicit.** `swapFeeBps` is 35 only when `TON_NETWORK=mainnet` AND
+`STON_REFERRAL_ADDRESS` parses as a TON address; a typo yields 0, and a one-time startup warning
+states that revenue is disabled. `referralConfigured` exposes only the boolean.
+
+**Non-TON chains are hidden, not mocked.** Deposit shows the TON address and QR only; the TRON/EVM
+receive tabs and their QR codes were removed because an address for a chain the app cannot spend
+from is a fund-loss trap. Static TRON/ETH rows were removed from Home and the pending-activity
+placeholders no longer appear. v1 reads as a focused TON wallet; EVM/TRON land with their
+adapters (and their own fee review).

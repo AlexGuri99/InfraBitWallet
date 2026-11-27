@@ -11,6 +11,7 @@ import { PreferencesProvider } from '../ui/preferences';
 import { ToastProvider } from '../ui/toast';
 import { WalletShell } from '../ui/wallet-shell';
 import type { WalletTab } from '../ui/nav';
+import type { TonConfig } from '../ui/network';
 import type { TonReadApi, TonStakeApi, TonSwapApi, TonWriteApi } from '../ton/api';
 import { App } from '../App';
 import type { BiometryApi } from '../adapters/biometry';
@@ -65,13 +66,19 @@ export function renderApp(vault: VaultUi): ReturnType<typeof render> {
 export function renderShell(
   vault: VaultUi,
   api: TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi,
-  options: { tab?: WalletTab; onLock?: () => void; onTabChange?: (tab: WalletTab) => void } = {},
+  options: {
+    tab?: WalletTab;
+    onLock?: () => void;
+    onTabChange?: (tab: WalletTab) => void;
+    tonConfig?: TonConfig;
+  } = {},
 ): ReturnType<typeof render> {
   return renderWithProviders(
     <WalletShell
       manager={vault.manager}
       api={api}
       biometry={vault.biometry}
+      tonConfig={options.tonConfig}
       tab={options.tab ?? 'wallet'}
       onTabChange={options.onTabChange ?? (() => {})}
       onLock={options.onLock ?? (() => {})}

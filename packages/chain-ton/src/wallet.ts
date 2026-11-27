@@ -99,6 +99,23 @@ export function toTestnetDisplayAddress(raw: string, bounceable: boolean): strin
   }
 }
 
+/** Render a raw (`0:…`) address in the user-friendly form of the ACTIVE network. */
+export function tonDisplayAddressForNetwork(
+  raw: string,
+  network: 'testnet' | 'mainnet',
+  bounceable: boolean,
+): string {
+  try {
+    return Address.parse(raw).toString({
+      testOnly: network === 'testnet',
+      bounceable,
+      urlSafe: true,
+    });
+  } catch {
+    return raw;
+  }
+}
+
 /** True when the user-friendly prefix requires bounces (EQ/kQ) — false for UQ/0Q. */
 export function addressRequiresBounce(address: string): boolean {
   if (/^UQ/.test(address)) return false; // mainnet non-bounceable

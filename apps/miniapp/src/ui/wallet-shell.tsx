@@ -14,7 +14,7 @@ import {
   type TonPortfolio,
 } from '@onezerowallet/chain-ton';
 import type { AssetView } from './asset';
-import { staticChainAssets, tonAssetView } from './asset';
+import { tonAssetView } from './asset';
 import type { Load } from './home';
 import { WalletHome } from './home';
 import { BottomNav, type WalletTab } from './nav';
@@ -34,7 +34,9 @@ import type { BiometryApi } from '../adapters/biometry';
 import { useToast } from './toast';
 import { FullscreenProvider } from '../telegram/fullscreen';
 import { t } from '../i18n';
+import { activeTonAddress, DEFAULT_TON_CONFIG, type TonConfig } from './network';
 
+/** Test/fixture default only — the runtime network always comes from `/api/ton/config`. */
 export const UI_TON_NETWORK = 'testnet' as const;
 
 type Route =
@@ -47,11 +49,7 @@ type Route =
   | { kind: 'coin'; asset: AssetView }
   | { kind: 'tx'; item: TonActivityItem };
 
-function placeholderAssets(
-  state: 'loading' | 'error',
-  hasTron: boolean,
-  hasEvm: boolean,
-): AssetView[] {
+function placeholderAssets(state: 'loading' | 'error'): AssetView[] {
   const mark = state === 'error' ? '—' : '…';
   const rows: AssetView[] = [
     {
@@ -85,13 +83,14 @@ function placeholderAssets(
       testId: 'asset-USDT',
     },
   ];
-  return [...rows, ...staticChainAssets(hasTron, hasEvm)];
+  return rows;
 }
 
 function WalletShellContent({
   manager,
   api,
   biometry,
+  tonConfig = DEFAULT_TON_CONFIG,
   tab,
   onTabChange,
   onLock,
@@ -102,6 +101,7 @@ function WalletShellContent({
   manager: VaultManager;
   api: TonReadApi & TonWriteApi & TonSwapApi & TonStakeApi;
   biometry: BiometryApi;
+  tonConfig?: TonConfig | undefined;
   tab: WalletTab;
   onTabChange: (tab: WalletTab) => void;
   onLock: () => void;
@@ -110,9 +110,10 @@ function WalletShellContent({
   onWiped: () => void;
 }) {
   const [, setWalletVersion] = useState(0);
+  const network = tonConfig.network;
   const session = manager.getSession();
   const info = session?.getPublicInfo(0) ?? null;
-  const tonAddress = info?.ton.addressTestnetNonBounceable ?? '';
+  const tonAddress = info ? activeTonAddress(info.ton, network) : '';
   const activeWalletLabel =
     session?.listWallets().find((wallet) => wallet.active)?.label ?? t('home.wallets');
   const toast = useToast();
@@ -131,8 +132,8 @@ function WalletShellContent({
     setPortfolio({ state: 'loading' });
     setActivity({ state: 'loading' });
     const [portfolioResult, activityResult] = await Promise.allSettled([
-      api.getPortfolio(tonAddress, UI_TON_NETWORK, controller.signal),
-      api.getActivity(tonAddress, UI_TON_NETWORK, 20, controller.signal),
+      api.getPortfolio(tonAddress, network, controller.signal),
+      api.getActivity(tonAddress, network, 20, controller.signal),
     ]);
     if (controller.signal.aborted) return;
     setPortfolio(
@@ -145,7 +146,7 @@ function WalletShellContent({
         ? { state: 'ready', value: filterActivity(activityResult.value) }
         : { state: 'error' },
     );
-  }, [api, tonAddress]);
+  }, [api, tonAddress, network]);
 
   useEffect(() => {
     void refresh();
@@ -177,11 +178,10 @@ function WalletShellContent({
   }, [activity, pending]);
 
   const portfolioReady = portfolio.state === 'ready' ? portfolio.value : null;
-  const hasTron = info?.tron !== undefined;
-  const hasEvm = info?.evm !== undefined;
+  // v1 is a focused TON wallet: no TRON/EVM rows (deposit traps are hidden at source).
   const assets: AssetView[] = portfolioReady
-    ? [...portfolioReady.assets.map(tonAssetView), ...staticChainAssets(hasTron, hasEvm)]
-    : placeholderAssets(portfolio.state === 'error' ? 'error' : 'loading', hasTron, hasEvm);
+    ? portfolioReady.assets.map(tonAssetView)
+    : placeholderAssets(portfolio.state === 'error' ? 'error' : 'loading');
   const activityItems = activity.state === 'ready' ? activity.value : [];
 
   const openSend = (prefill: SendPrefill): void => {
@@ -241,7 +241,6 @@ function WalletShellContent({
   if (route.kind === 'deposit' && info) {
     return (
       <DepositScreen
-        info={info}
         tonAddress={tonAddress}
         onBack={() => {
           setRoute({ kind: 'root' });
@@ -256,6 +255,7 @@ function WalletShellContent({
         info={info}
         portfolio={portfolioReady}
         api={api}
+        network={network}
         prefill={route.prefill}
         onBack={() => {
           setRoute({ kind: 'root' });
@@ -271,6 +271,7 @@ function WalletShellContent({
         info={info}
         portfolio={portfolioReady}
         api={api}
+        network={network}
         onBack={() => {
           setRoute({ kind: 'root' });
         }}
@@ -285,6 +286,7 @@ function WalletShellContent({
         info={info}
         portfolio={portfolioReady}
         api={api}
+        network={network}
         onBack={() => {
           setRoute({ kind: 'root' });
         }}
@@ -317,6 +319,7 @@ function WalletShellContent({
     return (
       <TxDetailScreen
         item={route.item}
+        network={network}
         onBack={() => {
           setRoute({ kind: 'root' });
         }}
@@ -336,6 +339,7 @@ function WalletShellContent({
             <WalletHome
               tonAddress={tonAddress}
               walletLabel={activeWalletLabel}
+              network={network}
               portfolio={portfolio}
               activity={activity}
               pending={pending}

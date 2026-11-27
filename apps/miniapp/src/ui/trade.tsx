@@ -15,7 +15,7 @@ import {
   formatUsd,
   maxTonAmountRaw,
   parseDecimal,
-  toTestnetDisplayAddress,
+  type TonNetwork,
   tonAddressEquals,
   type BuiltTransfer,
   type DecodedSignedTransfer,
@@ -48,6 +48,7 @@ import {
 } from './common';
 import { ChevronDownIcon, SwapIcon } from './icons';
 import { useToast } from './toast';
+import { activeTonAddress, displayTonAddress, explorerHost, explorerMessageUrl } from './network';
 
 /** Reserved nanoTON for the swap's attached value while using Max on the native side. */
 const NATIVE_SWAP_GAS_RESERVE_RAW = 400_000_000n;
@@ -98,6 +99,7 @@ export function TradeScreen({
   info,
   portfolio,
   api,
+  network,
   onBack,
   onSubmitted,
 }: {
@@ -105,6 +107,7 @@ export function TradeScreen({
   info: PublicAccountInfo;
   portfolio: TonPortfolio;
   api: SwapApi;
+  network: TonNetwork;
   onBack: () => void;
   onSubmitted: (
     decoded: DecodedSignedTransfer,
@@ -125,7 +128,7 @@ export function TradeScreen({
   useEffect(() => {
     let cancelled = false;
     api
-      .getSwapAssets('testnet')
+      .getSwapAssets(network)
       .then((list) => {
         if (cancelled) return;
         if (list.length === 0) {
@@ -142,7 +145,7 @@ export function TradeScreen({
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, network]);
 
   const list = assets.kind === 'ready' ? assets.assets : [];
   const offer = list.find((asset) => asset.id === offerId) ?? list.find((a) => a.kind === 'native');
@@ -174,14 +177,14 @@ export function TradeScreen({
       const offerJettonWallet = jettonWalletFor(portfolio, offer);
       api
         .getSwapQuote({
-          network: 'testnet',
+          network,
           offerAsset: offer.contractAddress,
           askAsset: ask.contractAddress,
           offerKind: offer.kind,
           askKind: ask.kind,
           offerUnits: units.toString(),
           slippageBps,
-          userAddress: info.ton.addressTestnetNonBounceable,
+          userAddress: activeTonAddress(info.ton, network),
           ...(offerJettonWallet ? { offerJettonWallet } : {}),
         })
         .then((value) => {
@@ -195,7 +198,7 @@ export function TradeScreen({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [api, amount, offer, ask, slippageBps, portfolio, info]);
+  }, [api, amount, offer, ask, slippageBps, portfolio, info, network]);
 
   const setMax = (): void => {
     if (!offer || offerBalanceRaw === null) return;
@@ -240,7 +243,7 @@ export function TradeScreen({
     setError(null);
     setBusy(true);
     try {
-      const state = await api.getWalletState(info.ton.addressTestnetNonBounceable, 'testnet');
+      const state = await api.getWalletState(activeTonAddress(info.ton, network), network);
       if (state.status === 'active' && state.seqno === 0) {
         setError('Could not read the wallet seqno. Retry before swapping.');
         return;
@@ -250,7 +253,7 @@ export function TradeScreen({
       const payload = await buildSwapPayload({
         router: q.router,
         direction: q.direction,
-        userWalletAddress: info.ton.addressTestnetNonBounceable,
+        userWalletAddress: activeTonAddress(info.ton, network),
         offer: {
           kind: offer.kind,
           ...(offer.kind === 'jetton' ? { address: offer.contractAddress } : {}),
@@ -269,7 +272,7 @@ export function TradeScreen({
       const built = await buildSwapTransfer(
         {
           publicKeyHex: info.ton.publicKeyHex,
-          network: 'testnet',
+          network,
           seqno: state.seqno,
           to: payload.to,
           valueRaw: payload.valueRaw,
@@ -279,7 +282,7 @@ export function TradeScreen({
         sign,
       );
       const swap = decodeSwapPayload(payload.bodyBoc, q.direction);
-      const emulation = await api.emulate(built.boc, 'testnet');
+      const emulation = await api.emulate(built.boc, network);
       setStep({
         kind: 'review',
         quote: q,
@@ -302,7 +305,7 @@ export function TradeScreen({
     setBusy(true);
     setError(null);
     try {
-      const result = await api.broadcast(step.built.boc, 'testnet');
+      const result = await api.broadcast(step.built.boc, network);
       onSubmitted(step.decoded, {
         symbol: step.offer.symbol,
         decimals: step.offer.decimals,
@@ -339,11 +342,11 @@ export function TradeScreen({
             </p>
             <a
               className="mt-2 block break-all text-[11.5px] font-medium text-accent-link underline"
-              href={`https://testnet.tonviewer.com/message/${step.hashHex}`}
+              href={explorerMessageUrl(network, step.hashHex)}
               target="_blank"
               rel="noreferrer noopener"
             >
-              testnet.tonviewer.com/message/{step.hashHex.slice(0, 16)}…
+              {explorerHost(network)}/message/{step.hashHex.slice(0, 16)}…
             </a>
           </Card>
           <Button
@@ -376,7 +379,7 @@ export function TradeScreen({
                 Router
               </p>
               <code className="mt-1 block break-all font-mono text-[12.5px] text-ink">
-                {toTestnetDisplayAddress(step.decoded.recipient, true)}
+                {displayTonAddress(step.decoded.recipient, network, true)}
               </code>
             </div>
             <div className="h-px bg-hairline" />

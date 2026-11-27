@@ -19,7 +19,8 @@ import {
   maxTonAmountRaw,
   parseDecimal,
   SEND_MODE_MAX,
-  toTestnetDisplayAddress,
+  isTestnetUserFriendlyAddress,
+  type TonNetwork,
   type BuiltTransfer,
   type DecodedSignedTransfer,
   type TonAssetBalance,
@@ -39,6 +40,7 @@ import {
   Segmented,
 } from './common';
 import { useToast } from './toast';
+import { activeTonAddress, displayTonAddress, explorerHost, explorerMessageUrl } from './network';
 import { TokenAvatar } from './common';
 
 const MAX_COMMENT = 120;
@@ -82,6 +84,7 @@ export function SendScreen({
   info,
   portfolio,
   api,
+  network,
   prefill,
   onBack,
   onSubmitted,
@@ -90,6 +93,7 @@ export function SendScreen({
   info: PublicAccountInfo;
   portfolio: TonPortfolio;
   api: TonReadApi & TonWriteApi;
+  network: TonNetwork;
   prefill?: SendPrefill | undefined;
   onBack: () => void;
   onSubmitted: (
@@ -122,8 +126,11 @@ export function SendScreen({
   const validate = (): string | null => {
     if (!asset) return 'No asset selected';
     if (!isProbablyTonAddress(recipient.trim())) return 'Enter a valid TON address';
-    if (/^[EU]Q/.test(recipient.trim())) {
+    if (network === 'testnet' && /^[EU]Q/.test(recipient.trim())) {
       return 'Mainnet-only address. Testnet mode accepts 0Q, kQ or a raw 0: address.';
+    }
+    if (network === 'mainnet' && isTestnetUserFriendlyAddress(recipient.trim())) {
+      return 'Testnet-only address. Mainnet mode accepts UQ, EQ or a raw 0: address.';
     }
     const raw = amountFor(asset, amount.trim());
     if (raw === null || raw <= 0n) return 'Enter a positive amount';
@@ -161,7 +168,7 @@ export function SendScreen({
     setError(null);
     setBusy(true);
     try {
-      const state = await api.getWalletState(info.ton.addressTestnetNonBounceable, 'testnet');
+      const state = await api.getWalletState(activeTonAddress(info.ton, network), network);
       if (state.status === 'active' && state.seqno === 0) {
         setError('Could not read the wallet seqno. Retry before sending.');
         return;
@@ -179,7 +186,7 @@ export function SendScreen({
         ? await buildTonTransfer(
             {
               publicKeyHex: info.ton.publicKeyHex,
-              network: 'testnet',
+              network,
               seqno: state.seqno,
               destination,
               amountRaw: rawAmount,
@@ -195,7 +202,7 @@ export function SendScreen({
         : await buildJettonTransfer(
             {
               publicKeyHex: info.ton.publicKeyHex,
-              network: 'testnet',
+              network,
               seqno: state.seqno,
               jettonWallet: asset.jettonWalletAddress ?? '',
               destination,
@@ -206,7 +213,7 @@ export function SendScreen({
             sign,
           );
       const decoded = built.decoded;
-      const emulation = await api.emulate(built.boc, 'testnet');
+      const emulation = await api.emulate(built.boc, network);
       setStep({
         kind: 'review',
         built,
@@ -227,7 +234,7 @@ export function SendScreen({
     setBusy(true);
     setError(null);
     try {
-      const result = await api.broadcast(step.built.boc, 'testnet');
+      const result = await api.broadcast(step.built.boc, network);
       onSubmitted(step.decoded, { symbol: step.symbol, decimals: step.decimals });
       setStep({
         kind: 'sent',
@@ -261,11 +268,11 @@ export function SendScreen({
             </p>
             <a
               className="mt-2 block break-all text-[11.5px] font-medium text-accent-link underline"
-              href={`https://testnet.tonviewer.com/message/${step.hashHex}`}
+              href={explorerMessageUrl(network, step.hashHex)}
               target="_blank"
               rel="noreferrer noopener"
             >
-              testnet.tonviewer.com/message/{step.hashHex.slice(0, 16)}…
+              {explorerHost(network)}/message/{step.hashHex.slice(0, 16)}…
             </a>
           </Card>
           <Button
@@ -299,7 +306,7 @@ export function SendScreen({
                 {t('send.recipient')}
               </p>
               <code className="mt-1 block break-all font-mono text-[12.5px] text-ink">
-                {toTestnetDisplayAddress(decoded.recipient, decoded.bounce)}
+                {displayTonAddress(decoded.recipient, network, decoded.bounce)}
               </code>
             </div>
             <div className="h-px bg-hairline" />

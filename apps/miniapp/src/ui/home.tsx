@@ -37,6 +37,7 @@ import {
 } from './icons';
 import { Button, Card, SectionHeader, Sheet, TokenAvatar } from './common';
 import type { WalletTab } from './nav';
+import type { TonNetwork } from '@onezerowallet/chain-ton';
 
 export type Load<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error' };
 
@@ -196,6 +197,7 @@ function AssetRowView({
 
 export interface WalletHomeProps extends HomeActions {
   tonAddress: string;
+  network: TonNetwork;
   /** Label of the active wallet (shown in the top-left selector). */
   walletLabel: string;
   portfolio: Load<TonPortfolio>;
@@ -207,6 +209,7 @@ export interface WalletHomeProps extends HomeActions {
 
 export function WalletHome({
   tonAddress,
+  network,
   walletLabel,
   portfolio,
   activity,
@@ -293,9 +296,11 @@ export function WalletHome({
             <span className="truncate">{walletLabel}</span>
             <ChevronDownIcon size={15} className="shrink-0 text-ink-2" />
           </button>
-          <span className="shrink-0 rounded-full bg-positive-bg px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.04em] text-positive">
-            {t('home.testnet')}
-          </span>
+          {network === 'testnet' ? (
+            <span className="shrink-0 rounded-full bg-positive-bg px-2 py-[3px] text-[10px] font-bold uppercase tracking-[0.04em] text-positive">
+              {t('home.testnet')}
+            </span>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <button

@@ -120,6 +120,20 @@ async function mockTonApi(
     const url = route.request().url();
     options.onRequest?.(url);
     const path = new URL(url).pathname;
+    if (path === '/api/ton/config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          network: 'testnet',
+          swapEnabled: false,
+          stakingEnabled: false,
+          swapFeeBps: 0,
+          referralConfigured: false,
+        }),
+      });
+      return;
+    }
     if (path.endsWith('/portfolio')) {
       portfolioCalls += 1;
       if (options.failPortfolioOnce === true && portfolioCalls === 1) {
@@ -196,10 +210,11 @@ test.describe('onboarding and unlock', () => {
 
     await page.getByRole('button', { name: 'Deposit' }).click();
     await expect(page.getByTestId('address-TON')).toHaveText(/^0Q/);
-    await page.getByRole('button', { name: 'EVM' }).click();
-    await expect(page.getByTestId('address-EVM')).toHaveText(/^0x/);
-    await page.getByRole('button', { name: 'TRON' }).click();
-    await expect(page.getByTestId('address-TRON')).toHaveText(/^T/);
+    // v1 receive is TON-only: no TRON/EVM tabs or addresses (fund-loss traps removed).
+    await expect(page.getByRole('button', { name: 'TRON' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'EVM' })).toHaveCount(0);
+    await expect(page.getByTestId('address-TRON')).toHaveCount(0);
+    await expect(page.getByTestId('address-EVM')).toHaveCount(0);
     await page.getByRole('button', { name: 'Back' }).click();
 
     const dump = await page.evaluate(() => ({
@@ -313,10 +328,8 @@ test.describe('onboarding and unlock', () => {
 
     await expect(page.getByTestId('hero-balance')).toBeVisible();
     await page.getByRole('button', { name: 'Deposit' }).click();
-    await page.getByRole('button', { name: 'EVM' }).click();
-    await expect(page.getByTestId('address-EVM')).toHaveText(
-      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    );
+    await expect(page.getByTestId('address-TON')).toHaveText(/^0Q/);
+    await expect(page.getByTestId('address-EVM')).toHaveCount(0);
   });
 
   test('home dashboard: hero, tabs, actions and asset list', async ({ page }) => {
@@ -333,8 +346,9 @@ test.describe('onboarding and unlock', () => {
     await expect(page.getByTestId('asset-TON')).toContainText('Toncoin');
     await expect(page.getByTestId('asset-TON')).toContainText('1.5 TON');
     await expect(page.getByTestId('asset-USDT')).toContainText('TON · Jetton');
-    await expect(page.getByTestId('asset-TRX')).toContainText('TRC-20');
-    await expect(page.getByTestId('asset-ETH')).toContainText('ERC-20');
+    // Focused TON v1: no TRON/Ethereum placeholder rows.
+    await expect(page.getByTestId('asset-TRX')).toHaveCount(0);
+    await expect(page.getByTestId('asset-ETH')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Hide balance' }).click();
     await expect(page.getByTestId('hero-balance')).toHaveText('••••');

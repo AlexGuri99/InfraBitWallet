@@ -16,6 +16,7 @@
  * owner's sign-off (CLAUDE.md "stop and ask"). Missing/empty keys are valid (public rate limits).
  */
 import { z } from 'zod';
+import { normalizeTonAddress } from './ton/validation.js';
 
 export type TonDataProvider = 'toncenter' | 'tonapi';
 export type TonNetwork = 'mainnet' | 'testnet';
@@ -96,20 +97,62 @@ export function loadServerConfig(
   const routers = parsed.data.STON_ALLOWED_ROUTERS?.split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
-  return {
-    ok: true,
-    config: {
-      provider: parsed.data.TON_DATA_PROVIDER ?? 'toncenter',
-      network: parsed.data.TON_NETWORK ?? 'testnet',
-      toncenterApiKey: parsed.data.TONCENTER_API_KEY,
-      toncenterTestnetApiKey: parsed.data.TONCENTER_TESTNET_API_KEY,
-      tonapiApiKey: parsed.data.TONAPI_API_KEY,
-      stonApiBaseUrl: parsed.data.STON_API_BASE_URL,
-      stonTestnetApiBaseUrl: parsed.data.STON_TESTNET_API_BASE_URL,
-      stonReferralAddress: parsed.data.STON_REFERRAL_ADDRESS,
-      ...(routers && routers.length > 0 ? { stonAllowedRouters: routers } : {}),
-    },
+  const config: ServerConfig = {
+    provider: parsed.data.TON_DATA_PROVIDER ?? 'toncenter',
+    network: parsed.data.TON_NETWORK ?? 'testnet',
+    toncenterApiKey: parsed.data.TONCENTER_API_KEY,
+    toncenterTestnetApiKey: parsed.data.TONCENTER_TESTNET_API_KEY,
+    tonapiApiKey: parsed.data.TONAPI_API_KEY,
+    stonApiBaseUrl: parsed.data.STON_API_BASE_URL,
+    stonTestnetApiBaseUrl: parsed.data.STON_TESTNET_API_BASE_URL,
+    stonReferralAddress: parsed.data.STON_REFERRAL_ADDRESS,
+    ...(routers && routers.length > 0 ? { stonAllowedRouters: routers } : {}),
   };
+  warnOnMissingMainnetReferral(config);
+  return { ok: true, config };
+}
+
+/** Policy fee in basis points (0.35%), mirroring `SWAP_FEE_BPS` in `@onezerowallet/swap-ton`. */
+export const POLICY_SWAP_FEE_BPS = 35 as const;
+
+/** True when a reviewed, parsable referral address is configured (never exposed raw to the client). */
+export function isReferralConfigured(config: ServerConfig): boolean {
+  return normalizeTonAddress(config.stonReferralAddress) !== null;
+}
+
+/**
+ * Fee actually collectable: the policy fee only on mainnet with a valid referral address, else 0.
+ * An invalid address is treated as "not configured" so a typo can never silently look healthy.
+ */
+export function collectableSwapFeeBps(config: ServerConfig): number {
+  return config.network === 'mainnet' && isReferralConfigured(config) ? POLICY_SWAP_FEE_BPS : 0;
+}
+
+/** TON swaps are served on mainnet (STON REST) or on testnet only with an operator endpoint. */
+export function swapEnabledFor(config: ServerConfig): boolean {
+  return config.network === 'mainnet' || config.stonTestnetApiBaseUrl !== undefined;
+}
+
+/** Tonstakers metrics exist on mainnet only; testnet staking fails closed. */
+export function stakingEnabledFor(config: ServerConfig): boolean {
+  return config.network === 'mainnet';
+}
+
+let warnedMissingReferral = false;
+
+/**
+ * Startup warning (once per process) so mainnet can never run with silently zero swap revenue.
+ * The message never contains an address or a key.
+ */
+function warnOnMissingMainnetReferral(config: ServerConfig): void {
+  if (warnedMissingReferral) return;
+  if (config.network !== 'mainnet') return;
+  if (isReferralConfigured(config)) return;
+  warnedMissingReferral = true;
+  console.warn(
+    '[api] TON_NETWORK=mainnet but STON_REFERRAL_ADDRESS is unset or not a valid TON address: ' +
+      'swap revenue is disabled (swapFeeBps=0). Set a reviewed treasury address and redeploy.',
+  );
 }
 
 /** The TON Center key for the configured network, if any. */
