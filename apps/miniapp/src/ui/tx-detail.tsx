@@ -2,15 +2,16 @@
  * Transaction Detail (DESIGN.md §5.5) — live data.
  *
  * Renders exactly the on-chain item: status, hero amount, full counterparty with a dimmed middle,
- * the 64-char hash with a testnet explorer link, and a Repeat action that pre-fills Send.
+ * the 64-char hash with a network-appropriate explorer link, and a Repeat action that pre-fills Send.
  */
-import { toTestnetDisplayAddress, type TonActivityItem } from '@onezerowallet/chain-ton';
+import type { TonActivityItem, TonNetwork } from '@onezerowallet/chain-ton';
 import { t } from '../i18n';
 import { activityKind, activityStatusLabel, fullTimestamp, hashToHex, splitAmount } from './asset';
 import { usePreferences } from './preferences';
 import { useToast } from './toast';
 import { Button, Card, PhoneFrame, ScreenHeader } from './common';
 import { CopyIcon } from './icons';
+import { displayTonAddress, explorerHost, explorerTransactionUrl } from './network';
 
 function AddressDisplay({ address }: { address: string }) {
   const head = address.slice(0, 6);
@@ -50,10 +51,12 @@ function CopyLine({ value, label }: { value: string; label: string }) {
 
 export function TxDetailScreen({
   item,
+  network,
   onBack,
   onRepeat,
 }: {
   item: TonActivityItem;
+  network: TonNetwork;
   onBack: () => void;
   onRepeat: (item: TonActivityItem) => void;
 }) {
@@ -64,9 +67,9 @@ export function TxDetailScreen({
   const { whole, fraction } = splitAmount(item.amount);
   const hashHex = hashToHex(item.hash);
   const sign = incoming ? '+' : '-';
-  // Pending items carry the raw address decoded from the signed BoC; show the same testnet
-  // user-friendly form as the Send Review screen so history and review always agree.
-  const counterparty = toTestnetDisplayAddress(item.counterparty, true);
+  // Pending items carry the raw address decoded from the signed BoC; show the same user-friendly
+  // form (mainnet UQ/EQ vs testnet 0Q/kQ) as the Send Review screen so history and review agree.
+  const counterparty = displayTonAddress(item.counterparty, network, true);
 
   return (
     <PhoneFrame>
@@ -128,11 +131,11 @@ export function TxDetailScreen({
           </div>
           <a
             className="text-[12.5px] font-semibold text-accent-link underline"
-            href={`https://testnet.tonviewer.com/transaction/${hashHex}`}
+            href={explorerTransactionUrl(network, hashHex)}
             target="_blank"
             rel="noreferrer noopener"
           >
-            testnet.tonviewer.com
+            {explorerHost(network)}
           </a>
         </Card>
 
@@ -143,7 +146,9 @@ export function TxDetailScreen({
           </div>
           <div className="flex items-center justify-between">
             <span className="text-ink-2">Network</span>
-            <span className="font-semibold text-ink">TON {t('home.testnet')}</span>
+            <span className="font-semibold text-ink">
+              {network === 'testnet' ? `TON ${t('home.testnet')}` : 'TON'}
+            </span>
           </div>
           {item.comment ? (
             <>
@@ -163,7 +168,7 @@ export function TxDetailScreen({
             <Button
               onClick={() => {
                 void navigator.clipboard
-                  .writeText(`https://testnet.tonviewer.com/transaction/${hashHex}`)
+                  .writeText(explorerTransactionUrl(network, hashHex))
                   .then(() => {
                     toast.show(t('home.copied'));
                   })

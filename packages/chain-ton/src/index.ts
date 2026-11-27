@@ -39,6 +39,7 @@ export {
   normalizeTonAddress,
   tonAddressEquals,
   toTestnetDisplayAddress,
+  tonDisplayAddressForNetwork,
   maxTonAmountRaw,
   buildTonTransfer,
   buildJettonTransfer,

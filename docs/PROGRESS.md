@@ -158,7 +158,7 @@ approval. Cadence: one commit per task.
 
 ### P1b: UI — Onboarding, Unlock, Backup Screens
 
-**Status:** Not started
+**Status:** ✅ Complete (implemented during P1c/P2; this table was stale — corrected 2026-11-27)
 
 ---
 
@@ -261,7 +261,7 @@ live P2a/P2b TON read/send behaviour.
 
 ### P2: TON — Receive, Balances, History, Prices, Send
 
-**Status:** Not started
+**Status:** ✅ Complete for TON Testnet (P2a read layer, P2b send, P2h detail polish; see those sections). HMAC initData validation and mainnet network wiring land in later phases.
 
 | Task                                                     | Notes                          |
 | -------------------------------------------------------- | ------------------------------ |
@@ -281,7 +281,7 @@ live P2a/P2b TON read/send behaviour.
 
 ### P3: TON Swap + GRAM Staking
 
-**Status:** Not started
+**Status:** ✅ Complete for TON (P3a live STON.fi v2 swaps, P3b live Tonstakers staking; both testnet-gated). TRON swaps remain deferred.
 
 | Task                                                                                                                                                                                                                                | Notes          |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
@@ -299,7 +299,7 @@ live P2a/P2b TON read/send behaviour.
 
 ### P4: TRON — Receive, Send, Energy Handling
 
-**Status:** Not started
+**Status:** ⛔ Not started — out of v1 scope. TRON/EVM receive surfaces were REMOVED from the app in P9 so no address for an unsupported chain is ever shown.
 
 | Task                                                                                                  | Notes                          |
 | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
@@ -317,7 +317,7 @@ live P2a/P2b TON read/send behaviour.
 
 ### P5: Ethereum/EVM — Receive, Send, Swap
 
-**Status:** Not started
+**Status:** ⛔ Not started — out of v1 scope; EVM receive rows/tabs removed in P9.
 
 | Task                                                         | Notes                          |
 | ------------------------------------------------------------ | ------------------------------ |
@@ -338,7 +338,7 @@ live P2a/P2b TON read/send behaviour.
 
 ### P6: Hardening — Accessibility — i18n — Launch
 
-**Status:** Not started
+**Status:** ◐ Partial — a11y checks, i18n scaffold, 84 Playwright E2E and CI are in place; WCAG AA audit, full security review, LAUNCH_CHECKLIST.md and the audit/bug-bounty gate remain before mainnet.
 
 | Task                                     | Notes |
 | ---------------------------------------- | ----- |
@@ -512,3 +512,22 @@ Branch `feat/telegram-swipe-lock-and-chrome`.
 
 **Untested:** real iOS hardware; verified through the bridge recorder in unit tests and the
 mobile Playwright flow.
+
+---
+
+### P9: Server-driven network wiring + TON-only v1 surfaces (2026-11-27)
+
+Branch `feat/mainnet-network-wiring`.
+
+| Area                                                                                                                 | Status | Evidence                                                       |
+| -------------------------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------- |
+| `GET /api/ton/config` (network, swapEnabled, stakingEnabled, swapFeeBps, referralConfigured; no secrets)             | DONE   | `apps/miniapp/api/ton/config.ts`, `services/api/src/config.ts` |
+| Startup warning when mainnet runs without a usable `STON_REFERRAL_ADDRESS` (no key/address in the message)           | DONE   | `config.ts`, `config.test.ts`                                  |
+| Mini App fetches the config at startup and fails closed to testnet with swaps/staking disabled                       | DONE   | `src/ton/config.ts`, `App.tsx`, `ton-config.test.ts`           |
+| Active network threaded through shell/home/send/trade/earn/tx-detail: API calls, UQ vs 0Q addresses, Send validation | DONE   | `ui/network.ts`, screens, `ui-mainnet.test.tsx`                |
+| Network-specific explorer links (`tonviewer.com` vs `testnet.tonviewer.com`) and pending counterparties              | DONE   | `ui/network.ts`, `tx-detail.tsx`                               |
+| TESTNET badge / "TON Testnet" only on testnet                                                                        | DONE   | `home.tsx`, `tx-detail.tsx`                                    |
+| Deposit is TON-only; TRON/EVM receive tabs + QR removed; TRON/EVM home rows removed                                  | DONE   | `deposit.tsx`, `wallet-shell.tsx`, unit + e2e                  |
+| E2E mainnet + testnet flows                                                                                          | DONE   | `src/test/e2e/mainnet.spec.ts`, config mocks in all e2e mocks  |
+
+**Remaining for mainnet launch:** API authentication/rate limiting, PIN/backup policy (P0 items from the pre-mainnet audit), treasury sign-off, and the manual 1–2 TON smoke test.

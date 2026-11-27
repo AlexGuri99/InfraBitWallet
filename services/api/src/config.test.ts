@@ -1,10 +1,32 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
+  collectableSwapFeeBps,
+  isReferralConfigured,
   loadServerConfig,
   providerBaseUrl,
   providerRequestHeaders,
+  stakingEnabledFor,
+  swapEnabledFor,
   type ServerConfig,
 } from './config.js';
+
+const TON_ADDRESS = '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287';
+
+describe('mainnet revenue startup warning', () => {
+  it('warns once on mainnet without a usable referral address (no secrets in the message)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      loadServerConfig({ TON_NETWORK: 'mainnet', TONCENTER_API_KEY: 'secret-key-value' });
+      loadServerConfig({ TON_NETWORK: 'mainnet' });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]?.[0] ?? '');
+      expect(message).toContain('STON_REFERRAL_ADDRESS');
+      expect(message).not.toContain('secret-key-value');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
 
 describe('server config: TON provider keys', () => {
   it('defaults to testnet + toncenter with no key (public rate limits)', () => {
@@ -80,5 +102,52 @@ describe('server config: TON provider keys', () => {
       expect(result).toEqual({ ok: false, error: 'INVALID_SERVER_ENV' });
       expect(JSON.stringify(result)).not.toContain('secret-');
     }
+  });
+});
+
+describe('mainnet swap revenue policy', () => {
+  function configFor(env: Record<string, string>): ServerConfig {
+    const result = loadServerConfig(env);
+    if (!result.ok) throw new Error('config failed');
+    return result.config;
+  }
+
+  it('collects 35 bps only on mainnet with a parsable referral address', () => {
+    expect(
+      collectableSwapFeeBps(
+        configFor({ TON_NETWORK: 'mainnet', STON_REFERRAL_ADDRESS: TON_ADDRESS }),
+      ),
+    ).toBe(35);
+    expect(
+      isReferralConfigured(
+        configFor({ TON_NETWORK: 'mainnet', STON_REFERRAL_ADDRESS: TON_ADDRESS }),
+      ),
+    ).toBe(true);
+
+    // Unset or a typo must never look healthy.
+    expect(collectableSwapFeeBps(configFor({ TON_NETWORK: 'mainnet' }))).toBe(0);
+    expect(
+      collectableSwapFeeBps(
+        configFor({ TON_NETWORK: 'mainnet', STON_REFERRAL_ADDRESS: 'not-a-ton-address' }),
+      ),
+    ).toBe(0);
+    // Testnet never reports a fee.
+    expect(
+      collectableSwapFeeBps(
+        configFor({ TON_NETWORK: 'testnet', STON_REFERRAL_ADDRESS: TON_ADDRESS }),
+      ),
+    ).toBe(0);
+  });
+
+  it('reports swap/staking availability by network', () => {
+    expect(swapEnabledFor(configFor({ TON_NETWORK: 'mainnet' }))).toBe(true);
+    expect(swapEnabledFor(configFor({ TON_NETWORK: 'testnet' }))).toBe(false);
+    expect(
+      swapEnabledFor(
+        configFor({ TON_NETWORK: 'testnet', STON_TESTNET_API_BASE_URL: 'https://ston.test' }),
+      ),
+    ).toBe(true);
+    expect(stakingEnabledFor(configFor({ TON_NETWORK: 'mainnet' }))).toBe(true);
+    expect(stakingEnabledFor(configFor({ TON_NETWORK: 'testnet' }))).toBe(false);
   });
 });

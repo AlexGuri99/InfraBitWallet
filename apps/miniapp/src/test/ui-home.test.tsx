@@ -293,7 +293,7 @@ describe('Wallet home: live TON data', () => {
     });
   });
 
-  it('Deposit screen shows the testnet address, multichain addresses and an inline QR', async () => {
+  it('Deposit screen shows only the TON address and an inline QR (no chain traps)', async () => {
     const user = userEvent.setup();
     const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, apiWith(portfolio()));
@@ -303,10 +303,10 @@ describe('Wallet home: live TON data', () => {
     await user.click(screen.getByRole('button', { name: 'Deposit' }));
     expect(screen.getByRole('heading', { name: 'Fund' })).toBeInTheDocument();
     expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
-    await user.click(screen.getByRole('button', { name: 'TRON' }));
-    expect(screen.getByTestId('address-TRON')).toHaveTextContent(/^T/);
-    await user.click(screen.getByRole('button', { name: 'EVM' }));
-    expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
+    expect(screen.queryByRole('button', { name: 'TRON' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'EVM' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('address-TRON')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();
     expect(document.querySelector('svg[role="img"]')).not.toBeNull();
     await user.click(screen.getByRole('button', { name: 'Back' }));
   });
@@ -360,9 +360,9 @@ describe('Wallet home: live TON data', () => {
     expect(await screen.findByText(/No transactions yet/)).toBeInTheDocument();
   });
 
-  it('ton-native-only hides TRON/EVM assets and addresses', async () => {
+  it('shows no TRON/EVM asset rows for a standard wallet either (focused TON v1)', async () => {
     const user = userEvent.setup();
-    const manager = await unlockedManager('ton-native-only');
+    const manager = await unlockedManager();
     renderShell({ ...makeVault(), manager }, apiWith(portfolio()));
     await waitFor(() => {
       expect(screen.getByTestId('hero-balance')).toHaveTextContent('$2.25');

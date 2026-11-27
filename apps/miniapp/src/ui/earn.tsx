@@ -14,7 +14,7 @@ import {
   formatDecimal,
   formatDecimalShort,
   parseDecimal,
-  toTestnetDisplayAddress,
+  type TonNetwork,
   tonAddressEquals,
   type BuiltTransfer,
   type DecodedSignedTransfer,
@@ -41,6 +41,7 @@ import type {
 } from '../ton/api';
 import { Button, Card, ErrorText, Notice, PhoneFrame, ScreenHeader, Segmented } from './common';
 import { useToast } from './toast';
+import { activeTonAddress, displayTonAddress, explorerHost, explorerMessageUrl } from './network';
 
 type EarnApi = TonReadApi & TonWriteApi & TonStakeApi;
 
@@ -94,6 +95,7 @@ export function EarnScreen({
   info,
   portfolio,
   api,
+  network,
   onBack,
   onSubmitted,
 }: {
@@ -101,6 +103,7 @@ export function EarnScreen({
   info: PublicAccountInfo;
   portfolio: TonPortfolio;
   api: EarnApi;
+  network: TonNetwork;
   onBack: () => void;
   onSubmitted: (
     decoded: DecodedSignedTransfer,
@@ -119,7 +122,7 @@ export function EarnScreen({
   useEffect(() => {
     let cancelled = false;
     api
-      .getStakingInfo('testnet')
+      .getStakingInfo(network)
       .then((value) => {
         if (!cancelled) setPool({ kind: 'ready', value });
       })
@@ -129,7 +132,7 @@ export function EarnScreen({
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, network]);
 
   const staking = pool.kind === 'ready' ? pool.value : null;
   const rate = staking?.exchangeRate ?? null;
@@ -191,7 +194,7 @@ export function EarnScreen({
     setError(null);
     setBusy(true);
     try {
-      const state = await api.getWalletState(info.ton.addressTestnetNonBounceable, 'testnet');
+      const state = await api.getWalletState(activeTonAddress(info.ton, network), network);
       if (state.status === 'active' && state.seqno === 0) {
         setError('Could not read the wallet seqno. Retry before staking.');
         return;
@@ -210,7 +213,7 @@ export function EarnScreen({
         payload = buildUnstakePayload({
           jettonWalletAddress: tsTonAsset.jettonWalletAddress,
           amountRaw: amountRaw.toString(),
-          ownerAddress: info.ton.addressTestnetNonBounceable,
+          ownerAddress: activeTonAddress(info.ton, network),
           mode: unstakeMode,
         });
       }
@@ -222,7 +225,7 @@ export function EarnScreen({
       const built = await buildSwapTransfer(
         {
           publicKeyHex: info.ton.publicKeyHex,
-          network: 'testnet',
+          network,
           seqno: state.seqno,
           to: payload.to,
           valueRaw: payload.valueRaw,
@@ -233,7 +236,7 @@ export function EarnScreen({
       );
       // Decode the exact body being signed, then emulate it fail-closed.
       const stakingDecoded = decodeStakingPayload(payload.valueRaw, payload.bodyBoc);
-      const emulation = await api.emulate(built.boc, 'testnet');
+      const emulation = await api.emulate(built.boc, network);
       setStep({
         kind: 'review',
         mode,
@@ -256,7 +259,7 @@ export function EarnScreen({
     setBusy(true);
     setError(null);
     try {
-      const result = await api.broadcast(step.built.boc, 'testnet');
+      const result = await api.broadcast(step.built.boc, network);
       // Stake leaves TON; unstake burns tsTON. Both are what the Activity row should show.
       const symbol = step.mode === 'stake' ? 'TON' : step.info.tsTonSymbol;
       const decimals = step.mode === 'stake' ? 9 : step.info.tsTonDecimals;
@@ -288,11 +291,11 @@ export function EarnScreen({
             </p>
             <a
               className="mt-2 block break-all text-[11.5px] font-medium text-accent-link underline"
-              href={`https://testnet.tonviewer.com/message/${step.hashHex}`}
+              href={explorerMessageUrl(network, step.hashHex)}
               target="_blank"
               rel="noreferrer noopener"
             >
-              testnet.tonviewer.com/message/{step.hashHex.slice(0, 16)}…
+              {explorerHost(network)}/message/{step.hashHex.slice(0, 16)}…
             </a>
           </Card>
           <Button
@@ -327,7 +330,7 @@ export function EarnScreen({
                 {step.mode === 'stake' ? 'Staking pool' : 'tsTON wallet'}
               </p>
               <code className="mt-1 block break-all font-mono text-[12.5px] text-ink">
-                {toTestnetDisplayAddress(step.decoded.recipient, true)}
+                {displayTonAddress(step.decoded.recipient, network, true)}
               </code>
             </div>
             <div className="h-px bg-hairline" />

@@ -77,6 +77,20 @@ async function mockTonApi(
   const staking = options.staking ?? 'ok';
   await page.route('**/api/ton/**', async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/ton/config') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          network: 'testnet',
+          swapEnabled: false,
+          stakingEnabled: false,
+          swapFeeBps: 0,
+          referralConfigured: false,
+        }),
+      });
+      return;
+    }
     if (path.endsWith('/portfolio')) {
       await json(route, PORTFOLIO);
       return;

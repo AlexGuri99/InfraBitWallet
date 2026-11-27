@@ -32,7 +32,12 @@ const PENDING: TonActivityItem = {
 describe('Transaction Detail (pending)', () => {
   it('renders a friendly testnet recipient instead of raw hex', () => {
     const { container } = renderWithProviders(
-      <TxDetailScreen item={PENDING} onBack={() => undefined} onRepeat={() => undefined} />,
+      <TxDetailScreen
+        item={PENDING}
+        network="testnet"
+        onBack={() => undefined}
+        onRepeat={() => undefined}
+      />,
     );
     const text = container.textContent;
     // 48-char user-friendly testnet form (kQ… bounceable), no raw workchain address.
@@ -47,6 +52,7 @@ describe('Transaction Detail (pending)', () => {
     const { container } = renderWithProviders(
       <TxDetailScreen
         item={{ ...PENDING, counterparty: friendly }}
+        network="testnet"
         onBack={() => undefined}
         onRepeat={() => undefined}
       />,

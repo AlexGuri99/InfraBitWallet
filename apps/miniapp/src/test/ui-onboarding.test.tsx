@@ -85,8 +85,10 @@ describe('Onboarding: create', () => {
 
     await screen.findByTestId('hero-balance');
     await user.click(screen.getByRole('button', { name: 'Deposit' }));
-    await user.click(screen.getByRole('button', { name: 'EVM' }));
-    expect(screen.getByTestId('address-EVM')).toHaveTextContent(/^0x/);
+    // v1 deposit is TON-only: no TRON/EVM addresses can be shown to receive funds.
+    expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
+    expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('address-TRON')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByTestId('phrase-words')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain(words.join(' '));
@@ -155,10 +157,8 @@ describe('Onboarding: import', () => {
 
     await screen.findByTestId('hero-balance');
     await user.click(screen.getByRole('button', { name: 'Deposit' }));
-    await user.click(screen.getByRole('button', { name: 'EVM' }));
-    expect(screen.getByTestId('address-EVM')).toHaveTextContent(
-      '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-    );
+    expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
+    expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();
     expect(secretHolder.has()).toBe(false);
   });
 

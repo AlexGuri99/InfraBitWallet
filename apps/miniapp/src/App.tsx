@@ -37,6 +37,8 @@ import {
   type TonWriteApi,
 } from './ton/api';
 import type { WalletTab } from './ui/nav';
+import { DEFAULT_TON_CONFIG, type TonConfig } from './ui/network';
+import { fetchTonConfig } from './ton/config';
 
 type Screen =
   | 'loading'
@@ -79,7 +81,20 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('loading');
   const [tab, setTab] = useState<WalletTab>('wallet');
   const [storageError, setStorageError] = useState(false);
+  const [tonConfig, setTonConfig] = useState<TonConfig>(DEFAULT_TON_CONFIG);
   const [importAccountType, setImportAccountType] = useState<AccountType>('bip39-multichain');
+
+  // The server owns the active network; the bundle has no build-time switch. Failure = testnet
+  // with swaps/staking disabled (never a guessed mainnet).
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchTonConfig(controller.signal).then((config) => {
+      if (!controller.signal.aborted) setTonConfig(config);
+    });
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -334,6 +349,7 @@ export function App() {
           <WalletShell
             manager={manager}
             api={defaultTonApi}
+            tonConfig={tonConfig}
             biometry={biometry}
             tab={tab}
             onTabChange={setTab}
