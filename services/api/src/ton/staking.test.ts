@@ -9,8 +9,16 @@ import type { ServerConfig } from '../config.js';
 const MASTER = '0:bdf3fa8098d129b54b4f73b5bac5d1e1fd91eb054169c3916dfc8ccd536d1000';
 const POOL_RAW = Address.parse(TONSTAKERS_POOL_MAINNET).toRawString();
 
-const MAINNET: ServerConfig = { provider: 'toncenter', network: 'mainnet' };
-const TESTNET: ServerConfig = { provider: 'toncenter', network: 'testnet' };
+const MAINNET: ServerConfig = {
+  provider: 'toncenter',
+  network: 'mainnet',
+  requireTelegramAuth: false,
+};
+const TESTNET: ServerConfig = {
+  provider: 'toncenter',
+  network: 'testnet',
+  requireTelegramAuth: false,
+};
 
 function poolBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

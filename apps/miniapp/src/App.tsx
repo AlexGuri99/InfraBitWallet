@@ -44,6 +44,7 @@ type Screen =
   | 'loading'
   | 'welcome'
   | 'create-phrase'
+  | 'create-verify'
   | 'create-passcode'
   | 'import-phrase'
   | 'import-disambiguate'
@@ -55,6 +56,7 @@ type Screen =
 
 const ONBOARDING_SECRET_SCREENS: Screen[] = [
   'create-phrase',
+  'create-verify',
   'create-passcode',
   'import-phrase',
   'import-disambiguate',
@@ -268,6 +270,21 @@ export function App() {
               setScreen('welcome');
             }}
             onDone={() => {
+              // Mandatory 3-word verification before the vault is sealed.
+              setScreen('create-verify');
+            }}
+          />
+        );
+        break;
+      case 'create-verify':
+        content = (
+          <VerifyScreen
+            step={{ current: 1, total: 2 }}
+            keepPhrase
+            onCancel={() => {
+              setScreen('create-phrase');
+            }}
+            onVerified={() => {
               setScreen('create-passcode');
             }}
           />

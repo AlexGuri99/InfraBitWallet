@@ -80,6 +80,7 @@ describe('server config: TON provider keys', () => {
     const config: ServerConfig = {
       provider: 'tonapi',
       network: 'testnet',
+      requireTelegramAuth: false,
       toncenterApiKey: 'unused',
       toncenterTestnetApiKey: 'unused',
       tonapiApiKey: undefined,
@@ -149,5 +150,41 @@ describe('mainnet swap revenue policy', () => {
     ).toBe(true);
     expect(stakingEnabledFor(configFor({ TON_NETWORK: 'mainnet' }))).toBe(true);
     expect(stakingEnabledFor(configFor({ TON_NETWORK: 'testnet' }))).toBe(false);
+  });
+});
+
+describe('Telegram auth configuration', () => {
+  it('defaults to no auth and accepts an explicit false flag', () => {
+    const result = loadServerConfig({});
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.config.requireTelegramAuth).toBe(false);
+    const explicit = loadServerConfig({ REQUIRE_TELEGRAM_AUTH: 'false' });
+    expect(explicit.ok && explicit.config.requireTelegramAuth).toBe(false);
+  });
+
+  it('enables auth with a bot token and never exposes the token in errors', () => {
+    const result = loadServerConfig({
+      REQUIRE_TELEGRAM_AUTH: 'true',
+      TELEGRAM_BOT_TOKEN: '123:secret-bot-token',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.requireTelegramAuth).toBe(true);
+    expect(result.config.telegramBotToken).toBe('123:secret-bot-token');
+  });
+
+  it('fails closed when auth is required without a token or with an invalid flag', () => {
+    expect(loadServerConfig({ REQUIRE_TELEGRAM_AUTH: 'true' })).toEqual({
+      ok: false,
+      error: 'INVALID_SERVER_ENV',
+    });
+    expect(loadServerConfig({ REQUIRE_TELEGRAM_AUTH: 'true', TELEGRAM_BOT_TOKEN: '   ' })).toEqual({
+      ok: false,
+      error: 'INVALID_SERVER_ENV',
+    });
+    expect(loadServerConfig({ REQUIRE_TELEGRAM_AUTH: 'yes' })).toEqual({
+      ok: false,
+      error: 'INVALID_SERVER_ENV',
+    });
   });
 });

@@ -17,6 +17,7 @@ const REFERRAL = '0:111111111111111111111111111111111111111111111111111111111111
 const CONFIG: ServerConfig = {
   provider: 'toncenter',
   network: 'testnet',
+  requireTelegramAuth: false,
   stonTestnetApiBaseUrl: 'https://ston.test',
 };
 

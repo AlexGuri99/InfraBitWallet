@@ -6,7 +6,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 
-const PASS = '2580';
+const PASS = '258036';
 
 const PORTFOLIO = {
   address: '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389287',
@@ -78,8 +78,16 @@ async function createWallet(page: Page): Promise<string[]> {
   const words = page.locator('[data-role="word"]');
   await expect(words).toHaveCount(24);
   const list = await words.allTextContents();
-  await page.getByLabel("I've stored the seed phrase in a secure place.").check();
   await page.getByRole('button', { name: 'Next' }).click();
+  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+  for (let i = 0; i < 3; i += 1) {
+    const input = page.locator('input[id^="word-"]').nth(i);
+    const id = await input.getAttribute('id');
+    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+    await input.fill(list[position] ?? '');
+  }
+  await page.getByRole('button', { name: 'Verify' }).click();
+
   await expect(page.getByRole('heading', { name: 'Set a passcode' })).toBeVisible();
   await page.getByLabel('PIN', { exact: true }).fill(PASS);
   await page.getByLabel('Confirm PIN').fill(PASS);
@@ -124,8 +132,15 @@ test.describe('brand, phrase copy and multi-wallet', () => {
     const newWords = page.locator('[data-role="word"]');
     await expect(newWords).toHaveCount(24);
     const words = await newWords.allTextContents();
-    await page.getByLabel("I've stored the seed phrase in a secure place.").check();
     await page.getByRole('button', { name: 'Next' }).click();
+    await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+    for (let i = 0; i < 3; i += 1) {
+      const input = page.locator('input[id^="word-"]').nth(i);
+      const id = await input.getAttribute('id');
+      const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+      await input.fill(words[position] ?? '');
+    }
+    await page.getByRole('button', { name: 'Verify' }).click();
 
     await expect(page.getByRole('heading', { name: 'Confirm your PIN' })).toBeVisible();
     await page.getByLabel('Current PIN').fill(PASS);

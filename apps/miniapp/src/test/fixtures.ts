@@ -2,4 +2,4 @@
 export const MNEMONIC_12_HARDHAT = 'test test test test test test test test test test test junk';
 
 /** 12+ chars so the no-device-secret policy accepts it in tests. */
-export const PASS = '2580';
+export const PASS = '258036';

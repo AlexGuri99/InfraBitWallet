@@ -143,10 +143,19 @@ async function createWallet(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByRole('button', { name: 'Create a wallet' }).click();
   await page.getByRole('button', { name: 'Show recovery phrase' }).click();
-  await page.getByLabel("I've stored the seed phrase in a secure place.").check();
+  const quizWords = await page.locator('[data-role="word"]').allTextContents();
   await page.getByRole('button', { name: 'Next' }).click();
-  await page.getByLabel('PIN', { exact: true }).fill('2580');
-  await page.getByLabel('Confirm PIN').fill('2580');
+  await expect(page.getByRole('heading', { name: 'Check your backup' })).toBeVisible();
+  for (let i = 0; i < 3; i += 1) {
+    const input = page.locator('input[id^="word-"]').nth(i);
+    const id = await input.getAttribute('id');
+    const position = Number.parseInt(id?.replace('word-', '') ?? '0', 10);
+    await input.fill(quizWords[position] ?? '');
+  }
+  await page.getByRole('button', { name: 'Verify' }).click();
+
+  await page.getByLabel('PIN', { exact: true }).fill('258036');
+  await page.getByLabel('Confirm PIN').fill('258036');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByTestId('hero-balance')).toHaveText('$2.25');
 }

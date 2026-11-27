@@ -1047,7 +1047,7 @@ export interface PasscodePolicy {
   minLength: number;
 }
 
-/** True for a 4-digit PIN that is all one digit or a consecutive ascending/descending run. */
+/** True for a PIN that is all one digit or a consecutive ascending/descending run. */
 function isWeakPin(pin: string): boolean {
   if (/^(\d)\1+$/.test(pin)) return true;
   const ascending = '01234567890123456789';
@@ -1056,13 +1056,12 @@ function isWeakPin(pin: string): boolean {
 }
 
 /**
- * Passcode policy (temporarily a 4-digit numeric PIN in every environment).
+ * Passcode policy: a 6-digit numeric PIN (mainnet hardening, 2026-11-27).
  *
- * SECURITY NOTE: this is a deliberate, temporary relaxation. A 4-digit PIN has only 10,000
- * combinations; with Argon2id and the backoff it is adequate for on-device guessing, but a
- * 4-digit PIN WITHOUT a device secret (Web/Desktop) is brute-forceable offline if the IndexedDB
- * envelope is copied. It must be tightened (or gated behind a passphrase on Web) before mainnet.
- * Recorded in docs/DECISIONS.md, docs/THREAT_MODEL.md and docs/UNVERIFIED.md.
+ * Existing vaults sealed with the previous 4-digit policy still UNLOCK because unsealing never
+ * applies this policy; only creating a vault or changing the passcode requires six digits. With
+ * a device secret the PIN is an on-device factor; without one (Web/Desktop) a copied envelope is
+ * still offline-attackable, so Argon2id + backoff + six digits remain the defence (T11).
  *
  * Weak PINs (all identical digits, consecutive ascending/descending runs) are rejected.
  * Argon2id parameters are NOT part of this policy; measure them with measureKdf().
@@ -1073,13 +1072,13 @@ export function evaluatePasscodeStrength(
 ): PasscodePolicy {
   const unprotectedByDeviceSecret = !hasDeviceSecretWrap;
 
-  if (!/^\d{4}$/.test(passcode)) {
+  if (!/^\d{6}$/.test(passcode)) {
     return {
       ok: false,
-      error: 'Enter a 4-digit PIN',
+      error: 'Enter a 6-digit PIN',
       unprotectedByDeviceSecret,
       kind: 'pin',
-      minLength: 4,
+      minLength: 6,
     };
   }
   if (isWeakPin(passcode)) {
@@ -1088,10 +1087,10 @@ export function evaluatePasscodeStrength(
       error: 'PIN is too easy to guess (avoid repeated or sequential digits)',
       unprotectedByDeviceSecret,
       kind: 'pin',
-      minLength: 4,
+      minLength: 6,
     };
   }
-  return { ok: true, unprotectedByDeviceSecret, kind: 'pin', minLength: 4 };
+  return { ok: true, unprotectedByDeviceSecret, kind: 'pin', minLength: 6 };
 }
 
 // ---------------------------------------------------------------------------

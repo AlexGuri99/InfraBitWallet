@@ -37,6 +37,10 @@ export interface ServerConfig {
   stonReferralAddress?: string | undefined;
   /** Optional signed-off router allowlist; when set, quotes from other routers are rejected. */
   stonAllowedRouters?: string[] | undefined;
+  /** Require a valid Telegram `initData` HMAC on provider-backed routes (mainnet). */
+  requireTelegramAuth: boolean;
+  /** Bot token used only to verify `initData`; never logged or returned. */
+  telegramBotToken?: string | undefined;
 }
 
 /** Documented mainnet REST API base URL (docs.ston.fi / api.ston.fi). */
@@ -73,6 +77,16 @@ const envSchema = z.object({
     (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
     z.string().trim().optional(),
   ),
+  REQUIRE_TELEGRAM_AUTH: z
+    .preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+      z.enum(['true', 'false']).optional(),
+    )
+    .transform((value) => value === 'true'),
+  TELEGRAM_BOT_TOKEN: z.preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().min(1).optional(),
+  ),
 });
 
 /**
@@ -92,6 +106,8 @@ export function loadServerConfig(
     STON_TESTNET_API_BASE_URL: env['STON_TESTNET_API_BASE_URL'],
     STON_REFERRAL_ADDRESS: env['STON_REFERRAL_ADDRESS'],
     STON_ALLOWED_ROUTERS: env['STON_ALLOWED_ROUTERS'],
+    REQUIRE_TELEGRAM_AUTH: env['REQUIRE_TELEGRAM_AUTH'],
+    TELEGRAM_BOT_TOKEN: env['TELEGRAM_BOT_TOKEN'],
   });
   if (!parsed.success) return { ok: false, error: 'INVALID_SERVER_ENV' };
   const routers = parsed.data.STON_ALLOWED_ROUTERS?.split(',')
@@ -107,7 +123,14 @@ export function loadServerConfig(
     stonTestnetApiBaseUrl: parsed.data.STON_TESTNET_API_BASE_URL,
     stonReferralAddress: parsed.data.STON_REFERRAL_ADDRESS,
     ...(routers && routers.length > 0 ? { stonAllowedRouters: routers } : {}),
+    requireTelegramAuth: parsed.data.REQUIRE_TELEGRAM_AUTH,
+    ...(parsed.data.TELEGRAM_BOT_TOKEN ? { telegramBotToken: parsed.data.TELEGRAM_BOT_TOKEN } : {}),
   };
+  // Fail closed: demanding auth without a token would reject every request anyway, so refuse to
+  // start with a clear (secret-free) error instead.
+  if (config.requireTelegramAuth && !config.telegramBotToken) {
+    return { ok: false, error: 'INVALID_SERVER_ENV' };
+  }
   warnOnMissingMainnetReferral(config);
   return { ok: true, config };
 }

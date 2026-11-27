@@ -531,3 +531,23 @@ Branch `feat/mainnet-network-wiring`.
 | E2E mainnet + testnet flows                                                                                          | DONE   | `src/test/e2e/mainnet.spec.ts`, config mocks in all e2e mocks  |
 
 **Remaining for mainnet launch:** API authentication/rate limiting, PIN/backup policy (P0 items from the pre-mainnet audit), treasury sign-off, and the manual 1–2 TON smoke test.
+
+---
+
+### P10: Pre-mainnet security hardening (API auth, PIN/backup, legal) (2026-11-27)
+
+Branch `feat/mainnet-security-hardening`.
+
+| Area                                                                                              | Status | Evidence                                                                         |
+| ------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------- |
+| `REQUIRE_TELEGRAM_AUTH` + `TELEGRAM_BOT_TOKEN`; fail closed when auth is on without a token       | DONE   | `services/api/src/config.ts`, `config.test.ts`                                   |
+| initData HMAC verification (official spec, constant-time, 24h/5min freshness)                     | DONE   | `telegram/auth.ts`, `auth.test.ts`                                               |
+| Auth enforced on all provider routes; `/api/ton/config` stays public; clean bypass when disabled  | DONE   | `api-guard.ts`, all handlers, `api-guard.test.ts`                                |
+| Client sends `X-Telegram-Init-Data` on every `/api/ton/*` call                                    | DONE   | `src/ton/api.ts`                                                                 |
+| Fixed-window rate limits (reads 60/min, heavy 20/min) with `429` + `Retry-After`, pluggable store | DONE   | `rate-limit.ts`, `api-guard.ts`, tests                                           |
+| 6-digit PIN policy (old 4-digit vaults still unlock/rotate)                                       | DONE   | `packages/crypto-vault/src/vault.ts`, `policy.test.ts`                           |
+| Mandatory 3-word backup quiz on Create (onboarding + My Wallets)                                  | DONE   | `onboarding.tsx` `VerifyScreen keepPhrase`, `App.tsx`, `wallets.tsx`, unit + e2e |
+| Self-hosted Terms of Use / Privacy Policy sheets (onboarding + Settings → About & legal)          | DONE   | `ui/legal.tsx`, e2e                                                              |
+
+**Remaining P0 before the mainnet switch:** treasury/referral sign-off, independent audit + bug
+bounty, jurisdiction/sanctions/ToS legal review, and the manual 1–2 TON mainnet smoke test.

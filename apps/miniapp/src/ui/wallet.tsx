@@ -15,6 +15,7 @@ import { secretHolder } from '../vault/secret-holder';
 import { useFullscreenControl } from '../telegram/fullscreen';
 import { Button, Card, ErrorText, Field, Notice, PhoneFrame, Sheet } from './common';
 import { InfraBitLogo } from './logo';
+import { LegalLinks } from './legal';
 import { AUTO_LOCK_KEY, readPreference, usePreferences } from './preferences';
 import { useToast } from './toast';
 import {
@@ -168,7 +169,7 @@ export function UnlockScreen({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={6}
             autoComplete="current-password"
             autoFocus
             className="text-center font-mono text-[26px] tracking-[0.5em]"
@@ -573,6 +574,12 @@ export function SettingsTab({
           />
         </SettingsGroup>
 
+        <SettingsGroup title="About & legal">
+          <div className="flex flex-col gap-1 px-4 py-3">
+            <LegalLinks align="start" />
+          </div>
+        </SettingsGroup>
+
         {message ? (
           <p role="status" className="px-1 text-[12.5px] font-medium text-positive">
             {message}
@@ -623,7 +630,7 @@ export function SettingsTab({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={6}
             autoComplete="current-password"
           />
           <Field
@@ -633,7 +640,7 @@ export function SettingsTab({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={6}
             autoComplete="new-password"
           />
           <Field
@@ -643,7 +650,7 @@ export function SettingsTab({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={6}
             autoComplete="new-password"
           />
           {error ? <ErrorText>{error}</ErrorText> : null}
@@ -665,7 +672,7 @@ export function SettingsTab({
                 type="password"
                 inputMode="numeric"
                 pattern="[0-9]*"
-                maxLength={4}
+                maxLength={6}
                 autoComplete="current-password"
               />
               {error ? <ErrorText>{error}</ErrorText> : null}
@@ -726,7 +733,7 @@ export function SettingsTab({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={6}
             autoComplete="current-password"
           />
           {error ? <ErrorText>{error}</ErrorText> : null}
@@ -744,7 +751,7 @@ export function SettingsTab({
             type="password"
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={4}
+            maxLength={6}
             autoComplete="current-password"
           />
           {error ? <ErrorText>{error}</ErrorText> : null}

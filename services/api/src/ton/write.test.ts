@@ -9,6 +9,7 @@ const ADDRESS = '0:debd442a01d7562dfa3f37c44d9d420e39aa2ef4f9f7a402ed1e3b9c0e389
 const CONFIG: ServerConfig = {
   provider: 'toncenter',
   network: 'testnet',
+  requireTelegramAuth: false,
   toncenterTestnetApiKey: 'k',
 };
 

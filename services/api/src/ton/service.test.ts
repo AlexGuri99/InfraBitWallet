@@ -16,6 +16,7 @@ const JETTON = '-1:27b3b038792c090b59897fbd890c4f5bc8a63d9ffc716f5861968972f6179
 const CONFIG: ServerConfig = {
   provider: 'toncenter',
   network: 'testnet',
+  requireTelegramAuth: false,
   toncenterTestnetApiKey: 'test-key',
 };
 

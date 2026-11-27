@@ -908,3 +908,46 @@ receive tabs and their QR codes were removed because an address for a chain the 
 from is a fund-loss trap. Static TRON/ETH rows were removed from Home and the pending-activity
 placeholders no longer appear. v1 reads as a focused TON wallet; EVM/TRON land with their
 adapters (and their own fee review).
+
+---
+
+## Decision: Option C API protection — env-gated initData HMAC plus per-caller rate limits (2026-11-27)
+
+**Authentication.** `REQUIRE_TELEGRAM_AUTH` (default `false`) turns on Telegram `initData`
+verification for every provider-backed route. With it set to `true`, config loading fails closed
+unless `TELEGRAM_BOT_TOKEN` is present. Verification follows the official spec
+(`secret = HMAC_SHA256("WebAppData", bot_token)`, sorted `data_check_string`, constant-time
+compare, `auth_date` ≤ 24 h and ≤ 5 min future skew) in `services/api/src/telegram/auth.ts`; the
+token is never logged, returned, or included in errors. `/api/ton/config` stays public so the
+unauthenticated app can still render a clean state outside Telegram, and a `false` flag makes
+testnet/preview/E2E bypass auth cleanly. The Mini App attaches `X-Telegram-Init-Data` whenever
+`window.Telegram.WebApp.initData` is non-empty and CSP stays `connect-src 'self'`.
+
+**Rate limiting.** Fixed-window limits live in a zero-dependency store behind a small interface:
+reads (config, portfolio, activity, wallet-state, staking/info) 60/min; heavy routes (emulate,
+broadcast, swap/quote) 20/min; keyed by verified `user.id` when authenticated, else the first
+`x-forwarded-for` hop. Exceeding returns `429 { error: 'rate_limited' }` with `Retry-After`.
+The default store is in-memory per serverless instance — a burst/cost guard, not a global quota;
+swapping in Upstash Redis later only means implementing `RateLimitStore`.
+
+## Decision: 6-digit PIN and mandatory 3-word backup verification (2026-11-27)
+
+**PIN.** New vaults and passcode changes require exactly six digits (weak patterns rejected).
+Unlocking never applies the policy, so any existing 4-digit dev vault still opens and can rotate
+its PIN in Settings. Argon2id parameters and the persisted exponential backoff are unchanged; the
+web/desktop offline-brute-force caveat shrinks from 10,000 to 1,000,000 candidates per envelope
+but still relies on Argon2id + the device secret (T11 remains partially open).
+
+**Backup.** The honor-system checkbox is gone. Create (onboarding and My Wallets → Create) now
+ends with a mandatory quiz: three distinct random positions from the freshly generated phrase must
+be typed exactly before the vault is sealed. The phrase stays in the module `secretHolder` (never
+React state, never persisted); the creation flow keeps it only until the passcode step, while the
+Settings "Test your backup" path clears it immediately on success.
+
+## Decision: self-hosted Terms of Use and Privacy Policy (2026-11-27)
+
+The app ships plain, self-hosted legal sheets linked from onboarding and Settings → About & legal.
+No external URLs are used (CSP `'self'`), and the text states: non-custodial key handling,
+permanent loss on a lost recovery phrase, third-party DeFi (STON.fi/Tonstakers) smart-contract
+risk, the transparent 0.35% swap fee, and that zero ad/tracker SDKs are bundled. They are product
+disclosure copy, not legal advice — counsel review remains in LEGAL_TODO.

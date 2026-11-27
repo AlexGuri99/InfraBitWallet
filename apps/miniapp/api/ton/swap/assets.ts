@@ -5,6 +5,7 @@
  * directly (CSP `connect-src 'self'`), and provider errors are clean.
  */
 import {
+  guardTonRequest,
   loadServerConfig,
   ProviderError,
   readTonNetwork,
@@ -13,6 +14,7 @@ import {
 } from '@onezerowallet/api';
 
 interface ApiRequest {
+  headers?: Record<string, string | string[] | undefined> | undefined;
   method?: string | undefined;
   query?: Record<string, string | string[] | undefined>;
 }
@@ -44,6 +46,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     send(res, 500, { error: 'server_misconfigured' });
     return;
   }
+  if (!guardTonRequest(req, res, loaded.config, 'read').ok) return;
   const network = readTonNetwork(first(req.query?.['network']) ?? loaded.config.network);
   if (!network || network !== loaded.config.network) {
     send(res, 400, { error: 'invalid_network' });

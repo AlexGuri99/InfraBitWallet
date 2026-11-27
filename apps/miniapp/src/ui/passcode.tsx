@@ -1,5 +1,5 @@
 /**
- * Dedicated 4-digit PIN screen shared by Create (step 2) and Import (step 2).
+ * Dedicated 6-digit PIN screen shared by Create (step 2) and Import (step 2).
  *
  * The PIN is read from uncontrolled inputs only; React state holds metadata about the policy
  * (length, ok, error), never the value. Visibility toggling changes input types without
@@ -98,7 +98,7 @@ export function PasscodeScreen({
           type={type}
           inputMode="numeric"
           pattern="[0-9]*"
-          maxLength={4}
+          maxLength={6}
           autoComplete="new-password"
           autoFocus
           className="text-center font-mono text-[22px] tracking-[0.5em]"
@@ -113,7 +113,7 @@ export function PasscodeScreen({
           type={type}
           inputMode="numeric"
           pattern="[0-9]*"
-          maxLength={4}
+          maxLength={6}
           autoComplete="new-password"
           className="text-center font-mono text-[22px] tracking-[0.5em]"
         />

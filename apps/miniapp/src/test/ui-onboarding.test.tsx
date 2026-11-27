@@ -8,13 +8,27 @@ import userEvent from '@testing-library/user-event';
 import { makeVault, renderApp } from './ui-helpers';
 import { secretHolder } from '../vault/secret-holder';
 
-const PASS = '2580';
+const PASS = '258036';
 const MNEMONIC_12 = 'test test test test test test test test test test test junk';
 
 function phraseWords(): string[] {
   return Array.from(screen.getByTestId('phrase-words').querySelectorAll('[data-role="word"]')).map(
     (el) => el.textContent,
   );
+}
+
+async function answerBackupQuiz(
+  user: ReturnType<typeof userEvent.setup>,
+  words: string[],
+): Promise<void> {
+  await screen.findByRole('heading', { name: 'Check your backup' });
+  const inputs = screen.getAllByRole('textbox');
+  for (const input of inputs) {
+    const label = input.closest('div')?.querySelector('label')?.textContent ?? '';
+    const position = Number.parseInt(/(\d+)/.exec(label)?.[1] ?? '0', 10) - 1;
+    await user.type(input, words[position] ?? '');
+  }
+  await user.click(screen.getByRole('button', { name: 'Verify' }));
 }
 
 async function openImport(user: ReturnType<typeof userEvent.setup>): Promise<void> {
@@ -35,13 +49,12 @@ async function createToPasscode(user: ReturnType<typeof userEvent.setup>): Promi
   const words = phraseWords();
   expect(words).toHaveLength(24);
 
-  const checkbox = screen.getByLabelText("I've stored the seed phrase in a secure place.");
   const next = screen.getByRole('button', { name: 'Next' });
-  expect(next).toBeDisabled();
-  await user.click(checkbox);
   expect(next).toBeEnabled();
   await user.click(next);
 
+  // Mandatory 3-word backup verification before the vault can be sealed.
+  await answerBackupQuiz(user, words);
   await screen.findByRole('heading', { name: 'Set a passcode' });
   return words;
 }
@@ -57,7 +70,7 @@ describe('Onboarding: create', () => {
     expect(screen.queryByText('Wallet type')).not.toBeInTheDocument();
   });
 
-  it('phrase is hidden until revealed and Next requires reveal + checkbox', async () => {
+  it('phrase is hidden until revealed, then Next leads to the mandatory 3-word quiz', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     await user.click(await screen.findByRole('button', { name: 'Create a wallet' }));
@@ -69,7 +82,10 @@ describe('Onboarding: create', () => {
     await waitFor(() => {
       expect(phraseWords()).toHaveLength(24);
     });
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('heading', { name: 'Check your backup' });
+    expect(screen.getAllByRole('textbox')).toHaveLength(3);
   });
 
   it('creates the wallet after phrase + PIN and clears the phrase', async () => {
@@ -77,13 +93,13 @@ describe('Onboarding: create', () => {
     renderApp(makeVault());
     const words = await createToPasscode(user);
 
-    expect(screen.getByText(/Enter a 4-digit PIN/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter a 6-digit PIN/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('PIN', { exact: true }), PASS);
     await user.type(screen.getByLabelText('Confirm PIN'), PASS);
     expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await screen.findByTestId('hero-balance');
+    await screen.findByTestId('hero-balance', {}, { timeout: 10_000 });
     await user.click(screen.getByRole('button', { name: 'Deposit' }));
     // v1 deposit is TON-only: no TRON/EVM addresses can be shown to receive funds.
     expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
@@ -95,38 +111,38 @@ describe('Onboarding: create', () => {
     expect(secretHolder.has()).toBe(false);
     const dump = `${JSON.stringify(localStorage)}\n${JSON.stringify(sessionStorage)}`;
     expect(dump).not.toContain(words[0] ?? 'never');
-  });
+  }, 30_000);
 
-  it('shows the device-secret PIN requirements and accepts a 4-digit PIN', async () => {
+  it('shows the device-secret PIN requirements and accepts a 6-digit PIN', async () => {
     const user = userEvent.setup();
     renderApp(makeVault({ secure: true }));
     await createToPasscode(user);
-    expect(screen.getByText(/Enter a 4-digit PIN/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText('PIN', { exact: true }), '2580');
-    await user.type(screen.getByLabelText('Confirm PIN'), '2580');
+    expect(screen.getByText(/Enter a 6-digit PIN/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('PIN', { exact: true }), '258036');
+    await user.type(screen.getByLabelText('Confirm PIN'), '258036');
     expect(screen.getByRole('status')).toHaveTextContent(/Requirements met/);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByTestId('hero-balance');
+    await screen.findByTestId('hero-balance', {}, { timeout: 10_000 });
   });
 
   it('rejects a trivial PIN when a device secret exists', async () => {
     const user = userEvent.setup();
     renderApp(makeVault({ secure: true }));
     await createToPasscode(user);
-    await user.type(screen.getByLabelText('PIN', { exact: true }), '1234');
-    await user.type(screen.getByLabelText('Confirm PIN'), '1234');
+    await user.type(screen.getByLabelText('PIN', { exact: true }), '123456');
+    await user.type(screen.getByLabelText('Confirm PIN'), '123456');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/too easy to guess/);
   });
 
-  it('rejects a non-4-digit PIN and stays on the passcode step', async () => {
+  it('rejects a non-6-digit PIN and stays on the passcode step', async () => {
     const user = userEvent.setup();
     renderApp(makeVault());
     await createToPasscode(user);
     await user.type(screen.getByLabelText('PIN', { exact: true }), '123');
     await user.type(screen.getByLabelText('Confirm PIN'), '123');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/4-digit PIN/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/6-digit PIN/);
     expect(screen.getByRole('heading', { name: 'Set a passcode' })).toBeInTheDocument();
   });
 });
@@ -155,7 +171,7 @@ describe('Onboarding: import', () => {
     await user.type(screen.getByLabelText('Confirm PIN'), PASS);
     await user.click(screen.getByRole('button', { name: 'Import' }));
 
-    await screen.findByTestId('hero-balance');
+    await screen.findByTestId('hero-balance', {}, { timeout: 10_000 });
     await user.click(screen.getByRole('button', { name: 'Deposit' }));
     expect(screen.getByTestId('address-TON')).toHaveTextContent(/^0Q/);
     expect(screen.queryByTestId('address-EVM')).not.toBeInTheDocument();

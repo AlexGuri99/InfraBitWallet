@@ -175,7 +175,7 @@ describe('mainnet network wiring', () => {
     expect(calls.emulate.at(-1)?.network).toBe('mainnet');
     // Review shows the mainnet user-friendly form, never a testnet kQ/0Q address.
     expect(screen.queryByText(/^(?:kQ|0Q)/)).not.toBeInTheDocument();
-  });
+  }, 30_000);
 
   it('testnet keeps 0Q addresses and the TESTNET badge while rejecting mainnet prefixes', async () => {
     const user = userEvent.setup();
@@ -199,7 +199,7 @@ describe('mainnet network wiring', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Review transfer' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Mainnet-only address/);
-  });
+  }, 30_000);
 
   it('renders mainnet explorer links and UQ counterparties on the transaction detail', () => {
     renderWithProviders(

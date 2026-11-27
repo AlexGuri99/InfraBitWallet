@@ -5,6 +5,7 @@
  * (CSP connect-src stays 'self'). Errors are clean and never include upstream bodies or keys.
  */
 import {
+  guardTonRequest,
   getTonPortfolio,
   loadServerConfig,
   normalizeTonAddress,
@@ -13,6 +14,7 @@ import {
 } from '@onezerowallet/api';
 
 interface ApiRequest {
+  headers?: Record<string, string | string[] | undefined> | undefined;
   method?: string | undefined;
   query?: Record<string, string | string[] | undefined>;
 }
@@ -44,6 +46,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     send(res, 500, { error: 'server_misconfigured' });
     return;
   }
+  if (!guardTonRequest(req, res, loaded.config, 'read').ok) return;
   const address = normalizeTonAddress(first(req.query?.['address']));
   if (!address) {
     send(res, 400, { error: 'invalid_address' });

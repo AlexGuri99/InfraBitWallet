@@ -6,6 +6,7 @@
  * the response carries only what the review screen needs.
  */
 import {
+  guardTonRequest,
   loadServerConfig,
   ProviderError,
   readTonNetwork,
@@ -14,6 +15,7 @@ import {
 } from '@onezerowallet/api';
 
 interface ApiRequest {
+  headers?: Record<string, string | string[] | undefined> | undefined;
   method?: string | undefined;
   body?: unknown;
 }
@@ -64,6 +66,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     send(res, 500, { error: 'server_misconfigured' });
     return;
   }
+  if (!guardTonRequest(req, res, loaded.config, 'heavy').ok) return;
   const body = readBody(req.body);
   const network = readTonNetwork(body?.['network'] ?? loaded.config.network);
   const offerAsset = str(body?.['offerAsset']);
