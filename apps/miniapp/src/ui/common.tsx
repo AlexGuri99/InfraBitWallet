@@ -35,7 +35,9 @@ export function PhoneFrame({ children }: { children: ReactNode }) {
         data-testid="phone-frame"
         className="flex min-h-[100dvh] w-full max-w-[430px] flex-col"
         style={{
-          paddingTop: 'var(--app-safe-top, env(safe-area-inset-top))',
+          // Device/status-bar inset + Telegram's floating-controls band (fullscreen only).
+          paddingTop:
+            'calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px))',
           paddingLeft: 'env(safe-area-inset-left)',
           paddingRight: 'env(safe-area-inset-right)',
         }}
@@ -80,8 +82,17 @@ export function ScreenHeader({
   return (
     <header
       className={`grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 ${
-        floating ? '' : 'sticky top-0 z-20 bg-glass backdrop-blur-[18px]'
+        floating ? '' : 'sticky z-20 bg-glass backdrop-blur-[18px]'
       }`}
+      style={
+        floating
+          ? undefined
+          : {
+              // Stick below the same safe-area band the shell reserves, so a scrolled header never
+              // slides under the notch or Telegram's floating fullscreen controls.
+              top: 'calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px))',
+            }
+      }
     >
       <div className="flex justify-start">{onBack ? <BackButton onClick={onBack} /> : null}</div>
       <h1 className="text-center text-[17px] font-bold tracking-[-0.01em] text-ink">{title}</h1>

@@ -460,3 +460,21 @@ Branch `fix/trade-earn-padding-and-mobile-fullscreen`.
 **Root cause:** mobile Telegram clients expose the WebView bridge but not the Bot API 8.0
 `requestFullscreen` methods on every client build, and mobile WebViews do not implement the
 standard browser Fullscreen API — both old detection paths returned false. See DECISIONS.md.
+
+---
+
+### P6: iOS fullscreen native events + safe-area clearance (2026-11-27)
+
+Branch `fix/ios-fullscreen-insets-and-events`.
+
+| Area                                                                                                   | Status | Evidence                                            |
+| ------------------------------------------------------------------------------------------------------ | ------ | --------------------------------------------------- |
+| Intercept `Telegram.WebView.receiveEvent` (snake_case) alongside `WebApp.onEvent`, preserving handlers | DONE   | `telegram/fullscreen.tsx`, `ui-fullscreen.test.tsx` |
+| `fullscreen_changed` confirms the bridge request and clears the 1.5 s timer (no false error toast)     | DONE   | `fullscreen.tsx`, unit + Playwright mobile test     |
+| `safe_area_changed` / `content_safe_area_changed` update `--tg-*-inset-*` and the shell padding        | DONE   | `fullscreen.tsx`, `ui-fullscreen.test.tsx`          |
+| Shell + sticky headers pad by safe-area + content-safe-area; 48 px fallback in fullscreen, 0 on exit   | DONE   | `ui/common.tsx`, unit test                          |
+| Request fresh insets via `web_app_request_safe_area` / `web_app_request_content_safe_area`             | DONE   | `requestBridgeSafeArea`, e2e assertion              |
+| Fullscreen icon direction: outward expand when not fullscreen, inward collapse when fullscreen         | DONE   | unit icon-path assertions                           |
+
+**Untested:** real iOS hardware; verified against the documented wire format and simulated native
+events. See DECISIONS.md for the root cause.

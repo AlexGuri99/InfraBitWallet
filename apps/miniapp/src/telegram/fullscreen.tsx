@@ -77,6 +77,33 @@ export const FULLSCREEN_BRIDGE_EVENTS = {
   exit: 'web_app_exit_fullscreen',
 } as const;
 
+/** Bridge methods that ask the client to re-send its current safe-area values. */
+export const SAFE_AREA_BRIDGE_EVENTS = {
+  safe: 'web_app_request_safe_area',
+  content: 'web_app_request_content_safe_area',
+} as const;
+
+/**
+ * Top clearance used while fullscreen is on and the client has not reported a content inset yet.
+ * Telegram's floating `X InfraBitWallet` / `v` controls sit in that band, so the header must never
+ * start at 0 there.
+ */
+export const FULLSCREEN_CONTENT_TOP_FALLBACK = 48;
+
+/**
+ * Native WebView bridge iOS uses to deliver responses: `Telegram.WebView.receiveEvent(name, data)`
+ * with snake_case names. It is separate from the camelCase `WebApp.onEvent` surface.
+ */
+export interface TelegramWebViewBridge {
+  receiveEvent?: (eventType: string, eventData?: string | Record<string, unknown>) => void;
+}
+
+export type NativeFullscreenEvent =
+  | { type: 'fullscreen_changed'; isFullscreen: boolean }
+  | { type: 'fullscreen_failed'; error: string }
+  | { type: 'safe_area_changed'; inset: Partial<SafeAreaInset> }
+  | { type: 'content_safe_area_changed'; inset: Partial<SafeAreaInset> };
+
 export function telegramWebviewProxy(): TelegramWebviewProxy | null {
   if (typeof window === 'undefined') return null;
   const proxy = (window as { TelegramWebviewProxy?: TelegramWebviewProxy }).TelegramWebviewProxy;
@@ -118,6 +145,120 @@ export function requestBridgeFullscreen(enter: boolean): boolean {
   }
 }
 
+/** Ask the client to send fresh safe-area values through `Telegram.WebView.receiveEvent`. */
+export function requestBridgeSafeArea(which: 'safe' | 'content'): boolean {
+  const proxy = telegramWebviewProxy();
+  if (!proxy?.postEvent) return false;
+  try {
+    proxy.postEvent(
+      which === 'safe' ? SAFE_AREA_BRIDGE_EVENTS.safe : SAFE_AREA_BRIDGE_EVENTS.content,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Parses the `eventData` an iOS client passes to `Telegram.WebView.receiveEvent`. */
+export function parseWebviewEvent(
+  eventType: string,
+  eventData: unknown,
+): NativeFullscreenEvent | null {
+  let data: unknown = eventData;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      data = undefined;
+    }
+  }
+  const record = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+  if (eventType === 'fullscreen_changed') {
+    const value = record['is_fullscreen'];
+    return { type: 'fullscreen_changed', isFullscreen: value === true || value === 'true' };
+  }
+  if (eventType === 'fullscreen_failed') {
+    return {
+      type: 'fullscreen_failed',
+      error: typeof record['error'] === 'string' ? record['error'] : '',
+    };
+  }
+  if (eventType === 'safe_area_changed' || eventType === 'content_safe_area_changed') {
+    return {
+      type: eventType,
+      inset: {
+        top: numberOrZero(record['top']),
+        bottom: numberOrZero(record['bottom']),
+        left: numberOrZero(record['left']),
+        right: numberOrZero(record['right']),
+      },
+    };
+  }
+  return null;
+}
+
+interface TelegramGlobalWithWebView {
+  WebApp?: unknown;
+  WebView?: TelegramWebViewBridge;
+}
+
+function telegramGlobal(): TelegramGlobalWithWebView | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return (window as { Telegram?: TelegramGlobalWithWebView }).Telegram;
+}
+
+/**
+ * Intercepts `window.Telegram.WebView.receiveEvent`, preserving any handler the injected SDK
+ * installed. Only acts inside Telegram (a WebView bridge or proxy must exist); returns a cleanup
+ * that restores the previous state exactly.
+ */
+export function installWebViewReceiveEvent(
+  handler: (event: NativeFullscreenEvent) => void,
+): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const existingGlobal = telegramGlobal();
+  const proxy = telegramWebviewProxy();
+  if (!existingGlobal && !proxy) return () => {};
+
+  const win = window as { Telegram?: TelegramGlobalWithWebView };
+  const telegram = win.Telegram ?? {};
+  const webView = telegram.WebView ?? {};
+  const previous = webView.receiveEvent;
+
+  const receiveEvent = (eventType: string, eventData?: string | Record<string, unknown>): void => {
+    if (previous) {
+      try {
+        previous(eventType, eventData);
+      } catch {
+        // A broken third-party handler must not suppress our own state updates.
+      }
+    }
+    const parsed = parseWebviewEvent(eventType, eventData);
+    if (parsed) handler(parsed);
+  };
+
+  // Some clients expose `window.Telegram` as a read-only property; never assign over it.
+  try {
+    webView.receiveEvent = receiveEvent;
+    telegram.WebView = webView;
+    if (!win.Telegram) win.Telegram = telegram;
+  } catch {
+    return () => {};
+  }
+
+  return () => {
+    try {
+      if (webView.receiveEvent !== receiveEvent) return; // someone else replaced it later
+      if (previous) webView.receiveEvent = previous;
+      else delete webView.receiveEvent;
+      if (!telegram.WebApp && Object.keys(webView).length === 0) delete telegram.WebView;
+      if (!telegram.WebApp && Object.keys(telegram).length === 0 && !proxy) delete win.Telegram;
+    } catch {
+      // Restoration is best-effort; a frozen global is not worth crashing the app over.
+    }
+  };
+}
+
 /** Browser fallback: standard Fullscreen API on the document element. */
 export function browserFullscreenSupported(): boolean {
   return (
@@ -147,27 +288,46 @@ export function readSafeInsets(tg: FullscreenCapable | null | undefined): {
 }
 
 /**
- * Writes the combined insets to <html>. `--app-safe-top` is `max(device notch, safe + content)`
- * so entering fullscreen shifts the app below the notch and Telegram's floating controls.
+ * Writes the insets to <html>.
+ *
+ * - `--tg-safe-area-inset-*` are the device/Telegram chrome insets (falling back to the CSS
+ *   `env(safe-area-inset-*)` notch values when the client reports 0).
+ * - `--tg-content-safe-area-inset-top` is the band Telegram's floating fullscreen controls occupy.
+ *   It is applied only in fullscreen; while the client has not reported a value yet we use
+ *   `FULLSCREEN_CONTENT_TOP_FALLBACK` so the header can never hide behind those controls. In
+ *   normal sheet mode it is 0, so there is no extra blank gap.
+ * - `--app-safe-top` is the sum of both (kept for older consumers).
  */
-export function applySafeAreaVars(safe: SafeAreaInset, content: SafeAreaInset): void {
+export function applySafeAreaVars(
+  safe: SafeAreaInset,
+  content: SafeAreaInset,
+  isFullscreen: boolean = false,
+): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const top = safe.top + content.top;
-  const bottom = safe.bottom + content.bottom;
-  root.style.setProperty('--tg-safe-area-inset-top', `${String(safe.top)}px`);
-  root.style.setProperty('--tg-safe-area-inset-bottom', `${String(safe.bottom)}px`);
-  root.style.setProperty('--tg-content-safe-area-inset-top', `${String(content.top)}px`);
-  root.style.setProperty('--tg-content-safe-area-inset-bottom', `${String(content.bottom)}px`);
+  const safeTop = safe.top > 0 ? `${String(safe.top)}px` : 'env(safe-area-inset-top, 0px)';
+  const safeBottom =
+    safe.bottom > 0 ? `${String(safe.bottom)}px` : 'env(safe-area-inset-bottom, 0px)';
+  const contentTop = isFullscreen
+    ? content.top > 0
+      ? content.top
+      : FULLSCREEN_CONTENT_TOP_FALLBACK
+    : 0;
+  const contentBottom = isFullscreen ? content.bottom : 0;
+
+  root.style.setProperty('--tg-safe-area-inset-top', safeTop);
+  root.style.setProperty('--tg-safe-area-inset-bottom', safeBottom);
+  root.style.setProperty('--tg-safe-area-inset-left', `${String(safe.left)}px`);
+  root.style.setProperty('--tg-safe-area-inset-right', `${String(safe.right)}px`);
+  root.style.setProperty('--tg-content-safe-area-inset-top', `${String(contentTop)}px`);
+  root.style.setProperty('--tg-content-safe-area-inset-bottom', `${String(contentBottom)}px`);
   root.style.setProperty(
     '--app-safe-top',
-    top > 0 ? `max(env(safe-area-inset-top), ${String(top)}px)` : 'env(safe-area-inset-top)',
+    `calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + ${String(contentTop)}px)`,
   );
   root.style.setProperty(
     '--app-safe-bottom',
-    bottom > 0
-      ? `max(env(safe-area-inset-bottom), ${String(bottom)}px)`
-      : 'env(safe-area-inset-bottom)',
+    `calc(var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + ${String(contentBottom)}px)`,
   );
 }
 
@@ -178,6 +338,8 @@ export function resetSafeAreaVars(): void {
   for (const name of [
     '--tg-safe-area-inset-top',
     '--tg-safe-area-inset-bottom',
+    '--tg-safe-area-inset-left',
+    '--tg-safe-area-inset-right',
     '--tg-content-safe-area-inset-top',
     '--tg-content-safe-area-inset-bottom',
   ]) {
@@ -219,7 +381,7 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   const [isFullscreen, setIsFullscreen] = useState(
     () => tg?.isFullscreen === true || (browserSupported && document.fullscreenElement !== null),
   );
-  // Bridge requests are optimistic: if no fullscreenChanged event arrives, we revert and explain.
+  // Bridge requests are optimistic: if no confirmation event arrives, we revert and explain.
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearConfirmTimer = useCallback(() => {
     if (confirmTimer.current !== null) {
@@ -229,12 +391,41 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => clearConfirmTimer, [clearConfirmTimer]);
 
+  // Latest Telegram insets and fullscreen state, kept in refs so event handlers and the
+  // fullscreen change effect always apply consistent values.
+  const insetsRef = useRef(readSafeInsets(tg));
+  const isFullscreenRef = useRef(isFullscreen);
+  isFullscreenRef.current = isFullscreen;
+
+  const applyInsets = useCallback(() => {
+    applySafeAreaVars(insetsRef.current.safe, insetsRef.current.content, isFullscreenRef.current);
+  }, []);
+
+  const setFullscreen = useCallback(
+    (next: boolean) => {
+      isFullscreenRef.current = next;
+      setIsFullscreen(next);
+      applyInsets();
+    },
+    [applyInsets],
+  );
+
   const isSupported = tgSupported || bridgeSupported || browserSupported;
 
   // Adopt Telegram's current state once the WebApp object becomes available.
   useEffect(() => {
-    if (tgSupported) setIsFullscreen(tg?.isFullscreen === true);
-  }, [tg, tgSupported]);
+    if (tgSupported) setFullscreen(tg?.isFullscreen === true);
+  }, [tg, tgSupported, setFullscreen]);
+
+  // Recompute the clearance whenever fullscreen flips (enter: content band applies; exit: 0).
+  useEffect(() => {
+    isFullscreenRef.current = isFullscreen;
+    applyInsets();
+    if (!tgSupported && !bridgeSupported) return;
+    // Ask the client for fresh values; iOS answers through Telegram.WebView.receiveEvent.
+    requestBridgeSafeArea('safe');
+    requestBridgeSafeArea('content');
+  }, [isFullscreen, tgSupported, bridgeSupported, applyInsets]);
 
   // Follow the live object: false → true when Telegram (or a late script) attaches the methods.
   // The bridge is re-checked under the same window because some mobile clients create the proxy
@@ -267,11 +458,45 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   const syncInsets = useCallback(() => {
-    if (tgSupported) {
-      const { safe, content } = readSafeInsets(tg);
-      applySafeAreaVars(safe, content);
-    }
-  }, [tg, tgSupported]);
+    if (tg) insetsRef.current = readSafeInsets(tg);
+    applyInsets();
+  }, [tg, applyInsets]);
+
+  const applyBridgeInset = useCallback(
+    (kind: 'safe' | 'content', inset: Partial<SafeAreaInset>) => {
+      const normalized: SafeAreaInset = {
+        top: numberOrZero(inset.top),
+        bottom: numberOrZero(inset.bottom),
+        left: numberOrZero(inset.left),
+        right: numberOrZero(inset.right),
+      };
+      insetsRef.current = {
+        ...insetsRef.current,
+        [kind]: normalized,
+      };
+      applyInsets();
+    },
+    [applyInsets],
+  );
+
+  // iOS delivers responses through Telegram.WebView.receiveEvent (snake_case), not only through
+  // WebApp.onEvent. Intercept it so a successful request clears the optimistic timer immediately.
+  useEffect(() => {
+    return installWebViewReceiveEvent((event) => {
+      if (event.type === 'fullscreen_changed') {
+        clearConfirmTimer();
+        setFullscreen(event.isFullscreen);
+        syncInsets();
+        return;
+      }
+      if (event.type === 'fullscreen_failed') {
+        clearConfirmTimer();
+        notifyUnavailable();
+        return;
+      }
+      applyBridgeInset(event.type === 'safe_area_changed' ? 'safe' : 'content', event.inset);
+    });
+  }, [applyBridgeInset, clearConfirmTimer, notifyUnavailable, setFullscreen, syncInsets]);
 
   // Telegram events: fullscreen state, failures and safe-area changes. The bridge path needs the
   // fullscreenChanged event even when the high-level methods are missing.
@@ -279,7 +504,7 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
     if (!tg || (!tgSupported && !bridgeSupported)) return;
     const onFullscreenChanged = (payload: unknown): void => {
       clearConfirmTimer();
-      setIsFullscreen(boolFromPayload(payload));
+      setFullscreen(boolFromPayload(payload));
       syncInsets();
     };
     const onFailed = (): void => {
@@ -301,20 +526,28 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
       tg.offEvent?.('contentSafeAreaChanged', onSafeArea);
       resetSafeAreaVars();
     };
-  }, [tg, tgSupported, bridgeSupported, syncInsets, notifyUnavailable, clearConfirmTimer]);
+  }, [
+    tg,
+    tgSupported,
+    bridgeSupported,
+    syncInsets,
+    notifyUnavailable,
+    clearConfirmTimer,
+    setFullscreen,
+  ]);
 
   // Browser fallback: mirror the standard event.
   useEffect(() => {
     if (!browserSupported) return;
     const onChange = (): void => {
-      setIsFullscreen(document.fullscreenElement !== null);
+      setFullscreen(document.fullscreenElement !== null);
     };
     document.addEventListener('fullscreenchange', onChange);
     onChange();
     return () => {
       document.removeEventListener('fullscreenchange', onChange);
     };
-  }, [browserSupported]);
+  }, [browserSupported, setFullscreen]);
 
   const toggle = useCallback(() => {
     if (tgSupported) {
@@ -334,11 +567,12 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
         notifyUnavailable();
         return;
       }
-      setIsFullscreen(next);
+      setFullscreen(next);
       clearConfirmTimer();
       confirmTimer.current = setTimeout(() => {
         confirmTimer.current = null;
-        setIsFullscreen((current) => (current === next ? !next : current));
+        // Only revert if Telegram never confirmed the transition.
+        if (isFullscreenRef.current === next) setFullscreen(!next);
         notifyUnavailable();
       }, 1500);
       return;
@@ -360,6 +594,7 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
     tg,
     notifyUnavailable,
     clearConfirmTimer,
+    setFullscreen,
   ]);
 
   const value = useMemo<FullscreenControl>(

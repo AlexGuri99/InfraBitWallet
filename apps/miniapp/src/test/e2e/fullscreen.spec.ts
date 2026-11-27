@@ -269,20 +269,76 @@ test.describe('fullscreen control', () => {
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __tgPosts: string[] }).__tgPosts))
       .toContain('web_app_request_fullscreen');
+    // Fresh insets are requested through the bridge on startup/state change.
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __tgPosts: string[] }).__tgPosts))
+      .toEqual(
+        expect.arrayContaining(['web_app_request_safe_area', 'web_app_request_content_safe_area']),
+      );
 
-    // Telegram confirms through fullscreenChanged; the control flips to Exit.
+    // iOS confirms via Telegram.WebView.receiveEvent (snake_case), not WebApp.onEvent.
     await page.evaluate(() => {
-      (window as unknown as { __emitTg: (event: string, payload?: unknown) => void }).__emitTg(
-        'fullscreenChanged',
-        { isFullscreen: true },
+      (
+        window as unknown as {
+          Telegram: { WebView: { receiveEvent: (event: string, data: string) => void } };
+        }
+      ).Telegram.WebView.receiveEvent(
+        'fullscreen_changed',
+        JSON.stringify({ is_fullscreen: true }),
       );
     });
     const exit = page.getByTestId('fullscreen-toggle');
     await expect(exit).toHaveAttribute('aria-label', 'Exit fullscreen');
+
+    // No false "unavailable" toast once the native confirmation arrives.
+    await page.waitForTimeout(1700);
+    await expect(page.getByText("Fullscreen isn't available on this device")).toHaveCount(0);
+
+    // Native safe-area events clear Telegram's floating bar above our header.
+    await page.evaluate(() => {
+      const bridge = (
+        window as unknown as {
+          Telegram: { WebView: { receiveEvent: (event: string, data: string) => void } };
+        }
+      ).Telegram.WebView;
+      bridge.receiveEvent(
+        'safe_area_changed',
+        JSON.stringify({ top: 59, bottom: 34, left: 0, right: 0 }),
+      );
+      bridge.receiveEvent(
+        'content_safe_area_changed',
+        JSON.stringify({ top: 52, bottom: 0, left: 0, right: 0 }),
+      );
+    });
+    const fullscreenPadding = await page.evaluate(() => {
+      const frame = document.querySelector('[data-testid="phone-frame"]');
+      return frame ? Number.parseFloat(getComputedStyle(frame).paddingTop) : 0;
+    });
+    expect(fullscreenPadding).toBeGreaterThanOrEqual(100);
+
     await exit.click();
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __tgPosts: string[] }).__tgPosts))
       .toContain('web_app_exit_fullscreen');
+
+    // Leaving fullscreen removes the extra content clearance.
+    await page.evaluate(() => {
+      (
+        window as unknown as {
+          Telegram: { WebView: { receiveEvent: (event: string, data: string) => void } };
+        }
+      ).Telegram.WebView.receiveEvent(
+        'fullscreen_changed',
+        JSON.stringify({ is_fullscreen: false }),
+      );
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          document.documentElement.style.getPropertyValue('--tg-content-safe-area-inset-top'),
+        ),
+      )
+      .toBe('0px');
 
     // Never clipped at the narrowest supported viewport, and Settings exposes the same control.
     await page.setViewportSize({ width: 360, height: 780 });

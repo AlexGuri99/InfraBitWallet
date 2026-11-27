@@ -94,6 +94,13 @@ export type TelegramWebApp = WebApp;
 declare global {
   interface Window {
     Telegram?: {
+      /**
+       * Native WebView bridge used by iOS to deliver responses with snake_case event names
+       * (`fullscreen_changed`, `safe_area_changed`, ...). Optional: feature-detect, never assume.
+       */
+      WebView?: {
+        receiveEvent?: (eventType: string, eventData?: string | Record<string, unknown>) => void;
+      };
       WebApp: {
         initData: string;
         initDataUnsafe: Record<string, unknown>;
