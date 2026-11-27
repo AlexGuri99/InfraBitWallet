@@ -15,6 +15,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -60,6 +61,61 @@ const FullscreenContext = createContext<FullscreenControl | null>(null);
 export function telegramFullscreenSupported(tg: FullscreenCapable | null | undefined): boolean {
   if (!tg) return false;
   return typeof tg.requestFullscreen === 'function' && typeof tg.exitFullscreen === 'function';
+}
+
+/**
+ * The raw Telegram WebView bridge. Inside the mobile clients this object exists synchronously,
+ * before (or even without) the injected `window.Telegram.WebApp` exposing the high-level methods.
+ * It is a function-only surface: `postEvent('web_app_<method>', data)`.
+ */
+export interface TelegramWebviewProxy {
+  postEvent?: (eventType: string, eventData?: string) => void;
+}
+
+export const FULLSCREEN_BRIDGE_EVENTS = {
+  enter: 'web_app_request_fullscreen',
+  exit: 'web_app_exit_fullscreen',
+} as const;
+
+export function telegramWebviewProxy(): TelegramWebviewProxy | null {
+  if (typeof window === 'undefined') return null;
+  const proxy = (window as { TelegramWebviewProxy?: TelegramWebviewProxy }).TelegramWebviewProxy;
+  return typeof proxy?.postEvent === 'function' ? proxy : null;
+}
+
+/**
+ * Bridge fallback support: a WebView proxy exists AND the client advertises Bot API 8.0+ (older
+ * clients ignore the request, so we keep the control hidden there). The version string is only
+ * used here because the bridge has no capability object of its own.
+ */
+export function telegramBridgeFullscreenSupported(
+  tg: FullscreenCapable | null | undefined,
+): boolean {
+  if (telegramWebviewProxy() === null) return false;
+  if (typeof tg?.isVersionAtLeast === 'function') {
+    try {
+      return tg.isVersionAtLeast('8.0');
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Post a fullscreen request through the bridge. Event names and the empty payload match the
+ * official telegram-web-app.js bridge (it calls `TelegramWebviewProxy.postEvent(eventType,
+ * JSON.stringify(params))` with no params for these methods). Returns false when unreachable.
+ */
+export function requestBridgeFullscreen(enter: boolean): boolean {
+  const proxy = telegramWebviewProxy();
+  if (!proxy?.postEvent) return false;
+  try {
+    proxy.postEvent(enter ? FULLSCREEN_BRIDGE_EVENTS.enter : FULLSCREEN_BRIDGE_EVENTS.exit);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Browser fallback: standard Fullscreen API on the document element. */
@@ -156,12 +212,24 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   // the fullscreen methods after the object exists. Re-check for a short window instead of
   // freezing "unsupported" on the first render.
   const [tgSupported, setTgSupported] = useState(() => telegramFullscreenSupported(tg));
+  const [bridgeSupported, setBridgeSupported] = useState(() =>
+    telegramBridgeFullscreenSupported(tg),
+  );
   const browserSupported = browserFullscreenSupported();
   const [isFullscreen, setIsFullscreen] = useState(
     () => tg?.isFullscreen === true || (browserSupported && document.fullscreenElement !== null),
   );
+  // Bridge requests are optimistic: if no fullscreenChanged event arrives, we revert and explain.
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearConfirmTimer = useCallback(() => {
+    if (confirmTimer.current !== null) {
+      clearTimeout(confirmTimer.current);
+      confirmTimer.current = null;
+    }
+  }, []);
+  useEffect(() => clearConfirmTimer, [clearConfirmTimer]);
 
-  const isSupported = tgSupported || browserSupported;
+  const isSupported = tgSupported || bridgeSupported || browserSupported;
 
   // Adopt Telegram's current state once the WebApp object becomes available.
   useEffect(() => {
@@ -169,19 +237,25 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
   }, [tg, tgSupported]);
 
   // Follow the live object: false → true when Telegram (or a late script) attaches the methods.
+  // The bridge is re-checked under the same window because some mobile clients create the proxy
+  // (and the WebApp object) slightly after the first React render.
   useEffect(() => {
     const supported = telegramFullscreenSupported(tg);
     setTgSupported(supported);
-    if (supported || !tg) return undefined;
+    const bridge = telegramBridgeFullscreenSupported(tg);
+    setBridgeSupported(bridge);
+    if ((supported && bridge) || !tg) return undefined;
     let attempts = 0;
     const id = window.setInterval(() => {
       attempts += 1;
-      if (telegramFullscreenSupported(tg)) {
-        setTgSupported(true);
+      if (telegramFullscreenSupported(tg)) setTgSupported(true);
+      if (telegramBridgeFullscreenSupported(tg)) setBridgeSupported(true);
+      if (
+        (telegramFullscreenSupported(tg) && telegramBridgeFullscreenSupported(tg)) ||
+        attempts >= 25
+      ) {
         window.clearInterval(id);
-        return;
       }
-      if (attempts >= 25) window.clearInterval(id);
     }, 200);
     return () => {
       window.clearInterval(id);
@@ -199,10 +273,12 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
     }
   }, [tg, tgSupported]);
 
-  // Telegram events: fullscreen state, failures and safe-area changes.
+  // Telegram events: fullscreen state, failures and safe-area changes. The bridge path needs the
+  // fullscreenChanged event even when the high-level methods are missing.
   useEffect(() => {
-    if (!tgSupported || !tg) return;
+    if (!tg || (!tgSupported && !bridgeSupported)) return;
     const onFullscreenChanged = (payload: unknown): void => {
+      clearConfirmTimer();
       setIsFullscreen(boolFromPayload(payload));
       syncInsets();
     };
@@ -225,7 +301,7 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
       tg.offEvent?.('contentSafeAreaChanged', onSafeArea);
       resetSafeAreaVars();
     };
-  }, [tg, tgSupported, syncInsets, notifyUnavailable]);
+  }, [tg, tgSupported, bridgeSupported, syncInsets, notifyUnavailable, clearConfirmTimer]);
 
   // Browser fallback: mirror the standard event.
   useEffect(() => {
@@ -250,6 +326,23 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
+    if (bridgeSupported) {
+      // Mobile clients can expose the WebView bridge without the high-level methods. Post the
+      // documented event and trust `fullscreenChanged`; if it never arrives, revert and say so.
+      const next = !isFullscreen;
+      if (!requestBridgeFullscreen(next)) {
+        notifyUnavailable();
+        return;
+      }
+      setIsFullscreen(next);
+      clearConfirmTimer();
+      confirmTimer.current = setTimeout(() => {
+        confirmTimer.current = null;
+        setIsFullscreen((current) => (current === next ? !next : current));
+        notifyUnavailable();
+      }, 1500);
+      return;
+    }
     if (!browserSupported) return;
     try {
       const result = isFullscreen
@@ -259,7 +352,15 @@ export function FullscreenProvider({ children }: { children: ReactNode }) {
     } catch {
       notifyUnavailable();
     }
-  }, [tgSupported, browserSupported, isFullscreen, tg, notifyUnavailable]);
+  }, [
+    tgSupported,
+    bridgeSupported,
+    browserSupported,
+    isFullscreen,
+    tg,
+    notifyUnavailable,
+    clearConfirmTimer,
+  ]);
 
   const value = useMemo<FullscreenControl>(
     () => ({ isSupported, isFullscreen, toggle }),

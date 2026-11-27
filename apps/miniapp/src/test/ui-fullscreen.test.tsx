@@ -35,6 +35,7 @@ interface MutableWebApp {
   offEvent?: unknown;
   safeAreaInset?: unknown;
   contentSafeAreaInset?: unknown;
+  isVersionAtLeast?: unknown;
 }
 
 function webAppRecord(): MutableWebApp {
@@ -53,6 +54,7 @@ function installFullscreenMock(): FullscreenHarness {
     'isFullscreen',
     'safeAreaInset',
     'contentSafeAreaInset',
+    'isVersionAtLeast',
   ] as const;
   const original = Object.fromEntries(
     (keys as readonly string[]).map((key) => [key, (tg as Record<string, unknown>)[key]]),
@@ -150,6 +152,18 @@ async function renderHome(): Promise<void> {
   const manager = await unlockedManager();
   renderShell({ ...makeVault(), manager }, apiWith());
   await screen.findByTestId('hero-balance');
+}
+
+/** Mobile fallback: the WebView bridge exists, the high-level SDK methods do not. */
+function installBridgeMock(): { postEvent: ReturnType<typeof vi.fn>; restore: () => void } {
+  const postEvent = vi.fn();
+  (window as { TelegramWebviewProxy?: unknown }).TelegramWebviewProxy = { postEvent };
+  return {
+    postEvent,
+    restore: () => {
+      Reflect.deleteProperty(window, 'TelegramWebviewProxy');
+    },
+  };
 }
 
 describe('fullscreen toggle', () => {
@@ -276,6 +290,77 @@ describe('fullscreen toggle', () => {
       await userEvent.setup().click(row);
       expect(harness.request).toHaveBeenCalledTimes(1);
     } finally {
+      harness.restore();
+    }
+  });
+
+  it('falls back to the WebView bridge when Telegram methods are missing (mobile clients)', async () => {
+    const harness = installFullscreenMock();
+    const bridge = installBridgeMock();
+    const tg = webAppRecord();
+    try {
+      Reflect.deleteProperty(tg, 'requestFullscreen');
+      Reflect.deleteProperty(tg, 'exitFullscreen');
+      const user = userEvent.setup();
+      await renderHome();
+
+      const enter = await screen.findByRole('button', { name: 'Enter fullscreen' });
+      await user.click(enter);
+      expect(bridge.postEvent).toHaveBeenCalledWith('web_app_request_fullscreen');
+      // Optimistic until Telegram confirms.
+      expect(screen.getByRole('button', { name: 'Exit fullscreen' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+
+      act(() => {
+        harness.emit('fullscreenChanged', { isFullscreen: true });
+      });
+      const exit = await screen.findByRole('button', { name: 'Exit fullscreen' });
+      await user.click(exit);
+      expect(bridge.postEvent).toHaveBeenLastCalledWith('web_app_exit_fullscreen');
+    } finally {
+      bridge.restore();
+      harness.restore();
+    }
+  });
+
+  it('reverts the optimistic bridge toggle when the client ignores the request', async () => {
+    const harness = installFullscreenMock();
+    const bridge = installBridgeMock();
+    const tg = webAppRecord();
+    try {
+      Reflect.deleteProperty(tg, 'requestFullscreen');
+      Reflect.deleteProperty(tg, 'exitFullscreen');
+      const user = userEvent.setup();
+      await renderHome();
+
+      await user.click(await screen.findByRole('button', { name: 'Enter fullscreen' }));
+      expect(bridge.postEvent).toHaveBeenCalledWith('web_app_request_fullscreen');
+      expect(
+        await screen.findByText("Fullscreen isn't available on this device", {}, { timeout: 3000 }),
+      ).toBeInTheDocument();
+      expect(
+        await screen.findByRole('button', { name: 'Enter fullscreen' }, { timeout: 3000 }),
+      ).toHaveAttribute('aria-pressed', 'false');
+    } finally {
+      bridge.restore();
+      harness.restore();
+    }
+  });
+
+  it('keeps the control hidden on a bridge client older than Bot API 8.0', async () => {
+    const harness = installFullscreenMock();
+    const bridge = installBridgeMock();
+    const tg = webAppRecord();
+    try {
+      Reflect.deleteProperty(tg, 'requestFullscreen');
+      Reflect.deleteProperty(tg, 'exitFullscreen');
+      tg.isVersionAtLeast = (): boolean => false;
+      await renderHome();
+      expect(screen.queryByRole('button', { name: /fullscreen/i })).not.toBeInTheDocument();
+    } finally {
+      bridge.restore();
       harness.restore();
     }
   });

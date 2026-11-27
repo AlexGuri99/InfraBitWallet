@@ -441,3 +441,22 @@ Branch `feat/logo-copy-multiwallet`.
 unlock (see DECISIONS.md); adding or removing a wallet drops biometric wraps and the user must
 re-enable biometrics; the copy fallback (`execCommand`) is best-effort and cannot always clear the
 clipboard on browsers that deny programmatic writes.
+
+---
+
+### P5: Trade/Earn spacing, single chevron and mobile fullscreen (2026-11-27)
+
+Branch `fix/trade-earn-padding-and-mobile-fullscreen`.
+
+| Area                                                                                                    | Status | Evidence                                                      |
+| ------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------- |
+| Top breathing room under the sticky header on Trade and Earn (form + review) via `pt-3`                 | DONE   | `ui/trade.tsx`, `ui/earn.tsx`, `e2e/design.spec.ts`           |
+| Trade asset selects use `appearance-none` so only the custom chevron renders                            | DONE   | `ui/trade.tsx`, `e2e/design.spec.ts`                          |
+| Mobile fullscreen via `TelegramWebviewProxy` (`web_app_request_fullscreen` / `web_app_exit_fullscreen`) | DONE   | `telegram/fullscreen.tsx`, `test/ui-fullscreen.test.tsx`      |
+| Optimistic bridge toggle reverts with a toast when Telegram ignores the request                         | DONE   | `fullscreen.tsx`, `ui-fullscreen.test.tsx`                    |
+| Bridge-aware detection keeps the control hidden on pre-8.0 clients                                      | DONE   | `telegramBridgeFullscreenSupported`, `ui-fullscreen.test.tsx` |
+| 360–390px mobile viewport: toggle visible, inside the viewport, Settings row present                    | DONE   | `e2e/fullscreen.spec.ts`                                      |
+
+**Root cause:** mobile Telegram clients expose the WebView bridge but not the Bot API 8.0
+`requestFullscreen` methods on every client build, and mobile WebViews do not implement the
+standard browser Fullscreen API — both old detection paths returned false. See DECISIONS.md.
