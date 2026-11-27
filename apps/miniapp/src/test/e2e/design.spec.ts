@@ -315,6 +315,13 @@ test.describe('design system', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await page.getByRole('button', { name: 'Trade' }).click();
     await expect(page.getByRole('heading', { name: 'Trade' })).toBeVisible();
+    // Content column gets top breathing room under the sticky header, and the asset selects
+    // hide the native arrow so the custom chevron is the only one.
+    expect(await page.locator('main').first().getAttribute('class')).toContain('pt-3');
+    const sellSelect = page.getByLabel('Sell asset');
+    await expect(sellSelect).toBeVisible();
+    expect(await sellSelect.getAttribute('class')).toContain('appearance-none');
+    expect(await page.getByLabel('Buy asset').getAttribute('class')).toContain('appearance-none');
     await page.getByLabel('You sell amount').fill('1');
     await expect(page.getByText('Minimum received').first()).toBeVisible();
     await expect(page.getByText('0.35%').first()).toBeVisible();
@@ -328,6 +335,7 @@ test.describe('design system', () => {
 
     await page.getByRole('button', { name: 'Earn' }).click();
     await expect(page.getByRole('heading', { name: 'Add Stake' })).toBeVisible();
+    expect(await page.locator('main').first().getAttribute('class')).toContain('pt-3');
     await expect(page.getByTestId('earn-apy')).toHaveText('12.84% APY');
     await expect(page.getByRole('button', { name: 'Review stake' })).toBeDisabled();
   });

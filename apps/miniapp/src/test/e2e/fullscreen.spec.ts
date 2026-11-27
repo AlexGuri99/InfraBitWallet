@@ -137,6 +137,77 @@ async function createWallet(page: Page): Promise<void> {
   await expect(page.getByTestId('hero-balance')).toHaveText('$2.25');
 }
 
+/**
+ * Mobile Telegram: `window.Telegram.WebApp` is injected but WITHOUT the Bot API 8.0 methods, the
+ * mobile WebView has no standard Fullscreen API, and only `TelegramWebviewProxy` can be used.
+ * This is the shape seen on iOS/Android clients, so the bridge must surface the control.
+ */
+async function installMobileTelegramBridge(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const posts: string[] = [];
+    const handlers = new Map<string, Array<(payload?: unknown) => void>>();
+    (window as unknown as { __tgPosts: string[] }).__tgPosts = posts;
+    (window as unknown as { __emitTg: (event: string, payload?: unknown) => void }).__emitTg = (
+      event,
+      payload,
+    ) => {
+      for (const handler of handlers.get(event) ?? []) handler(payload);
+    };
+    (window as unknown as { TelegramWebviewProxy: unknown }).TelegramWebviewProxy = {
+      postEvent: (event: string) => {
+        posts.push(event);
+      },
+    };
+    const webApp = {
+      initData: '',
+      initDataUnsafe: {},
+      version: '10.0',
+      platform: 'ios',
+      colorScheme: 'light',
+      themeParams: {},
+      isExpanded: true,
+      viewportHeight: 812,
+      viewportStableHeight: 812,
+      isVersionAtLeast: () => true,
+      ready: () => undefined,
+      expand: () => undefined,
+      close: () => undefined,
+      setHeaderColor: () => undefined,
+      setBackgroundColor: () => undefined,
+      enableClosingConfirmation: () => undefined,
+      disableClosingConfirmation: () => undefined,
+      onEvent: (event: string, callback: (payload?: unknown) => void) => {
+        handlers.set(event, [...(handlers.get(event) ?? []), callback]);
+      },
+      offEvent: (event: string, callback: (payload?: unknown) => void) => {
+        handlers.set(
+          event,
+          (handlers.get(event) ?? []).filter((entry) => entry !== callback),
+        );
+      },
+      sendData: () => undefined,
+      switchInlineQuery: () => undefined,
+      openLink: () => undefined,
+      openTelegramLink: () => undefined,
+      openInvoice: () => false,
+      showPopup: () => undefined,
+      showAlert: () => undefined,
+      showConfirm: () => undefined,
+    };
+    Object.defineProperty(window, 'Telegram', { value: { WebApp: webApp }, configurable: true });
+    // Mobile WebViews have no standard Fullscreen API (iPhone Safari in particular).
+    Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, get: () => false });
+    Object.defineProperty(Element.prototype, 'requestFullscreen', {
+      configurable: true,
+      value: undefined,
+    });
+    Object.defineProperty(Document.prototype, 'exitFullscreen', {
+      configurable: true,
+      value: undefined,
+    });
+  });
+}
+
 test.describe('fullscreen control', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
@@ -180,5 +251,60 @@ test.describe('fullscreen control', () => {
     }
 
     expect(violations).toEqual([]);
+  });
+
+  test('mobile Telegram: bridge fallback shows the toggle and posts fullscreen events', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installMobileTelegramBridge(page);
+    await mockTonApi(page);
+    await createWallet(page);
+
+    const enter = page.getByTestId('fullscreen-toggle');
+    await expect(enter).toBeVisible();
+    await expect(enter).toHaveAttribute('aria-label', 'Enter fullscreen');
+
+    await enter.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __tgPosts: string[] }).__tgPosts))
+      .toContain('web_app_request_fullscreen');
+
+    // Telegram confirms through fullscreenChanged; the control flips to Exit.
+    await page.evaluate(() => {
+      (window as unknown as { __emitTg: (event: string, payload?: unknown) => void }).__emitTg(
+        'fullscreenChanged',
+        { isFullscreen: true },
+      );
+    });
+    const exit = page.getByTestId('fullscreen-toggle');
+    await expect(exit).toHaveAttribute('aria-label', 'Exit fullscreen');
+    await exit.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __tgPosts: string[] }).__tgPosts))
+      .toContain('web_app_exit_fullscreen');
+
+    // Never clipped at the narrowest supported viewport, and Settings exposes the same control.
+    await page.setViewportSize({ width: 360, height: 780 });
+    const layout = await page.evaluate(() => ({
+      inner: window.innerWidth,
+      doc: document.documentElement.scrollWidth,
+      body: document.body.scrollWidth,
+      button: (() => {
+        const element = document.querySelector('[data-testid="fullscreen-toggle"]');
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        return { right: rect.right, width: rect.width };
+      })(),
+    }));
+    expect(layout.doc).toBeLessThanOrEqual(360);
+    expect(layout.body).toBeLessThanOrEqual(360);
+    expect(layout.button).not.toBeNull();
+    // 36px target (sub-pixel allowed); it must be fully inside the viewport, never clipped.
+    expect(layout.button?.width).toBeGreaterThanOrEqual(35);
+    expect(layout.button?.right).toBeLessThanOrEqual(360);
+
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await expect(page.getByRole('button', { name: /^Fullscreen/ })).toBeVisible();
   });
 });

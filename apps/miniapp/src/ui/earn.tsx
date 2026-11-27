@@ -320,7 +320,7 @@ export function EarnScreen({
             setStep({ kind: 'form' });
           }}
         />
-        <main className="flex flex-1 flex-col gap-4 px-4 pb-10">
+        <main className="flex flex-1 flex-col gap-4 px-4 pb-10 pt-3">
           <Card className="flex flex-col gap-3 p-4">
             <div>
               <p className="text-[11.5px] font-semibold uppercase tracking-[0.02em] text-ink-muted">
@@ -448,7 +448,7 @@ export function EarnScreen({
           )
         }
       />
-      <main className="flex flex-1 flex-col gap-3 px-4 pb-10">
+      <main className="flex flex-1 flex-col gap-3 px-4 pb-10 pt-3">
         <Card className="p-4">
           <div className="flex items-center justify-between">
             <h2 className="text-[14px] font-bold text-ink">Staking overview</h2>

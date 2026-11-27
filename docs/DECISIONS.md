@@ -773,3 +773,27 @@ an explicit button: it copies `words.join('\t')` only after the user reveals the
 `Copied`, clears the clipboard after 60 seconds when the browser permits a programmatic write, and
 falls back to `execCommand('copy')` in webviews without the async Clipboard API. The phrase stays
 in the module holder (never React state) and no copy ever happens automatically.
+
+---
+
+## Decision: WebView bridge fallback for fullscreen on mobile Telegram (2026-11-27)
+
+**Why the toggle was missing on mobile.** Fullscreen had two detection paths, and on iOS/Android
+Telegram both failed: the high-level `requestFullscreen` / `exitFullscreen` methods only exist on
+clients implementing Bot API 8.0, and mobile WebViews (WKWebView/Android WebView) do not implement
+the standard Fullscreen API (`document.fullscreenEnabled === false`, no
+`Element.requestFullscreen` on iPhone). Telegram Web on desktop reported support only because the
+desktop browser provides the standard API, which is why the control looked "web-only".
+
+**Fix.** Inside Telegram the mobile clients always expose `window.TelegramWebviewProxy.postEvent`,
+the same bridge `telegram-web-app.js` uses. When the high-level methods are absent and the client
+advertises Bot API 8.0+ (`isVersionAtLeast('8.0')`), the control now posts
+`web_app_request_fullscreen` / `web_app_exit_fullscreen` through that bridge. The request is
+optimistic: the button flips immediately, and if no `fullscreenChanged` event arrives within 1.5 s
+the state reverts and the existing "Fullscreen isn't available on this device" toast explains it.
+Clients older than 8.0 keep the control hidden because they ignore the event.
+
+We still do **not** load `https://telegram.org/js/telegram-web-app.js`: it is a third-party script
+and `script-src 'self'` forbids it (CLAUDE.md §4). Mobile clients inject their own SDK; Telegram
+Web uses the browser API fallback. No CSP change was needed — `postEvent` is a JS bridge call, not
+a network request, so `connect-src 'self'` still holds.
